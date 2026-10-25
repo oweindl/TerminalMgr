@@ -47,7 +47,7 @@ jobs:
       - run: dotnet run --project tests/TerminalMgr.UiTests -c Release --no-build
       - run: npm test
         working-directory: web
-      - name: Publish (branches and pull requests: only to prove that it works)
+      - name: Publish (branches and pull requests, only to prove that it works)
         if: github.ref != 'refs/heads/main' || github.event_name != 'push'
         run: dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
       - name: Release (push to main only)
