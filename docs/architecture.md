@@ -26,6 +26,10 @@ Eine zweite nicht interaktive Abfrage führt `tmux list-windows -a -F` aus (Sess
 
 Wechsel bei verbundenem Server: zwei Schritte mit 150 ms Pause. Zuerst Ctrl+B und `:`, dann `switch-client -t '$id:@id'` und Enter. tmux öffnet den Prompt erst nach der Verarbeitung des `:`; in einem Schreibvorgang gesendete Folgezeichen landeten im Programm des Fensters (am echten tmux 3.6 beobachtet). Bei nicht verbundenem Server wird mit `tmux attach-session -t '$id:@id'` verbunden. Ob eine Verbindung an einer Session hängt, ergibt sich aus der zuletzt gewählten ID, dem tmux-Namen des Profils oder dem RemoteCommand aus `ssh -G`.
 
+## Konfigurationsdatei
+
+`ConfigFile` (Core) baut und liest das `.tmconfig`-Format (`format`, `formatVersion`, `appVersion`, `exported`, `encryption`, `content` oder `data`). `ConfigImporter` erzeugt aus Datei und aktuellem Stand einen Plan und wendet ihn rein funktional an; `ConfigBackup`, `SshConfigBlocks` und `ConfigCheck` kümmern sich um Sicherungen, Host-Blöcke und die Prüfung nach dem Import. Die Dialoge und Dateizugriffe liegen in `MainWindow.Config.cs`.
+
 ## WebView-Grenze
 
 Alle Terminalressourcen liegen lokal. Navigation ist auf die interne Seite begrenzt; neue Fenster, Downloads und Berechtigungen werden abgewiesen. Nachrichten werden nur von der internen Seite angenommen. SSH-Ausgabe wird als Terminaltext übergeben, nie als HTML. OSC52 ist deaktiviert.

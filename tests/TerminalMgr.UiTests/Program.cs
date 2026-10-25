@@ -40,6 +40,28 @@ internal static class Program
         Console.WriteLine("PASS WPF update dialog (installable and development build) and settings with update section load");
     }
 
+    private static void TestConfigDialogs()
+    {
+        var current = new AppSettings { Profiles = [new Profile { Name = "dev", Destination = "devhost" }] };
+        var block = new SshHostBlock(["devhost"], "Host devhost" + Environment.NewLine + "  HostName 10.0.0.1" + Environment.NewLine + "  IdentityFile ~/.ssh/dev_key");
+        var export = new ExportDialog(current, [block]);
+        var exportContent = (FrameworkElement)export.Content;
+        exportContent.Measure(new Size(600, double.PositiveInfinity));
+        Check(exportContent.DesiredSize.Height > 300 && export.Selection is null, "Export dialog layout: " + exportContent.DesiredSize);
+
+        var content = new ConfigContent { Profiles = [new Profile { Name = "DEV", Destination = "other" }, new Profile { Name = "neu", Destination = "n" }], SshHosts = [block] };
+        var info = new ConfigFileInfo(1, "0.2.0", DateTimeOffset.Now, false);
+        var import = new ImportDialog(current, content, info, new HashSet<string> { "devhost" });
+        ((FrameworkElement)import.Content).Measure(new Size(680, 760));
+        Check(import.Plan.Profiles.Count == 2 && import.Plan.Profiles[0].Conflict && !import.Plan.Profiles[1].Conflict, "Import plan shows one conflict and one new profile");
+        Check(import.Plan.Hosts.Count == 1 && import.Plan.Hosts[0].Conflict, "Existing host alias is a conflict");
+        var password = new PasswordDialog("Passwort?", "Falsches Passwort");
+        var passwordContent = (FrameworkElement)password.Content;
+        passwordContent.Measure(new Size(440, double.PositiveInfinity));
+        Check(passwordContent.DesiredSize.Height > 80, "Password dialog layout: " + passwordContent.DesiredSize);
+        Console.WriteLine("PASS WPF export, import (with conflicts) and password dialogs load");
+    }
+
     private static void TestVersionIsShown()
     {
         // Directory.Build.props is the single source: it must reach the assembly, the window title and the file version.
@@ -169,6 +191,7 @@ internal static class Program
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
             TestUpdateDialog();
+            TestConfigDialogs();
             TestVersionIsShown();
             TestShortcutKeys();
             TestTmuxMenu();

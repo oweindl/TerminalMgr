@@ -24,8 +24,8 @@ public sealed class TmuxSessionQuery
     public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
-    /// <summary>The RemoteCommand OpenSSH would use for this profile, or null.</summary>
-    public async Task<string?> RemoteCommandAsync(Profile profile, CancellationToken cancellationToken = default)
+    /// <summary>Output of "ssh -G" (the effective settings, no connection is made), or null when ssh does not answer within 5 s.</summary>
+    public async Task<string?> EffectiveConfigAsync(Profile profile, CancellationToken cancellationToken = default)
     {
         var start = new ProcessStartInfo(SshExecutable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (string argument in SshCommand.EffectiveConfigArguments(profile)) start.ArgumentList.Add(argument);
@@ -36,7 +36,15 @@ public sealed class TmuxSessionQuery
         _ = process.StandardError.ReadToEndAsync();
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException) { if (!process.HasExited) process.Kill(entireProcessTree: true); return null; }
-        foreach (string line in (await output).Split('\n'))
+        return await output;
+    }
+
+    /// <summary>The RemoteCommand OpenSSH would use for this profile, or null.</summary>
+    public async Task<string?> RemoteCommandAsync(Profile profile, CancellationToken cancellationToken = default)
+    {
+        string? effective = await EffectiveConfigAsync(profile, cancellationToken);
+        if (effective is null) return null;
+        foreach (string line in effective.Split('\n'))
             if (line.StartsWith("remotecommand ", StringComparison.OrdinalIgnoreCase))
             {
                 string value = line["remotecommand ".Length..].Trim();

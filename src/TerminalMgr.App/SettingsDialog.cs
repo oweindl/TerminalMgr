@@ -9,6 +9,8 @@ using TerminalMgr.Windows;
 namespace TerminalMgr.App;
 
 /// <summary>Application settings: general, shortcuts, clipboard and dictation.</summary>
+public enum ConfigAction { None, Export, Import }
+
 public sealed class SettingsDialog : Window
 {
     private const string DefaultMicrophone = "Windows-Standard";
@@ -18,6 +20,8 @@ public sealed class SettingsDialog : Window
     private string? _skippedVersion;
     /// <summary>The user pressed "Jetzt nach Updates suchen": the settings are saved and the caller runs the check.</summary>
     public bool CheckForUpdatesNow { get; private set; }
+    /// <summary>"Exportieren" or "Importieren" was pressed: the settings are saved and the caller opens the matching dialog.</summary>
+    public ConfigAction ConfigAction { get; private set; }
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _language, _sessionModifier;
     public AppSettings? Result { get; private set; }
@@ -49,6 +53,18 @@ public sealed class SettingsDialog : Window
         updateButtons.Children.Add(checkNow);
         updateButtons.Children.Add(resetSkipped);
         _panel.Children.Add(updateButtons);
+
+        Heading("Konfiguration");
+        _panel.Children.Add(new TextBlock { Text = "Profile, Einstellungen, angeheftete Clipboard-Einträge und SSH-Host-Blöcke in eine .tmconfig-Datei sichern (optional mit Passwort) oder auf einem anderen Rechner einlesen.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 0, 0, 6) });
+        var configButtons = new WrapPanel();
+        var export = new Button { Content = "Konfiguration exportieren …", ToolTip = "Speichert die Einstellungen und öffnet die Auswahl." };
+        export.Click += (_, _) => { ConfigAction = ConfigAction.Export; Save(); };
+        var import = new Button { Content = "Konfiguration importieren …", ToolTip = "Speichert die Einstellungen, zeigt vor dem Einlesen eine Vorschau und legt Sicherungen an." };
+        import.Click += (_, _) => { ConfigAction = ConfigAction.Import; Save(); };
+        configButtons.Children.Add(export);
+        configButtons.Children.Add(import);
+        _panel.Children.Add(configButtons);
 
         Heading("Tastenkürzel");
         _panel.Children.Add(new TextBlock { Text = "Feld anklicken und Kombination drücken. Mit Ctrl oder Alt, nur F1 bis F12 gehen allein. Ctrl+B bleibt für tmux reserviert.",
