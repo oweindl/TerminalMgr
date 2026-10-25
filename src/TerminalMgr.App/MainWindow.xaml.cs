@@ -122,6 +122,7 @@ public partial class MainWindow : Window
                     LoadingOverlay.Visibility = Visibility.Collapsed;
                     Post(new { type = "font", size = _fontSize });
                     PostShortcuts();
+                    PostTerminalSettings();
                     if (_profiles.Count > 0) ProfilesList.SelectedIndex = 0;
                     await ConnectAutomaticAsync();
                     break;
@@ -158,6 +159,17 @@ public partial class MainWindow : Window
                     break;
                 case "shortcut":
                     if (m.GetProperty("action").GetString() == "dictation") ToggleDictation();
+                    break;
+                case "osc52":
+                    // A program (or tmux for Claude Code / copy-mode) asked to set the clipboard: same path as a right-click copy.
+                    if (_settings.AcceptOsc52 && Osc52.TryDecode(m.GetProperty("data").GetString(), out var remoteText))
+                    {
+                        AddClip(remoteText, _profiles.FirstOrDefault(p => p.Profile.Id == id)?.Name ?? "Terminal");
+                        SetWindowsClipboard(remoteText);
+                    }
+                    break;
+                case "diag":
+                    StatusText.Text = m.GetProperty("text").GetString() ?? "";
                     break;
                 case "contextPaste":
                     PasteActiveClip(id);
@@ -651,6 +663,7 @@ public partial class MainWindow : Window
         _settings = result;
         _clipList.MaxUnpinned = result.ClipHistoryLimit;
         PostShortcuts();
+        PostTerminalSettings();
         ApplySettingsToUi();
         RenderClips(); SaveSettings();
     }

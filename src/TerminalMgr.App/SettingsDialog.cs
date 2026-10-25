@@ -14,7 +14,7 @@ public sealed class SettingsDialog : Window
     private const string DefaultMicrophone = "Windows-Standard";
     private readonly AppSettings _original;
     private readonly StackPanel _panel = new() { Margin = new Thickness(24) };
-    private readonly CheckBox _startWithWindows;
+    private readonly CheckBox _startWithWindows, _acceptOsc52;
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _language, _sessionModifier;
     public AppSettings? Result { get; private set; }
@@ -43,6 +43,9 @@ public sealed class SettingsDialog : Window
 
         Heading("Clipboard");
         _historyLimit = Field("Ungeheftete Einträge im Verlauf (1 bis 1000)", settings.ClipHistoryLimit.ToString());
+        _acceptOsc52 = new CheckBox { Content = "Kopieren aus Programmen übernehmen (OSC 52, z. B. Markieren in Claude Code oder tmux)", IsChecked = settings.AcceptOsc52,
+            ToolTip = "Programme in der Session können so Text in die Zwischenablage legen. Lesen der Zwischenablage ist nie möglich." };
+        _panel.Children.Add(_acceptOsc52);
 
         Heading("Diktat");
         _microphone = Combo("Mikrofon", MicrophoneNames(), dictation.Microphone is { Length: > 0 } m ? m : DefaultMicrophone);
@@ -143,6 +146,7 @@ public sealed class SettingsDialog : Window
         var candidate = _original with {
             ClipHistoryLimit = limit,
             StartWithWindows = _startWithWindows.IsChecked == true,
+            AcceptOsc52 = _acceptOsc52.IsChecked == true,
             Shortcuts = new ShortcutOptions {
                 Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
                 SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)]
