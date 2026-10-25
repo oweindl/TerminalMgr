@@ -23,7 +23,7 @@
     </StackPanel>
     <StackPanel DockPanel.Dock="Bottom" Margin="10">
      <Button Content="Autostart-Profile verbinden" Click="ConnectAutomatic"/>
-     <TextBlock Text="Alt+1 … Alt+9 · Session wechseln" FontSize="11" Foreground="#91A5B4" TextWrapping="Wrap" Margin="6,8"/>
+     <TextBlock x:Name="SessionHint" Text="Alt+1 … Alt+9 · Session wechseln" FontSize="11" Foreground="#91A5B4" TextWrapping="Wrap" Margin="6,8"/>
     </StackPanel>
     <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
      <ListBox.ItemTemplate><DataTemplate><StackPanel>

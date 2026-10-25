@@ -7,7 +7,7 @@ public sealed class ProfileDialog : Window
 {
     private readonly Profile _original;
     private readonly TextBox _name, _destination, _config, _session, _command;
-    private readonly CheckBox _automatic;
+    private readonly CheckBox _automatic, _reconnect;
     private readonly ComboBox _mode;
     public Profile? Result { get; private set; }
     public bool DeleteRequested { get; private set; }
@@ -31,6 +31,9 @@ public sealed class ProfileDialog : Window
         _config = Field("SSH-Config (leer = OpenSSH-Standard)", _original.ConfigPath ?? "");
         _automatic = new CheckBox { Content = "Beim Start von TerminalMgr automatisch verbinden", IsChecked = _original.AutoConnect };
         panel.Children.Add(_automatic);
+        _reconnect = new CheckBox { Content = "Nach Verbindungsabbruch automatisch neu verbinden", IsChecked = _original.AutoReconnect,
+            ToolTip = "Nur bei verlorener Verbindung (SSH-Exit 255), nicht nach exit oder tmux-Detach. Wartezeit 2 bis 30 s, höchstens 10 Versuche." };
+        panel.Children.Add(_reconnect);
         panel.Children.Add(new TextBlock { Text = "Nach dem Verbindungsaufbau" });
         _mode = new ComboBox { Margin = new Thickness(0, 6, 0, 14), Padding = new Thickness(8),
             ItemsSource = new[] { "SSH-Config verwenden (inklusive RemoteCommand)", "tmux-Session öffnen oder anlegen", "Eigenen Remote-Befehl ausführen" },
@@ -60,7 +63,8 @@ public sealed class ProfileDialog : Window
                 Result = _original with {
                     Name = _name.Text.Trim(), Destination = _destination.Text.Trim(),
                     ConfigPath = string.IsNullOrWhiteSpace(_config.Text) ? null : _config.Text.Trim(),
-                    AutoConnect = _automatic.IsChecked == true, Mode = (StartMode)_mode.SelectedIndex,
+                    AutoConnect = _automatic.IsChecked == true, AutoReconnect = _reconnect.IsChecked == true,
+                    Mode = (StartMode)_mode.SelectedIndex,
                     TmuxSession = _session.Text.Trim(), Command = _command.Text
                 };
                 Result.Validate();

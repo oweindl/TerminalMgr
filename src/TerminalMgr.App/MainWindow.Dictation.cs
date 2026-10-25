@@ -19,8 +19,16 @@ public partial class MainWindow
 
     private DictationOptions DictationSettings => _settings.Dictation.Normalized();
 
-    private void PostShortcuts() =>
-        Post(new { type = "shortcuts", shortcuts = new Dictionary<string, string> { ["dictation"] = DictationSettings.Shortcut } });
+    /// <summary>Hands the configured shortcuts to the terminal page, which takes them before the session sees them.</summary>
+    private void PostShortcuts()
+    {
+        var options = _settings.Shortcuts.Normalized();
+        Post(new {
+            type = "shortcuts",
+            shortcuts = new Dictionary<string, string> { ["dictation"] = DictationSettings.Shortcut, ["copy"] = options.Copy, ["paste"] = options.Paste },
+            sessionModifier = options.SessionModifier
+        });
+    }
 
     private void DictationButtonClick(object sender, RoutedEventArgs e) => ToggleDictation();
     private void DictationRecordClick(object sender, RoutedEventArgs e) => ToggleDictation();

@@ -426,6 +426,102 @@ try
         Check(hang.Wait(5000) && hang.Result && !File.Exists(target) && !File.Exists(target + ".part"), "Cancel left files behind");
     });
 
+    Test("Shortcut rules: default configuration is free of conflicts and covers copy, paste, dictation and 1-9", () =>
+    {
+        var settings = new AppSettings();
+        Check(ShortcutRules.FindConflict(settings) is null, "Defaults conflict: " + ShortcutRules.FindConflict(settings));
+        Check(ShortcutRules.Assignments(settings).Select(a => a.Shortcut.ToString()).SequenceEqual(["Ctrl+Y", "Ctrl+Shift+C", "Ctrl+Shift+V"]), "Assignments");
+        var sessions = ShortcutRules.SessionShortcuts("Alt");
+        Check(sessions.Count == 9 && sessions[0].Shortcut.ToString() == "Alt+1" && sessions[8].Shortcut.ToString() == "Alt+9", "Session shortcuts");
+    });
+    Test("Shortcut rules: duplicates, session digits and the tmux prefix are refused", () =>
+    {
+        var dup = ShortcutRules.FindConflict(new AppSettings { Dictation = new() { Shortcut = "Ctrl+Shift+C" } });
+        Check(dup is not null && dup.Contains("Ctrl+Shift+C") && dup.Contains("Diktat") && dup.Contains("kopieren"), "Duplicate: " + dup);
+        var digit = ShortcutRules.FindConflict(new AppSettings { Dictation = new() { Shortcut = "Alt+3" } });
+        Check(digit is not null && digit.Contains("Alt+3") && digit.Contains("Sessionwechsel"), "Session digit: " + digit);
+        Check(ShortcutRules.FindConflict(new AppSettings { Dictation = new() { Shortcut = "Alt+3" }, Shortcuts = new() { SessionModifier = "Ctrl+Alt" } }) is null, "Other modifier frees Alt+3");
+        var prefix = ShortcutRules.FindConflict(new AppSettings { Shortcuts = new() { Paste = "ctrl+b" } });
+        Check(prefix is not null && prefix.Contains("tmux-Präfix"), "tmux prefix: " + prefix);
+    });
+    Test("Shortcut rules: hints for terminal keys, normalization of bad values", () =>
+    {
+        Check(ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Y"))!.Contains("yank") && ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Q")) is not null, "Hint for Ctrl+letter");
+        Check(ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Shift+D")) is null && ShortcutRules.TerminalHint(Shortcut.Parse("Alt+1")) is null && ShortcutRules.TerminalHint(Shortcut.Parse("F5")) is null, "No hint expected");
+        var fixedUp = new ShortcutOptions { Copy = "C", Paste = "", SessionModifier = "Win" }.Normalized();
+        Check(fixedUp.Copy == "Ctrl+Shift+C" && fixedUp.Paste == "Ctrl+Shift+V" && fixedUp.SessionModifier == "Alt", "Normalization");
+    });
+    Test("Settings: reconnect, autostart and shortcuts default to off/unchanged, round-trip, and old files still load", () =>
+    {
+        var defaults = new AppSettings();
+        Check(!defaults.StartWithWindows && !new Profile().AutoReconnect && defaults.Shortcuts.SessionModifier == "Alt", "Defaults");
+        var store = new SettingsStore(Path.Combine(root, "newopts"));
+        var profile = new Profile { Name = "dev", Destination = "dev", AutoReconnect = true };
+        store.Save(new() { Profiles = [profile], StartWithWindows = true, Shortcuts = new() { Copy = "Ctrl+Alt+C", SessionModifier = "Ctrl+Alt" } });
+        var loaded = store.Load();
+        Check(loaded.Profiles.Single().AutoReconnect && loaded.StartWithWindows && loaded.Shortcuts.Copy == "Ctrl+Alt+C" && loaded.Shortcuts.SessionModifier == "Ctrl+Alt", "Round trip");
+        var old = Path.Combine(root, "oldprofile");
+        Directory.CreateDirectory(old);
+        File.WriteAllText(Path.Combine(old, "settings.json"), "{\"Profiles\":[{\"Id\":\"a\",\"Name\":\"x\",\"Destination\":\"x\",\"AutoConnect\":true}]}");
+        var oldLoaded = new SettingsStore(old).Load();
+        Check(oldLoaded.Profiles[0].AutoConnect && !oldLoaded.Profiles[0].AutoReconnect && !oldLoaded.StartWithWindows, "Old profile gained options");
+    });
+    Test("Reconnect: only a lost connection is retried, waits grow 2-4-8-16-30 s and stop after 10 attempts", () =>
+    {
+        var t = new ReconnectTracker();
+        var now = DateTimeOffset.Now;
+        t.Connected(now);
+        var waits = Enumerable.Range(1, 7).Select(i => t.Lost(true, 255, now.AddSeconds(i))).ToList();
+        Check(waits.Select(w => (int)w.Delay.TotalSeconds).SequenceEqual([2, 4, 8, 16, 30, 30, 30]) && waits.Select(w => w.Attempt).SequenceEqual([1, 2, 3, 4, 5, 6, 7]) && waits.All(w => w.Retry), "Backoff");
+        t.Lost(true, 255, now); t.Lost(true, 255, now); t.Lost(true, 255, now);
+        var last = t.Lost(true, 255, now);
+        Check(!last.Retry && last.Reason.Contains("10"), "Must give up: " + last);
+    });
+    Test("Reconnect: normal ends, disabled option and stable connections", () =>
+    {
+        var now = DateTimeOffset.Now;
+        var t = new ReconnectTracker();
+        Check(!t.Lost(true, 0, now).Retry && !t.Lost(true, 1, now).Retry && !t.Lost(true, 130, now).Retry && !t.Lost(true, 3, now).Retry, "Normal ends retried");
+        Check(ReconnectTracker.IsConnectionLost(255) && ReconnectTracker.IsConnectionLost(-1) && !ReconnectTracker.IsConnectionLost(254), "Lost-connection codes");
+        Check(new ReconnectTracker().Lost(true, -1, now).Retry, "Windows OpenSSH 'closed by remote host' (-1) must be retried");
+        Check(!t.Lost(false, 255, now).Retry, "Disabled option retried");
+        t.Connected(now); t.Lost(true, 255, now.AddSeconds(5)); t.Lost(true, 255, now.AddSeconds(6)); t.Lost(true, 255, now.AddSeconds(7));
+        t.Connected(now.AddSeconds(10));
+        Check(t.Lost(true, 255, now.AddSeconds(20)).Attempt == 4, "A short-lived connection must not reset the counter");
+        t.Connected(now.AddSeconds(30));
+        var afterStable = t.Lost(true, 255, now.AddSeconds(30 + 61));
+        Check(afterStable.Attempt == 1 && afterStable.Delay == TimeSpan.FromSeconds(2), "A stable connection starts a new incident: " + afterStable);
+        t.Reset();
+        Check(t.Lost(true, 255, now).Attempt == 1, "Reset");
+    });
+    Test("Start with Windows: quoted command, idempotent apply, removal, own key only", () =>
+    {
+        string exe = @"C:\Users\Test User\AppData\Local\Programs\TerminalMgr\TerminalMgr.App.exe";
+        Check(StartupRegistration.CommandFor(exe) == "\"" + exe + "\"" && StartupRegistration.CommandFor("a\"b") == "\"ab\"", "Quoting");
+        string realBefore = new StartupRegistration().CurrentCommand() ?? "";
+        // Everything this test writes lives under one throw-away key that it owns; only exactly that key is ever deleted.
+        string testRoot = @"Software\TerminalMgr-Test-" + Guid.NewGuid().ToString("N");
+        string subKey = testRoot + @"\Run";
+        var registration = new StartupRegistration(subKey);
+        try
+        {
+            Check(registration.CurrentCommand() is null && !registration.Apply(false, exe), "Fresh key must be empty and disabling a no-op");
+            Check(registration.Apply(true, exe) && registration.IsEnabled(exe) && registration.CurrentCommand() == "\"" + exe + "\"", "Enable");
+            Check(!registration.Apply(true, exe), "Second enable must not rewrite");
+            string moved = exe.Replace("TerminalMgr.App.exe", "Neu\\TerminalMgr.App.exe");
+            Check(!registration.IsEnabled(moved) && registration.Apply(true, moved) && registration.IsEnabled(moved), "A moved app updates the entry");
+            Check(registration.Apply(false, exe) && registration.CurrentCommand() is null && !registration.Apply(false, exe), "Disable");
+        }
+        finally
+        {
+            // Guard against ever deleting anything but the test key (a recursive delete of a parent would be destructive).
+            if (!System.Text.RegularExpressions.Regex.IsMatch(testRoot, @"^Software\\TerminalMgr-Test-[0-9a-f]{32}$"))
+                throw new InvalidOperationException("Refusing to delete registry key " + testRoot);
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(testRoot, throwOnMissingSubKey: false);
+        }
+        Check((new StartupRegistration().CurrentCommand() ?? "") == realBefore, "The real autostart entry was touched");
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");
@@ -577,6 +673,7 @@ if (args.Contains("--ssh-smoke"))
         Check(sessions.Count > 0, "Expected existing tmux sessions on linuxdev");
         passed++; Console.WriteLine("PASS Real SSH tmux session discovery: " + sessions.Count + " sessions");
         passed += await RealTmuxWindowScenario();
+        passed += await RealExitCodeScenario();
     }
     catch (Exception ex) { failures.Add("SSH smoke: " + ex.Message); Console.WriteLine("FAIL " + ex.Message); }
     finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
@@ -646,6 +743,34 @@ if (args.Any(a => a.StartsWith("--whisper-smoke")))
 }
 Console.WriteLine($"{passed} passed, {failures.Count} failed");
 Environment.ExitCode = failures.Count == 0 ? 0 : 1;
+
+// Which exit code does OpenSSH give for a dropped connection and for normal ends? The reconnect option relies on it.
+async Task<int> RealExitCodeScenario()
+{
+    string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
+    async Task<int> RunAsync(string remoteCommand)
+    {
+        var session = new PtySession();
+        var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.Output += _ => { };
+        session.Exited += code => exited.TrySetResult(code);
+        try
+        {
+            session.Start(ssh, ["-tt", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "linuxdev", remoteCommand], 100, 30);
+            return await exited.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
+    }
+    int normal = await RunAsync("exit 0"), failing = await RunAsync("exit 3");
+    // The server side ends the SSH session process: for the client this is a lost connection.
+    int dropped = await RunAsync("kill -9 $PPID");
+    Check(normal == 0 && failing == 3, $"Normal ends must keep their exit code: {normal}, {failing}");
+    Check(ReconnectTracker.IsConnectionLost(dropped), "A dropped connection must count as lost (255 or -1), was " + dropped);
+    var tracker = new ReconnectTracker();
+    Check(!tracker.Lost(true, normal, DateTimeOffset.Now).Retry && !tracker.Lost(true, failing, DateTimeOffset.Now).Retry && tracker.Lost(true, dropped, DateTimeOffset.Now).Retry, "Policy disagrees with real exit codes");
+    Console.WriteLine($"PASS Real SSH exit codes: normal end {normal}, remote failure {failing}, dropped connection {dropped} (only the last is reconnected)");
+    return 1;
+}
 
 // Real tmux on linuxdev with throw-away sessions (tmgr-ta / tmgr-tb); the user's own sessions are never touched.
 async Task<int> RealTmuxWindowScenario()

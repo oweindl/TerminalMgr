@@ -22,7 +22,10 @@
     for (const p of parts.slice(0, -1)) { const l = p.toLowerCase(); if (l === 'ctrl') s.ctrl = true; else if (l === 'alt') s.alt = true; else if (l === 'shift') s.shift = true; }
     return s;
   }
-  let shortcuts = [parseShortcut('Ctrl+Y', 'dictation')];
+  const parseModifier = text => { const s = parseShortcut(text + '+X'); return { ctrl:s.ctrl, alt:s.alt, shift:s.shift }; };
+  // Defaults until the host sends the configured ones: dictation, copy, paste, and Alt+1..9 for switching sessions.
+  let shortcuts = [parseShortcut('Ctrl+Y', 'dictation'), parseShortcut('Ctrl+Shift+C', 'copy'), parseShortcut('Ctrl+Shift+V', 'paste')];
+  let sessionModifier = parseModifier('Alt');
   // Terminals pad lines with spaces up to the window width; copied text must not carry them.
   const trimTrailingSpaces = text => text.replace(/\r\n?/g, '\n').split('\n').map(l => l.replace(/ +$/, '')).join('\n');
   function fitActive() {
@@ -55,31 +58,25 @@
     term.parser.registerOscHandler(52, () => true);
     term.onData(data => send({ type:'input',id,data }));
     term.onResize(({cols,rows}) => send({ type:'resize',id,cols,rows }));
+    // Copies the selection (without padding spaces) to the host and clears it, so the next right click pastes.
+    const copySelection = () => {
+      if (!term.hasSelection()) return;
+      const text = trimTrailingSpaces(term.getSelection());
+      term.clearSelection();
+      if (text) send({ type:'copy',id,text });
+    };
     term.attachCustomKeyEventHandler(e => {
       if (!e.metaKey) {
         const key = keyOf(e.code);
+        const fire = action => { e.preventDefault(); if (e.type === 'keydown' && !e.repeat) action(); return false; };
+        if (key && /^[1-9]$/.test(key) && e.ctrlKey === sessionModifier.ctrl && e.altKey === sessionModifier.alt && e.shiftKey === sessionModifier.shift)
+          return fire(() => send({ type:'switch', index:Number(key) - 1 }));
         const hit = key && shortcuts.find(s => s.ctrl === e.ctrlKey && s.alt === e.altKey && s.shift === e.shiftKey && s.key === key);
         if (hit) {
-          e.preventDefault();
-          if (e.type === 'keydown' && !e.repeat) send({ type:'shortcut', action:hit.action, id });
-          return false;
+          if (hit.action === 'copy') return fire(copySelection);
+          if (hit.action === 'paste') return fire(() => send({ type:'pasteRequest', id }));
+          return fire(() => send({ type:'shortcut', action:hit.action, id }));
         }
-      }
-      if (e.altKey && !e.ctrlKey && /^[1-9]$/.test(e.key)) {
-        if (e.type === 'keydown') send({ type:'switch',index:Number(e.key)-1 });
-        return false;
-      }
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
-        if (e.type === 'keydown' && term.hasSelection()) {
-          const text = trimTrailingSpaces(term.getSelection());
-          term.clearSelection();
-          if (text) send({ type:'copy',id,text });
-        }
-        return false;
-      }
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') {
-        if (e.type === 'keydown') send({ type:'pasteRequest',id });
-        return false;
       }
       return true; // Includes the tmux prefix Ctrl+B and all subsequent keys.
     });
@@ -91,11 +88,7 @@
     element.addEventListener('contextmenu', e => {
       e.preventDefault();
       e.stopPropagation();
-      if (term.hasSelection()) {
-        const text = trimTrailingSpaces(term.getSelection());
-        term.clearSelection();
-        if (text) send({ type:'copy',id,text });
-      } else send({ type:'contextPaste',id });
+      if (term.hasSelection()) copySelection(); else send({ type:'contextPaste',id });
     }, true);
     element.addEventListener('dragover', e => e.preventDefault());
     element.addEventListener('drop', e => {
@@ -122,6 +115,7 @@
         break;
       case 'shortcuts':
         shortcuts = Object.entries(m.shortcuts ?? {}).map(([action, text]) => parseShortcut(text, action));
+        if (m.sessionModifier) sessionModifier = parseModifier(m.sessionModifier);
         break;
       case 'font':
         fontSize = m.size;
