@@ -117,6 +117,39 @@ test('Shortcuts are configurable: the old key goes back to the session', async (
   expect(await inputs(page)).toEqual(['\x19']);
 });
 
+test('Copy and paste shortcuts are configurable; the old combination no longer copies', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'output',id:'one',data:'copy-me   \r\n'}));
+  await expect(page.locator('.xterm-rows')).toContainText('copy-me');
+  await page.evaluate(() => window.__hostMessage({type:'shortcuts', shortcuts:{dictation:'Ctrl+Y', copy:'Ctrl+Alt+C', paste:'Ctrl+Alt+V'}}));
+  await page.locator('.xterm-rows > div').first().click({clickCount:3});
+  await page.keyboard.press('Control+Shift+C');
+  await page.waitForTimeout(150);
+  expect(await messages(page, 'copy')).toHaveLength(0);
+  await page.keyboard.press('Control+Alt+c');
+  await expect.poll(async () => (await messages(page, 'copy')).length).toBe(1);
+  expect((await messages(page, 'copy'))[0].text).toBe('copy-me');
+  await page.keyboard.press('Control+Shift+V');
+  await page.keyboard.press('Control+Alt+v');
+  await expect.poll(async () => (await messages(page, 'pasteRequest')).length).toBe(1);
+});
+
+test('Default copy and paste shortcuts work before the host sends a configuration', async ({page}) => {
+  await page.keyboard.press('Control+Shift+V');
+  await expect.poll(async () => (await messages(page, 'pasteRequest')).length).toBe(1);
+});
+
+test('The session switch modifier is configurable: Alt+2 by default, Ctrl+Alt+2 after the change', async ({page}) => {
+  await page.keyboard.press('Alt+2');
+  await expect.poll(async () => (await messages(page, 'switch')).length).toBe(1);
+  await page.evaluate(() => window.__hostMessage({type:'shortcuts', shortcuts:{dictation:'Ctrl+Y'}, sessionModifier:'Ctrl+Alt'}));
+  await page.keyboard.press('Alt+3');
+  await page.waitForTimeout(150);
+  expect(await messages(page, 'switch')).toHaveLength(1); // Alt alone no longer switches
+  await page.keyboard.press('Control+Alt+3');
+  await expect.poll(async () => (await messages(page, 'switch')).length).toBe(2);
+  expect((await messages(page, 'switch')).at(-1).index).toBe(2);
+});
+
 test('Held shortcut key reports once; Ctrl+Alt+Y is not the Ctrl+Y shortcut', async ({page}) => {
   await page.keyboard.down('Control');
   for (let i = 0; i < 4; i++) await page.keyboard.down('y');
