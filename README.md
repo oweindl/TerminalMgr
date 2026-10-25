@@ -113,6 +113,28 @@ Eigenständiges Windows-x64-Paket:
 dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
 ~~~
 
+### Lokal installieren
+
+~~~powershell
+.\scripts\Install-Local.ps1
+~~~
+
+Das Skript baut die Terminal-Assets (`npm ci`, `npm run bundle`), führt alle Tests aus und bricht bei einem Fehler ab, veröffentlicht eigenständig für win-x64 in einen temporären Ordner, beendet eine laufende TerminalMgr aus dem Installationsordner (es fragt vorher, wenn SSH-Verbindungen offen sind; `-Force` fragt nicht), ersetzt den Inhalt von `%LOCALAPPDATA%\Programs\TerminalMgr` und legt die Verknüpfung `TerminalMgr.lnk` auf dem Desktop (auch bei OneDrive-Desktop) und im Startmenü an oder aktualisiert sie. Am Ende nennt es Version und Pfad. Die Verknüpfungen zeigen immer auf denselben Pfad und bleiben nach jedem Update gültig. Einstellungen, angeheftete Clipboard-Einträge und Modelle liegen in `%LOCALAPPDATA%\TerminalMgr` und bleiben unberührt.
+
+Schalter: `-Force` (nicht nachfragen, eine nicht reagierende App beenden), `-SkipTests` (nur zum schnellen Neu-Installieren eines bereits getesteten Stands), `-Start` (App danach starten).
+
+### Version und Release
+
+Die Versionsnummer steht nur in `Directory.Build.props` (`Version`, `FileVersion`, `InformationalVersion`) und erscheint in der Titelzeile und unter *Einstellungen*. Ein Release entsteht so:
+
+~~~powershell
+# Version in Directory.Build.props erhöhen, committen, dann:
+git tag v0.2.0
+git push origin v0.2.0
+~~~
+
+Der Workflow `.github/workflows/release.yml` läuft bei Tags `v*`, prüft, dass der Tag zur Version passt, baut und testet wie `build.yml`, packt `TerminalMgr-win-x64-<version>.zip` und hängt es an ein GitHub Release mit Notizen aus den Commits. Builds gehören nur in Releases, nie ins Repository.
+
 ## Struktur
 
 - TerminalMgr.Core: Profile, SSH-Argumente, Import, Einstellungen, tmux-Antwortparser.
