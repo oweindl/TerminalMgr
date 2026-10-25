@@ -6,3 +6,4 @@ artifacts/
 *.user
 *.log
 .tools/
+*.stackdump
