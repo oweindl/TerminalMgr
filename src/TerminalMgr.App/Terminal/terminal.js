@@ -5,6 +5,24 @@
   let active = null;
   let fontSize = 14;
   const send = message => window.chrome.webview.postMessage(message);
+  // App shortcuts (for example dictation on Ctrl+Y) are taken here and never reach the session. The host sends the
+  // configured ones as canonical text ("Ctrl+Shift+D"); key names match Shortcut.FromDomCode in TerminalMgr.Core.
+  const keyNames = { Escape:'Esc', Comma:',', Period:'.', Minus:'-', Slash:'/', Semicolon:';', Quote:"'", BracketLeft:'[', BracketRight:']',
+    Backquote:'`', Backslash:'\\', Equal:'=', ArrowUp:'Up', ArrowDown:'Down', ArrowLeft:'Left', ArrowRight:'Right', NumpadEnter:'Enter',
+    Enter:'Enter', Space:'Space', Tab:'Tab', Backspace:'Backspace', Delete:'Delete', Insert:'Insert', Home:'Home', End:'End', PageUp:'PageUp', PageDown:'PageDown' };
+  function keyOf(code) {
+    let m;
+    if ((m = /^Key([A-Z])$/.exec(code)) || (m = /^Digit([0-9])$/.exec(code)) || (m = /^Numpad([0-9])$/.exec(code))) return m[1];
+    if (/^F([1-9]|1[0-2])$/.test(code)) return code;
+    return keyNames[code] ?? null;
+  }
+  function parseShortcut(text, action) {
+    const parts = String(text).split('+').map(p => p.trim());
+    const s = { action, ctrl:false, alt:false, shift:false, key:parts[parts.length - 1] };
+    for (const p of parts.slice(0, -1)) { const l = p.toLowerCase(); if (l === 'ctrl') s.ctrl = true; else if (l === 'alt') s.alt = true; else if (l === 'shift') s.shift = true; }
+    return s;
+  }
+  let shortcuts = [parseShortcut('Ctrl+Y', 'dictation')];
   // Terminals pad lines with spaces up to the window width; copied text must not carry them.
   const trimTrailingSpaces = text => text.replace(/\r\n?/g, '\n').split('\n').map(l => l.replace(/ +$/, '')).join('\n');
   function fitActive() {
@@ -38,6 +56,15 @@
     term.onData(data => send({ type:'input',id,data }));
     term.onResize(({cols,rows}) => send({ type:'resize',id,cols,rows }));
     term.attachCustomKeyEventHandler(e => {
+      if (!e.metaKey) {
+        const key = keyOf(e.code);
+        const hit = key && shortcuts.find(s => s.ctrl === e.ctrlKey && s.alt === e.altKey && s.shift === e.shiftKey && s.key === key);
+        if (hit) {
+          e.preventDefault();
+          if (e.type === 'keydown' && !e.repeat) send({ type:'shortcut', action:hit.action, id });
+          return false;
+        }
+      }
       if (e.altKey && !e.ctrlKey && /^[1-9]$/.test(e.key)) {
         if (e.type === 'keydown') send({ type:'switch',index:Number(e.key)-1 });
         return false;
@@ -87,7 +114,15 @@
       case 'create': create(m.id); break;
       case 'select': select(m.id); break;
       case 'output': s?.term.write(m.data); break;
-      case 'paste': s?.term.paste(m.text); s?.term.focus(); break;
+      case 'paste':
+        s?.term.paste(m.text);
+        // "Paste and run": Enter goes through the same input path, so it always follows the pasted text.
+        if (m.enter) s?.term.input('\r', true);
+        s?.term.focus();
+        break;
+      case 'shortcuts':
+        shortcuts = Object.entries(m.shortcuts ?? {}).map(([action, text]) => parseShortcut(text, action));
+        break;
       case 'font':
         fontSize = m.size;
         for (const session of sessions.values()) session.term.options.fontSize = fontSize;

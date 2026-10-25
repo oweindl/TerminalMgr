@@ -29,8 +29,30 @@ public sealed record Profile
 }
 
 public sealed record ClipboardEntry(string Text, string Source, DateTimeOffset Created, bool Pinned = false);
+public sealed record DictationOptions
+{
+    public string Shortcut { get; init; } = "Ctrl+Y";
+    /// <summary>Name of the recording device; null or empty means the Windows default.</summary>
+    public string? Microphone { get; init; }
+    public string Model { get; init; } = WhisperModels.DefaultName;
+    /// <summary>"de", "en" or "auto".</summary>
+    public string Language { get; init; } = "de";
+    public string InitialPrompt { get; init; } = "tmux, git, Claude Code, Docker, SSH, GitHub, PowerShell, Linux, npm, Kubernetes";
+    public double SilenceSeconds { get; init; } = 1.5;
+    public double LevelThreshold { get; init; } = 0.015;
+
+    public DictationOptions Normalized() => this with {
+        Shortcut = Core.Shortcut.TryParse(Shortcut, out var s) ? s.ToString() : "Ctrl+Y",
+        Model = WhisperModels.Get(Model).Name,
+        Language = Language is "en" or "auto" ? Language : "de",
+        SilenceSeconds = Math.Clamp(SilenceSeconds, 0.5, 10),
+        LevelThreshold = Math.Clamp(LevelThreshold, 0.002, 0.2)
+    };
+}
+
 public sealed record AppSettings
 {
+    public DictationOptions Dictation { get; init; } = new();
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     public int FontSize { get; init; } = 14;

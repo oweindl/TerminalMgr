@@ -13,6 +13,14 @@
     <Resource Include="Assets/TerminalMgr.png" />
     <Content Include="Terminal/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <!-- Whisper.net ships native libraries for every platform. Only Windows x64 (CPU and Vulkan) is ever loaded. -->
+  <Target Name="PruneForeignNativeRuntimes" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ForeignRuntimeFile Include="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\\/](?!(win-x64|vulkan[\\/]win-x64)[\\/])'))" />
+      <ResolvedFileToPublish Remove="@(ForeignRuntimeFile)" />
+    </ItemGroup>
+  </Target>
   <Target Name="CheckTerminalAssets" BeforeTargets="PrepareForBuild" Condition="!Exists('Terminal/vendor/xterm.js')">
     <Error Text="Terminal-Assets fehlen. Zuerst in web: npm ci und npm run bundle ausführen." />
   </Target>

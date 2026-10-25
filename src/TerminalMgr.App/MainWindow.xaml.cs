@@ -61,6 +61,7 @@ public partial class MainWindow : Window
             foreach (var profile in settings.Profiles) _profiles.Add(new(profile));
             _clipList.MaxUnpinned = Math.Clamp(settings.ClipHistoryLimit, 1, 1000);
             _clipList.LoadPinned(settings.PinnedClips);
+            DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
             if (_profiles.Count == 0)
             {
                 var config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
@@ -117,6 +118,7 @@ public partial class MainWindow : Window
                     _ready = true;
                     LoadingOverlay.Visibility = Visibility.Collapsed;
                     Post(new { type = "font", size = _fontSize });
+                    PostShortcuts();
                     if (_profiles.Count > 0) ProfilesList.SelectedIndex = 0;
                     await ConnectAutomaticAsync();
                     break;
@@ -150,6 +152,9 @@ public partial class MainWindow : Window
                     break;
                 case "pasteRequest":
                     PasteSystemClipboard(id);
+                    break;
+                case "shortcut":
+                    if (m.GetProperty("action").GetString() == "dictation") ToggleDictation();
                     break;
                 case "contextPaste":
                     PasteActiveClip(id);
@@ -583,6 +588,8 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
         _settings = result;
         _clipList.MaxUnpinned = result.ClipHistoryLimit;
+        PostShortcuts();
+        DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
         RenderClips(); SaveSettings();
     }
 
@@ -620,6 +627,13 @@ public partial class MainWindow : Window
     }
     private void WindowKeyDown(object sender, KeyEventArgs e)
     {
+        // The dictation shortcut also works while a WPF control has the focus (Ctrl+Y would otherwise be "redo" in a text box).
+        if (Shortcut.TryParse(DictationSettings.Shortcut, out var dictation) && ShortcutKeys.FromEvent(e) == dictation)
+        {
+            if (!e.IsRepeat) ToggleDictation();
+            e.Handled = true;
+            return;
+        }
         if (Keyboard.Modifiers != ModifierKeys.Alt) return;
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         int index = key - Key.D1;
@@ -634,6 +648,7 @@ public partial class MainWindow : Window
         _closing = true;
         SaveSettings();
         _shutdown.Cancel();
+        DisposeDictation();
         StatusText.Text = "SSH-Sessions werden geschlossen …";
         await Task.WhenAll(_sessions.Values.Select(s => s.DisposeAsync().AsTask()));
         _sessions.Clear();
