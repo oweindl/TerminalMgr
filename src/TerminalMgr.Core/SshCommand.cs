@@ -33,6 +33,24 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: true, "tmux attach-session -t " + ShellQuote(sessionId));
     }
 
+    /// <summary>All windows of all sessions, one tab-separated line each (see <see cref="TmuxWindowParser.Format"/>).</summary>
+    public static IReadOnlyList<string> TmuxWindowsArguments(Profile profile) =>
+        OverrideArguments(profile, interactive: false, "tmux list-windows -a -F " + ShellQuote(TmuxWindowParser.Format));
+
+    /// <summary>Attach straight to one window; an existing session is required, nothing is created.</summary>
+    public static IReadOnlyList<string> TmuxAttachArguments(Profile profile, string sessionId, string windowId) =>
+        OverrideArguments(profile, interactive: true, "tmux attach-session -t " + ShellQuote(TmuxWindowParser.Target(sessionId, windowId)));
+
+    /// <summary>Prints the effective OpenSSH settings (ssh -G), e.g. the RemoteCommand from the config.</summary>
+    public static IReadOnlyList<string> EffectiveConfigArguments(Profile profile)
+    {
+        profile.Validate();
+        List<string> args = [];
+        if (!string.IsNullOrWhiteSpace(profile.ConfigPath)) args.AddRange(["-F", profile.ConfigPath]);
+        args.AddRange(["-G", profile.Destination]);
+        return args;
+    }
+
     private static IReadOnlyList<string> OverrideArguments(Profile profile, bool interactive, string command)
     {
         profile.Validate();
