@@ -135,6 +135,70 @@ internal static class Program
         Console.WriteLine("PASS WPF export, import (with conflicts) and password dialogs load");
     }
 
+    // The dictation panel sits under the clipboard list, takes at most a third of the window and scrolls its text.
+    private static void TestDictationPanel()
+    {
+        var main = new MainWindow();
+        var panel = (Border)main.FindName("DictationPanel");
+        var clipboard = (DockPanel)main.FindName("ClipboardPanel");
+        Check(ReferenceEquals(panel.Parent, clipboard) && DockPanel.GetDock(panel) == Dock.Bottom, "The dictation panel belongs under the clipboard list");
+        Check(ReferenceEquals(((FrameworkElement)main.FindName("ClipsList")).Parent, clipboard), "The clipboard list shares the column");
+        foreach (double height in new[] { 540.0, 940.0 })
+        {
+            panel.Visibility = Visibility.Visible;
+            panel.MaxHeight = DictationLayout.MaxPanelHeight(height);
+            ((TextBox)main.FindName("DictationBox")).Text = string.Join(Environment.NewLine, Enumerable.Range(1, 80).Select(i => "Zeile " + i + " des Diktats"));
+            var root = (FrameworkElement)main.Content;
+            root.Measure(new Size(1480, height));
+            root.Arrange(new Rect(0, 0, 1480, height));
+            root.UpdateLayout();
+            Check(panel.ActualHeight <= height / 3 + 1 && panel.ActualHeight > 100, $"Panel height {panel.ActualHeight} for a window of {height}");
+            var scroll = (ScrollViewer)main.FindName("DictationScroll");
+            Check(scroll.ExtentHeight > scroll.ViewportHeight, "Long text must scroll inside the panel");
+            scroll.ScrollToEnd();
+            root.UpdateLayout();
+            Check(scroll.VerticalOffset > 0 && scroll.VerticalOffset >= scroll.ScrollableHeight - 1, "Scrolled to the newest text");
+            var buttons = (Button)main.FindName("DictationRecordButton");
+            var bottom = buttons.TranslatePoint(new Point(0, buttons.ActualHeight), root).Y;
+            Check(bottom <= height, "The buttons must stay inside the window");
+        }
+        Check(DictationLayout.MaxPanelHeight(300) == 150 && DictationLayout.MaxPanelHeight(900) == 300, "Height rule");
+        Console.WriteLine("PASS WPF dictation panel: right column under the clipboard list, at most a third of the window, text scrolls");
+    }
+
+    // The engine that lives in the terminal page: commands out, page messages in, the common events on top.
+    private static void TestWebSpeechEngine()
+    {
+        var posted = new List<string>();
+        var engine = new WebSpeechEngine(m => posted.Add(System.Text.Json.JsonSerializer.Serialize(m)), new DictationOptions { Language = "de" });
+        var interim = new List<(string, string)>(); var results = new List<DictationResult>(); var errors = new List<Exception>(); var states = new List<DictationState>();
+        engine.Interim += (c, t) => interim.Add((c, t)); engine.Completed += r => results.Add(r); engine.Failed += e => errors.Add(e); engine.StateChanged += s => states.Add(s);
+        void Page(string json) { using var doc = System.Text.Json.JsonDocument.Parse(json); engine.OnPageMessage(doc.RootElement.Clone()); }
+        engine.Start();
+        Check(posted.Count == 1 && posted[0].Contains("\"cmd\":\"start\"") && posted[0].Contains("de-DE"), "Start command: " + string.Join(",", posted));
+        Page("{\"event\":\"started\"}");
+        Page("{\"event\":\"interim\",\"index\":0,\"text\":\"Starte den\"}");
+        Page("{\"event\":\"final\",\"index\":0,\"text\":\"Starte den Server\"}");
+        Page("{\"event\":\"interim\",\"index\":1,\"text\":\"und öffne\"}");
+        Check(interim.SequenceEqual([("", "Starte den"), ("Starte den Server", ""), ("Starte den Server", "und öffne")]), "Interim events: " + string.Join(" | ", interim));
+        engine.Stop();
+        Page("{\"event\":\"end\"}");
+        Check(results.Count == 1 && results[0] is { Text: "Starte den Server und öffne", Manual: true } && engine.State == DictationState.Idle, "Final text from the page results");
+        Check(states.SequenceEqual([DictationState.Recording, DictationState.Processing, DictationState.Idle]), "States: " + string.Join(",", states));
+
+        engine.Start();
+        Page("{\"event\":\"error\",\"error\":\"network\"}");
+        Page("{\"event\":\"end\"}");
+        Check(errors.Count == 1 && errors[0] is SpeechUnavailableException && results.Count == 1 && engine.State == DictationState.Idle, "A network error is reported as unavailable and ends the round without a result");
+        engine.Start();
+        Page("{\"event\":\"error\",\"error\":\"no-speech\"}");
+        Check(engine.State == DictationState.Recording && errors.Count == 1, "no-speech is not a failure");
+        engine.Cancel();
+        Page("{\"event\":\"end\"}");
+        Check(results.Count == 1 && posted.Last().Contains("abort"), "Cancel aborts the page recognizer and reports nothing");
+        Console.WriteLine("PASS Web Speech engine: commands, provisional/final text, stop, network error as unavailable, cancel");
+    }
+
     private static void TestVersionIsShown()
     {
         // Directory.Build.props is the single source: it must reach the assembly, the window title and the file version.
@@ -192,7 +256,7 @@ internal static class Program
         for (int attempt = 1; ; attempt++)
         {
             try { Clipboard.SetDataObject(data, true); return; }
-            catch (System.Runtime.InteropServices.COMException) when (attempt < 20) { Thread.Sleep(100); }
+            catch (System.Runtime.InteropServices.COMException) when (attempt < 60) { Thread.Sleep(100); }
         }
     }
 
@@ -266,6 +330,8 @@ internal static class Program
             TestClipboardFullText();
             TestUpdateDialog();
             TestConfigDialogs();
+            TestDictationPanel();
+            TestWebSpeechEngine();
             TestVersionIsShown();
             TestShortcutKeys();
             TestTmuxMenu();

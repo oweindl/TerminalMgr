@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SizeChanged += (_, _) => UpdateDictationHeight();
         Title = "TerminalMgr " + AppInfo.Version;
         _dataDirectory = AppPaths.DataDirectory();
         _store = new SettingsStore(_dataDirectory);
@@ -96,7 +97,9 @@ public partial class MainWindow : Window
                 if (args.Uri != "https://terminalmgr.local/index.html") args.Cancel = true;
             };
             core.NewWindowRequested += (_, args) => args.Handled = true;
-            core.PermissionRequested += (_, args) => args.State = CoreWebView2PermissionState.Deny;
+            // The page may use the microphone only while the Web Speech dictation engine is recording; everything else stays denied.
+            core.PermissionRequested += (_, args) => args.State = args.PermissionKind == CoreWebView2PermissionKind.Microphone && _webSpeech is { State: not DictationState.Idle }
+                ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
             core.DownloadStarting += (_, args) => args.Cancel = true;
             core.WebMessageReceived += WebMessageReceived;
             core.ProcessFailed += (_, _) => StatusText.Text = "Terminalanzeige ausgefallen. App bitte neu starten.";
@@ -119,6 +122,9 @@ public partial class MainWindow : Window
             string id = m.TryGetProperty("id", out var idValue) ? idValue.GetString() ?? "" : "";
             switch (type)
             {
+                case "speech":
+                    _webSpeech?.OnPageMessage(m);
+                    break;
                 case "ready":
                     _ready = true;
                     LoadingOverlay.Visibility = Visibility.Collapsed;

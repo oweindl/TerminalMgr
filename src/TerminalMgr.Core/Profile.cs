@@ -42,8 +42,20 @@ public sealed record DictationOptions
     public string InitialPrompt { get; init; } = "tmux, git, Claude Code, Docker, SSH, GitHub, PowerShell, Linux, npm, Kubernetes";
     public double SilenceSeconds { get; init; } = 1.5;
     public double LevelThreshold { get; init; } = 0.015;
+    /// <summary>Which recognizer dictates, one of <see cref="SpeechEngineIds.All"/>. Only "whisper" works without a Windows privacy setting or a cloud service.</summary>
+    public string Engine { get; init; } = SpeechEngineIds.Whisper;
+    /// <summary>Small, fast model for the provisional text while speaking; the configured <see cref="Model"/> makes the final text.</summary>
+    public string InterimModel { get; init; } = "small-q5_1";
+    /// <summary>The provisional text is computed from at most this much of the latest audio.</summary>
+    public double InterimWindowSeconds { get; init; } = 7;
+    /// <summary>Pause between two provisional results.</summary>
+    public double InterimCycleSeconds { get; init; } = 0.7;
 
     public DictationOptions Normalized() => this with {
+        Engine = SpeechEngineIds.Normalize(Engine),
+        InterimModel = WhisperModels.Get(InterimModel).Name,
+        InterimWindowSeconds = Math.Clamp(InterimWindowSeconds, 4, 12),
+        InterimCycleSeconds = Math.Clamp(InterimCycleSeconds, 0.4, 3),
         Shortcut = Core.Shortcut.TryParse(Shortcut, out var s) ? s.ToString() : "Ctrl+Y",
         Model = WhisperModels.Get(Model).Name,
         Language = Language is "en" or "auto" ? Language : "de",

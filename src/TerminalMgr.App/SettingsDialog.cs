@@ -23,7 +23,7 @@ public sealed class SettingsDialog : Window
     /// <summary>"Exportieren" or "Importieren" was pressed: the settings are saved and the caller opens the matching dialog.</summary>
     public ConfigAction ConfigAction { get; private set; }
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
-    private readonly ComboBox _microphone, _model, _language, _sessionModifier;
+    private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine;
     public AppSettings? Result { get; private set; }
 
     public SettingsDialog(AppSettings settings)
@@ -81,8 +81,11 @@ public sealed class SettingsDialog : Window
         _panel.Children.Add(_acceptOsc52);
 
         Heading("Diktat");
+        _engine = Combo("Spracherkennung (Engine)", SpeechEngineIds.All.Select(SpeechEngineIds.Label), SpeechEngineIds.Label(dictation.Engine));
+        _engine.ToolTip = "Whisper läuft lokal auf der Grafikkarte, ohne Schlüssel und ohne Dienst. Die Web Speech API und die Windows-Spracherkennung sind zum Vergleich da; sie laufen auf diesem System nur mit Einschränkungen (siehe docs/dictation-engines.md).";
         _microphone = Combo("Mikrofon", MicrophoneNames(), dictation.Microphone is { Length: > 0 } m ? m : DefaultMicrophone);
         _model = Combo("Modell (wird beim ersten Diktat nach Rückfrage geladen)", WhisperModels.All.Select(ModelLabel), ModelLabel(WhisperModels.Get(dictation.Model)));
+        _interimModel = Combo("Schnelles Modell für den Zwischenstand beim Sprechen", WhisperModels.All.Select(ModelLabel), ModelLabel(WhisperModels.Get(dictation.InterimModel)));
         _language = Combo("Sprache", ["Deutsch", "Englisch", "Automatisch erkennen"], dictation.Language switch { "en" => "Englisch", "auto" => "Automatisch erkennen", _ => "Deutsch" });
         _prompt = Field("Fachbegriffe für die Erkennung (Initial-Prompt)", dictation.InitialPrompt);
         _prompt.AcceptsReturn = true; _prompt.TextWrapping = TextWrapping.Wrap; _prompt.Height = 70; _prompt.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -185,15 +188,17 @@ public sealed class SettingsDialog : Window
                 Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
                 SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)]
             }.Normalized(),
-            Dictation = new DictationOptions {
+            Dictation = (_original.Dictation with {
                 Shortcut = _dictationShortcut.Text,
                 Microphone = microphone == DefaultMicrophone ? null : microphone,
+                Engine = SpeechEngineIds.All[Math.Max(0, _engine.SelectedIndex)],
                 Model = WhisperModels.All[Math.Max(0, _model.SelectedIndex)].Name,
+                InterimModel = WhisperModels.All[Math.Max(0, _interimModel.SelectedIndex)].Name,
                 Language = _language.SelectedIndex switch { 1 => "en", 2 => "auto", _ => "de" },
                 InitialPrompt = _prompt.Text.Trim(),
                 SilenceSeconds = silence,
                 LevelThreshold = threshold
-            }.Normalized()
+            }).Normalized()
         };
         if (ShortcutRules.FindConflict(candidate) is { } conflict) { Warn(conflict); return; }
         Result = candidate;

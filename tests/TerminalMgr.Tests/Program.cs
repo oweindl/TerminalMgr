@@ -21,8 +21,10 @@ if (args.Contains("--pty-child"))
 var passed = 0;
 var failures = new List<string>();
 void Check(bool value, string message) { if (!value) throw new Exception(message); }
+bool benchOnly = args.Any(a => a.StartsWith("--dictation-bench")); // the measuring mode runs on its own
 void Test(string name, Action action)
 {
+    if (benchOnly) return;
     try { action(); passed++; Console.WriteLine("PASS " + name); }
     catch (Exception ex) { failures.Add(name + ": " + ex.Message); Console.WriteLine("FAIL " + name + ": " + ex.Message); }
 }
@@ -342,6 +344,113 @@ try
         Check(transcriber.Calls.Last() >= 3.4 * 16000, "Final run must see the whole segment, saw " + transcriber.Calls.Last());
         Check(o.States.SequenceEqual([DictationState.Recording, DictationState.Processing, DictationState.Idle]), "States: " + string.Join(",", o.States));
         Check(WaitUntil(() => source.Disposed), "Microphone not released");
+    });
+    TimedWord W(string text, double start, double end) => new(text, TimeSpan.FromSeconds(start), TimeSpan.FromSeconds(end));
+    Test("Word agreement: words are confirmed when two results agree, never recomputed, tentative words may change", () =>
+    {
+        var agreement = new WordAgreement();
+        Check(agreement.Feed([W("eins", 0, .4), W("zwei", .4, .8)]).Count == 0 && agreement.ConfirmedText == "" && agreement.TentativeText == "eins zwei", "First result confirms nothing");
+        var confirmed = agreement.Feed([W("Eins,", 0, .4), W("zwei", .4, .8), W("drei", .8, 1.2)]);
+        Check(confirmed.Count == 2 && agreement.ConfirmedText == "Eins, zwei" && agreement.TentativeText == "drei", "Case and punctuation must not break agreement: " + agreement.FullText);
+        agreement.Feed([W("drei", .8, 1.2), W("vier", 1.2, 1.6)]);
+        Check(agreement.ConfirmedText == "Eins, zwei drei" && agreement.TentativeText == "vier" && agreement.ConfirmedEnd == TimeSpan.FromSeconds(1.2), "Third result: " + agreement.FullText);
+        agreement.Feed([W("vier", 1.2, 1.6), W("fünf", 1.6, 2.0)]);
+        agreement.Feed([W("vier", 1.2, 1.6), W("sechs", 1.6, 2.0)]);
+        Check(agreement.ConfirmedText.EndsWith("vier") && agreement.TentativeText == "sechs" && !agreement.ConfirmedText.Contains("fünf"), "A word the next result contradicts must stay tentative: " + agreement.FullText);
+        agreement.Reset();
+        Check(agreement.FullText == "" && agreement.ConfirmedEnd == TimeSpan.Zero, "Reset");
+    });
+    Test("Word agreement: the part of a window that overlaps confirmed words is not new", () =>
+    {
+        var agreement = new WordAgreement();
+        agreement.Feed([W("hallo", 0, .5), W("welt", .5, 1.0)]);
+        agreement.Feed([W("hallo", 0, .5), W("welt", .5, 1.0)]);
+        Check(agreement.ConfirmedText == "hallo welt", "Setup");
+        // The next window starts a little before the last confirmed word and repeats it.
+        agreement.Feed([W("welt", .55, 1.0), W("und", 1.0, 1.3), W("mehr", 1.3, 1.7)]);
+        agreement.Feed([W("welt", .55, 1.0), W("und", 1.0, 1.3), W("mehr", 1.3, 1.7)]);
+        Check(agreement.ConfirmedText == "hallo welt und mehr" && agreement.TentativeText == "", "Repeated word: " + agreement.FullText);
+        Check(new WordAgreement().Feed([W("[BLANK_AUDIO]", 0, 1), W("...", 1, 2)]).Count == 0, "Words without letters are ignored");
+    });
+    Test("Word error rate", () =>
+    {
+        Check(WordErrorRate.Compute("Starte den Server", "starte den server.") == 0, "Case and punctuation do not count");
+        Check(Math.Abs(WordErrorRate.Compute("a b c d", "a b x d") - 0.25) < 1e-9, "One substitution of four");
+        Check(Math.Abs(WordErrorRate.Compute("a b c d", "a d") - 0.5) < 1e-9, "Two deletions of four");
+        Check(WordErrorRate.Compute("", "") == 0 && WordErrorRate.Compute("", "x") == 1 && WordErrorRate.Compute("a b", "") == 1, "Empty cases");
+    });
+    Test("Dictation options: engine, interim model, window and cycle are normalized; old settings files still load", () =>
+    {
+        var defaults = new DictationOptions();
+        Check(defaults.Engine == "whisper" && defaults.InterimModel == "small-q5_1" && defaults.InterimWindowSeconds == 7 && defaults.InterimCycleSeconds == 0.7, "Defaults");
+        var fixedUp = (defaults with { Engine = "azure", InterimModel = "x", InterimWindowSeconds = 99, InterimCycleSeconds = 0 }).Normalized();
+        Check(fixedUp.Engine == "whisper" && fixedUp.InterimModel == WhisperModels.DefaultName && fixedUp.InterimWindowSeconds == 12 && fixedUp.InterimCycleSeconds == 0.4, "Normalization");
+        Check((defaults with { Engine = "WebSpeech" }).Normalized().Engine == "webspeech" && SpeechEngineIds.All.Count == 3, "Known engines");
+        var old = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("{\"Dictation\":{\"Shortcut\":\"Ctrl+Y\",\"Language\":\"en\"}}")!;
+        Check(old.Dictation.Language == "en" && old.Dictation.Engine == "whisper" && old.Dictation.InterimModel == "small-q5_1", "A settings file from before the engines");
+    });
+    Test("Dictation (streaming): the window follows the confirmed words, confirmed text only grows, the final text comes from the final model", () =>
+    {
+        var source = new FakeSource();
+        var final = new FakeTranscriber { Responder = _ => "Das ist der Endtext" };
+        long fed = 0;
+        var words = new FakeWordTranscriber { Total = () => Interlocked.Read(ref fed) };
+        words.Responder = (call, window) => call switch
+        {
+            1 or 2 => [W("alpha", 0, .4), W("beta", .4, .8)],
+            3 => [W("gamma", .3, .7)],
+            4 => [W("gamma", .3, .7), W("delta", .7, 1.1)],
+            _ => []
+        };
+        var session = new DictationSession(() => source, final, new DictationOptions { InterimCycleSeconds = 0.5 }, interim: words);
+        var events = new List<(string Confirmed, string Tentative)>();
+        session.Interim += (c, t) => { lock (events) events.Add((c, t)); };
+        var results = new List<DictationResult>();
+        session.Completed += r => { lock (results) results.Add(r); };
+        session.Start();
+        for (int call = 1; call <= 4; call++)
+        {
+            int guard = 0;
+            while (words.Windows.Count < call && guard++ < 400) { Interlocked.Add(ref fed, 1600); source.Feed(Tone(0.1, 0.2)); Thread.Sleep(12); }
+            Check(WaitUntil(() => { lock (events) return events.Count >= call; }), "No interim result for call " + call);
+        }
+        lock (events)
+        {
+            Check(events[1] == ("alpha beta", "") && events[2] == ("alpha beta", "gamma") && events[3] == ("alpha beta gamma", "delta"), "Interim events: " + string.Join(" | ", events));
+            for (int i = 1; i < events.Count; i++) Check(events[i].Confirmed.StartsWith(events[i - 1].Confirmed), "Confirmed text changed at " + i);
+        }
+        // Call 3 started 0.2 s before the end of the last confirmed word (0.8 s): the window is the audio from 0.6 s on, not the whole segment.
+        var third = words.Windows[2];
+        Check(Math.Abs(third.Samples - (third.TotalAtCall - (int)(0.6 * 16000))) <= 1700, $"Window {third.Samples} of {third.TotalAtCall} samples");
+        session.Stop();
+        Check(WaitUntil(() => { lock (results) return results.Count > 0; }) && results[0].Text == "Das ist der Endtext" && results[0].Manual, "Final text");
+        Check(final.Calls.Last() >= 16000 * 2, "The final run must see the whole segment, saw " + final.Calls.Last());
+        Check(session.Metrics.Cycles.Count >= 4 && session.Metrics.FirstInterimMilliseconds is not null && session.Metrics.FinalMilliseconds is not null, "Metrics: " + session.Metrics.Summary());
+    });
+    Test("Dictation (streaming): the window never exceeds the configured length, even when nothing gets confirmed", () =>
+    {
+        var source = new FakeSource();
+        var words = new FakeWordTranscriber();
+        int n = 0;
+        words.Responder = (call, window) => [W("wort" + Interlocked.Increment(ref n), 0, .3)]; // every result differs, nothing is ever confirmed
+        var session = new DictationSession(() => source, new FakeTranscriber(), new DictationOptions { InterimCycleSeconds = 0.4, InterimWindowSeconds = 2 }, interim: words);
+        session.Start();
+        for (int i = 0; i < 70; i++) { source.Feed(Tone(0.1, 0.2)); Thread.Sleep(12); }
+        session.Cancel();
+        Check(words.Windows.Count >= 3, "Cycles ran: " + words.Windows.Count);
+        Check(words.Windows.All(w => w.Samples <= 2 * 16000), "Longest window " + words.Windows.Max(w => w.Samples) / 16000.0 + " s");
+    });
+    Test("WavFileSource delivers prepared audio in real time and then silence", () =>
+    {
+        var audio = Tone(0.5, 0.3);
+        using var source = new WavFileSource(audio, trailingSilenceSeconds: 0.3, speed: 4);
+        var received = new List<short>();
+        source.Samples += s => { lock (received) received.AddRange(s); };
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        source.Start();
+        Check(WaitUntil(() => { lock (received) return received.Count >= 12800; }, 3000), "Not all audio arrived: " + received.Count);
+        Check(clock.Elapsed.TotalMilliseconds >= 150, "Delivered faster than the speed allows: " + clock.ElapsedMilliseconds + " ms");
+        lock (received) Check(received.Take(8000).Any(s => s != 0) && received.Skip(8000).All(s => s == 0), "Audio first, then silence");
     });
     Test("Dictation: no speech for 5 s ends without calling the recognizer", () =>
     {
@@ -1267,6 +1376,90 @@ if (args.Any(a => a.StartsWith("--whisper-smoke")))
     }
     catch (Exception ex) { failures.Add("Whisper smoke: " + ex.Message); Console.WriteLine("FAIL " + ex); }
 }
+if (args.Any(a => a.StartsWith("--dictation-bench")))
+{
+    // Measuring mode for the Whisper engine: synthesized German speech is played into the dictation in real time.
+    // Compares the streaming interim text (small model, sliding window, confirmed words) with the old behavior
+    // (the whole segment transcribed again with the final model). Models come from the normal model folder; missing ones are downloaded.
+    try
+    {
+        var options = new DictationOptions { Language = "de" }.Normalized();
+        foreach (string modelName in new[] { options.Model, options.InterimModel }.Distinct())
+        {
+            var model = WhisperModels.Get(modelName);
+            if (WhisperModels.IsInstalled(model)) continue;
+            Console.WriteLine($"Downloading {model.Name} ({model.SizeText}) ...");
+            long last = 0;
+            await ModelDownloader.DownloadAsync(model, AppPaths.ModelsDirectory(), new Progress<(long Done, long Total)>(p => {
+                if (p.Done - last > 50_000_000) { last = p.Done; Console.WriteLine($"  {p.Done / 1_000_000} / {p.Total / 1_000_000} MB"); }
+            }), CancellationToken.None);
+        }
+        string[] shortText = ["Starte bitte den tmux Server und öffne Claude Code im Projektordner."];
+        string[] mediumText = ["Erstelle einen neuen Branch für die Konfiguration, schreibe die Tests dazu und schiebe die Änderung auf GitHub, sobald der Build grün ist."];
+        string[] longText = ["Erstelle einen neuen Branch für die Konfiguration und schreibe die Tests dazu.", "Danach starte den Docker Container auf dem Entwicklungsserver neu.",
+            "Prüfe im Log mit tail, ob der SSH Verbindungsaufbau noch Fehler meldet.", "Wenn alles grün ist, schiebe die Änderung auf GitHub und öffne einen Pull Request."];
+        var fixtures = new (string Name, string[] Sentences)[] { ("kurz", shortText), ("mittel", mediumText), ("lang", longText) };
+        using var finalTranscriber = new WhisperTranscriber();
+        using var interimTranscriber = new WhisperTranscriber(interim: true);
+        Console.WriteLine("Lade und wärme die Modelle auf ...");
+        var warm = System.Diagnostics.Stopwatch.StartNew();
+        await interimTranscriber.PrepareAsync(options);
+        await finalTranscriber.PrepareAsync(options);
+        Console.WriteLine($"  bereit nach {warm.Elapsed.TotalSeconds:0.0} s, Backend {finalTranscriber.Backend}");
+        var rows = new List<string>();
+        foreach (var (fixtureName, sentences) in fixtures)
+        {
+            var audio = SpeechBench.SynthesizeSentences("de", sentences);
+            if (audio.Length < 16000) { Console.WriteLine("Keine deutsche Stimme installiert, Messung übersprungen."); break; }
+            string reference = string.Join(" ", sentences);
+            double seconds = audio.Length / 16000.0;
+            double rms = Math.Sqrt(audio.Select(s => (double)s * s).Average()) / 32768.0;
+            Console.WriteLine($"[{fixtureName}] {seconds:0.0} s Audio, Effektivwert {rms:0.000}, Spitze {audio.Max(s => Math.Abs((int)s)) / 32768.0:0.00}");
+            var direct = System.Diagnostics.Stopwatch.StartNew();
+            string directText = await finalTranscriber.TranscribeAsync(audio, options, CancellationToken.None);
+            Console.WriteLine($"  direkt (Endmodell, {direct.ElapsedMilliseconds} ms): {directText}");
+            direct.Restart();
+            var directWords = await interimTranscriber.TranscribeWordsAsync(audio, options, CancellationToken.None);
+            Console.WriteLine($"  direkt (Zwischenmodell, Wörter, {direct.ElapsedMilliseconds} ms): " + string.Join(" ", directWords.Select(w => $"{w.Text}[{w.Start.TotalSeconds:0.0}-{w.End.TotalSeconds:0.0}]")));
+            if (args.Contains("--probe-threads"))
+            {
+                // Same call as in the dictation session: from a pool thread, with a cancelable token, while another thread keeps running.
+                using var cts = new CancellationTokenSource();
+                var slice = audio.Take((int)(0.7 * 16000)).ToArray();
+                for (int i = 0; i < 3; i++)
+                {
+                    var sw2 = System.Diagnostics.Stopwatch.StartNew();
+                    var task = Task.Run(() => interimTranscriber.TranscribeWordsAsync(slice, options, cts.Token));
+                    var finished = await Task.WhenAny(task, Task.Delay(8000));
+                    Console.WriteLine($"  Pool-Thread {i}: {(finished == task ? "fertig nach " + sw2.ElapsedMilliseconds + " ms: " + string.Join(" ", task.Result.Select(w => w.Text)) : "HÄNGT nach 8 s")}");
+                    if (finished != task) break;
+                }
+            }
+            if (args.Contains("--probe-windows"))
+                foreach (double windowSeconds in new[] { 0.7, 1.2, 1.5, 2.0, 3.0, 4.0 })
+                {
+                    var slice = audio.Take((int)(windowSeconds * 16000)).ToArray();
+                    Console.Write($"  Fenster {windowSeconds:0.0} s: ");
+                    var probe = await interimTranscriber.TranscribeWordsAsync(slice, options, CancellationToken.None);
+                    Console.WriteLine(string.Join(" ", probe.Select(w => w.Text)));
+                }
+            bool traced = Environment.GetEnvironmentVariable("TERMINALMGR_BENCH_TRACE") == "1";
+            foreach (bool streaming in new[] { true, false })
+            {
+                using var session = new DictationSession(() => new WavFileSource(audio, 2.5), traced ? new TracingTranscriber(finalTranscriber, "final") : finalTranscriber, options, partialSeconds: 1.75, interim: streaming ? (traced ? new TracingTranscriber(interimTranscriber, "interim") : interimTranscriber) : null);
+                var result = await SpeechBench.RunAsync(streaming ? "Whisper Streaming (" + options.InterimModel + ", Fenster)" : "Whisper alt (Gesamtsegment, " + options.Model + ")",
+                    fixtureName, session, reference, seconds, TimeSpan.FromSeconds(seconds + 60));
+                Console.WriteLine(result.Line());
+                Console.WriteLine(SpeechBench.Describe(result));
+                rows.Add(result.Line());
+            }
+        }
+        Console.WriteLine();
+        Console.WriteLine(SpeechBench.TableHeader);
+        foreach (string row in rows) Console.WriteLine(row);
+    }
+    catch (Exception ex) { failures.Add("Dictation bench: " + ex.Message); Console.WriteLine("FAIL " + ex); }
+}
 Console.WriteLine($"{passed} passed, {failures.Count} failed");
 Environment.ExitCode = failures.Count == 0 ? 0 : 1;
 
@@ -1548,4 +1741,17 @@ sealed class HangingStream : Stream
     public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+}
+
+sealed class FakeWordTranscriber : IWordTranscriber
+{
+    public readonly List<(int Samples, int TotalAtCall)> Windows = [];
+    public Func<int, short[], IReadOnlyList<TimedWord>> Responder = (_, _) => [];
+    public Func<long>? Total;
+    public Task<IReadOnlyList<TimedWord>> TranscribeWordsAsync(short[] samples, DictationOptions options, CancellationToken cancellationToken)
+    {
+        int call;
+        lock (Windows) { Windows.Add((samples.Length, (int)(Total?.Invoke() ?? 0))); call = Windows.Count; }
+        return Task.FromResult(Responder(call, samples));
+    }
 }

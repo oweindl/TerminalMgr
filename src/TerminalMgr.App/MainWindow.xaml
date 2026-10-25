@@ -53,28 +53,6 @@
      </StackPanel>
     </Border>
     <StackPanel Grid.Row="2">
-     <Border x:Name="DictationPanel" Visibility="Collapsed" Background="#131A20" BorderBrush="#2B3740" BorderThickness="0,1,0,0" Padding="14,10">
-      <StackPanel>
-       <DockPanel>
-        <TextBlock x:Name="DictationStatus" DockPanel.Dock="Right" Foreground="#91A5B4" Text="Bereit"/>
-        <ProgressBar x:Name="DictationLevel" DockPanel.Dock="Right" Width="120" Height="8" Margin="12,0" Minimum="0" Maximum="100" Foreground="#43D4B7" Background="#202A32" BorderThickness="0" ToolTip="Mikrofonpegel"/>
-        <TextBlock x:Name="DictationTitle" FontWeight="SemiBold" Text="Diktat" TextTrimming="CharacterEllipsis"/>
-       </DockPanel>
-       <TextBox x:Name="DictationBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" MaxHeight="170" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="13" PreviewKeyDown="DictationBoxKeyDown" Margin="0,8,0,4"/>
-       <TextBlock x:Name="DictationPartial" Visibility="Collapsed" FontStyle="Italic" Foreground="#7F93A1" TextWrapping="Wrap" Margin="2,0,0,6" ToolTip="Vorläufiger Zwischenstand"/>
-       <StackPanel x:Name="DictationDownload" Visibility="Collapsed" Margin="0,4,0,8">
-        <TextBlock x:Name="DictationDownloadText" Foreground="#BBD0DB" Margin="0,0,0,4"/>
-        <DockPanel><Button DockPanel.Dock="Right" Content="Abbrechen" Click="DictationDownloadCancel"/><ProgressBar x:Name="DictationDownloadBar" Height="10" Minimum="0" Maximum="100" Foreground="#43D4B7" Background="#202A32" BorderThickness="0"/></DockPanel>
-       </StackPanel>
-       <WrapPanel>
-        <Button x:Name="DictationRecordButton" Content="● Aufnahme" Click="DictationRecordClick" ToolTip="Aufnahme starten oder stoppen (Diktat-Tastenkürzel)"/>
-        <Button Content="Einfügen" Click="DictationInsert" ToolTip="Enter"/>
-        <Button Content="Einfügen + Ausführen" Click="DictationInsertRun" ToolTip="Ctrl+Enter"/>
-        <Button Content="Verwerfen" Click="DictationDiscard" ToolTip="Esc"/>
-        <TextBlock Text="Enter einfügen · Ctrl+Enter einfügen + ausführen · Shift+Enter Zeilenumbruch · Esc verwerfen" Foreground="#637D8B" FontSize="11" VerticalAlignment="Center" Margin="10,0"/>
-       </WrapPanel>
-      </StackPanel>
-     </Border>
      <Border Background="#131A20" BorderBrush="#2B3740" BorderThickness="0,1,0,0" Height="38">
       <Button x:Name="DictationButton" Content="🎤 Diktat" Click="DictationButtonClick" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" ToolTip="Diktat starten (Ctrl+Y)"/>
      </Border>
@@ -89,6 +67,36 @@
      <CheckBox x:Name="PinnedOnly" Content="Nur angeheftete Einträge" Checked="FilterClips" Unchecked="FilterClips"/>
      <TextBlock Text="Klick: aktiv · Doppelklick: einfügen · Rechtsklick im Terminal: kopieren bzw. aktiven Eintrag einfügen" Foreground="#91A5B4" FontSize="11" TextWrapping="Wrap"/>
     </StackPanel>
+    <!-- Dictation sits under the clipboard list; its height is capped at a third of the window (MainWindow.Dictation.cs) and the text scrolls to the newest words. -->
+    <Border x:Name="DictationPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="#131A20" BorderBrush="#2B3740" BorderThickness="0,1,0,0" Padding="12,10">
+     <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <DockPanel>
+       <TextBlock x:Name="DictationStatus" DockPanel.Dock="Right" Foreground="#91A5B4" Text="Bereit" TextTrimming="CharacterEllipsis" MaxWidth="150"/>
+       <ProgressBar x:Name="DictationLevel" DockPanel.Dock="Right" Width="60" Height="8" Margin="8,0" Minimum="0" Maximum="100" Foreground="#43D4B7" Background="#202A32" BorderThickness="0" ToolTip="Mikrofonpegel"/>
+       <TextBlock x:Name="DictationTitle" FontWeight="SemiBold" Text="Diktat" TextTrimming="CharacterEllipsis"/>
+      </DockPanel>
+      <StackPanel x:Name="DictationDownload" Grid.Row="1" Visibility="Collapsed" Margin="0,6,0,0">
+       <TextBlock x:Name="DictationDownloadText" Foreground="#BBD0DB" Margin="0,0,0,4" TextWrapping="Wrap"/>
+       <DockPanel><Button DockPanel.Dock="Right" Content="Abbrechen" Click="DictationDownloadCancel"/><ProgressBar x:Name="DictationDownloadBar" Height="10" Minimum="0" Maximum="100" Foreground="#43D4B7" Background="#202A32" BorderThickness="0"/></DockPanel>
+      </StackPanel>
+      <ScrollViewer x:Name="DictationScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,8,0,4">
+       <StackPanel>
+        <TextBox x:Name="DictationBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" FontFamily="Cascadia Mono, Consolas" FontSize="13" PreviewKeyDown="DictationBoxKeyDown" TextChanged="DictationBoxChanged"/>
+        <TextBlock x:Name="DictationPartial" Visibility="Collapsed" FontStyle="Italic" Foreground="#7F93A1" TextWrapping="Wrap" Margin="2,4,0,2" ToolTip="Vorläufiger Zwischenstand: fest = bestätigt, kursiv = kann sich noch ändern"/>
+       </StackPanel>
+      </ScrollViewer>
+      <StackPanel Grid.Row="3">
+       <WrapPanel>
+        <Button x:Name="DictationRecordButton" Content="● Aufnahme" Click="DictationRecordClick" ToolTip="Aufnahme starten oder stoppen (Diktat-Tastenkürzel)"/>
+        <Button Content="Einfügen" Click="DictationInsert" ToolTip="Enter"/>
+        <Button Content="Einfügen + Ausführen" Click="DictationInsertRun" ToolTip="Ctrl+Enter"/>
+        <Button Content="Verwerfen" Click="DictationDiscard" ToolTip="Esc"/>
+       </WrapPanel>
+       <TextBlock Text="Enter einfügen · Ctrl+Enter einfügen + ausführen · Shift+Enter Zeilenumbruch · Esc verwerfen" Foreground="#637D8B" FontSize="11" TextWrapping="Wrap" Margin="2,2,0,0"/>
+      </StackPanel>
+     </Grid>
+    </Border>
     <ListBox x:Name="ClipsList" SelectionChanged="ClipSelected" MouseDoubleClick="ClipDoubleClick" VirtualizingPanel.ScrollUnit="Pixel">
      <ListBox.ItemTemplate><DataTemplate>
       <Border x:Name="Card" Background="#202A32" CornerRadius="6" Padding="10" BorderThickness="2" BorderBrush="Transparent" PreviewMouseLeftButtonDown="ClipPressed" MouseMove="DragClip" MouseEnter="ClipEnter" MouseLeave="ClipLeave">

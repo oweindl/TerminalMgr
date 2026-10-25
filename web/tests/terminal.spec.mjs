@@ -246,3 +246,47 @@ test('Remote output remains terminal text and cannot create page HTML', async ({
   await expect(page.locator('.xterm-rows')).toContainText('<img');
   await expect(page.locator('img')).toHaveCount(0);
 });
+
+// The Web Speech dictation engine: the page runs the recognizer, the host only gets messages. A scripted recognizer stands in
+// for the browser's (WebView2 has no speech service, see docs/dictation-engines.md).
+async function installFakeRecognizer(page) {
+  await page.evaluate(() => {
+    window.__recognizers = [];
+    window.SpeechRecognition = window.webkitSpeechRecognition = class {
+      constructor() { window.__recognizers.push(this); this.calls = []; }
+      start() { this.calls.push('start'); queueMicrotask(() => this.onstart?.()); }
+      stop() { this.calls.push('stop'); queueMicrotask(() => this.onend?.()); }
+      abort() { this.calls.push('abort'); queueMicrotask(() => this.onend?.()); }
+      say(index, text, isFinal) { this.onresult?.({ resultIndex: index, results: Object.assign([Object.assign([{ transcript: text }], { isFinal })], { length: index + 1 }) }); }
+    };
+  });
+}
+const speech = page => page.evaluate(() => window.__messages.filter(m => m.type === 'speech'));
+
+test('Web Speech engine: start, provisional and final results, stop and end go back to the host', async ({page}) => {
+  await installFakeRecognizer(page);
+  await page.evaluate(() => window.__hostMessage({type:'speech', cmd:'start', lang:'de-DE'}));
+  await expect.poll(async () => (await speech(page)).map(m => m.event)).toEqual(['started']);
+  const settings = await page.evaluate(() => { const r = window.__recognizers[0]; return { lang: r.lang, continuous: r.continuous, interim: r.interimResults }; });
+  expect(settings).toEqual({ lang:'de-DE', continuous:true, interim:true });
+  await page.evaluate(() => window.__recognizers[0].say(0, 'Starte den', false));
+  await page.evaluate(() => window.__recognizers[0].say(0, 'Starte den Server', true));
+  await page.evaluate(() => window.__hostMessage({type:'speech', cmd:'stop'}));
+  await expect.poll(async () => (await speech(page)).map(m => m.event)).toEqual(['started', 'interim', 'final', 'end']);
+  const messagesSeen = await speech(page);
+  expect(messagesSeen[1]).toMatchObject({ index:0, text:'Starte den' });
+  expect(messagesSeen[2]).toMatchObject({ index:0, text:'Starte den Server' });
+  expect(await page.evaluate(() => window.__recognizers[0].calls)).toEqual(['start', 'stop']);
+});
+
+test('Web Speech engine: errors are reported, abort ends quietly, a missing API is reported as unsupported', async ({page}) => {
+  await installFakeRecognizer(page);
+  await page.evaluate(() => window.__hostMessage({type:'speech', cmd:'start', lang:'de-DE'}));
+  await page.evaluate(() => window.__recognizers[0].onerror?.({ error:'network' }));
+  expect((await speech(page)).some(m => m.event === 'error' && m.error === 'network')).toBe(true);
+  await page.evaluate(() => window.__hostMessage({type:'speech', cmd:'abort'}));
+  await expect.poll(async () => await page.evaluate(() => window.__recognizers[0].calls)).toEqual(['start', 'abort']);
+  await page.evaluate(() => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; window.__messages.length = 0; });
+  await page.evaluate(() => window.__hostMessage({type:'speech', cmd:'start'}));
+  await expect.poll(async () => (await speech(page)).map(m => m.event + ':' + (m.error ?? ''))).toEqual(['error:unsupported', 'end:']);
+});

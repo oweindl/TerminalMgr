@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Documents;
 using System.Windows.Media.Animation;
 using TerminalMgr.Core;
 using TerminalMgr.Windows;
@@ -10,8 +11,9 @@ namespace TerminalMgr.App;
 /// <summary>Dictation: panel above the terminal, record button, model consent, hand-over of the text to the session.</summary>
 public partial class MainWindow
 {
-    private DictationSession? _dictation;
-    private WhisperTranscriber? _transcriber;
+    private ISpeechEngine? _dictation;
+    private WebSpeechEngine? _webSpeech;
+    private WhisperTranscriber? _transcriber, _interimTranscriber;
     private string? _dictationTargetId;
     private int _dictationCaret;
     private CancellationTokenSource? _modelDownload;
@@ -59,15 +61,43 @@ public partial class MainWindow
         DictationBox.Text = "";
         DictationPartial.Visibility = Visibility.Collapsed;
         DictationStatus.Text = "Bereit";
+        // The panel lives in the right column; a hidden clipboard column comes back with it.
+        if (ClipboardColumn.Width.Value <= 0) ToggleClipboard(this, new RoutedEventArgs());
         DictationPanel.Visibility = Visibility.Visible;
-        if (!await EnsureModelAsync()) { CloseDictation(); return; }
+        UpdateDictationHeight();
+        var options = DictationSettings;
+        if (options.Engine == SpeechEngineIds.Whisper)
+        {
+            if (!await EnsureModelAsync(options.Model)) { CloseDictation(); return; }
+            // The small model for the provisional text is optional: without it the final model is asked again every second or so (slow).
+            if (_dictationOpen && options.InterimModel != options.Model) await EnsureModelAsync(options.InterimModel);
+            if (_dictationOpen) _ = WarmUpWhisperAsync(options);
+        }
         if (_dictationOpen) StartRecording();
     }
 
-    /// <summary>The model is never downloaded silently: the user is asked first and sees the progress.</summary>
-    private async Task<bool> EnsureModelAsync()
+    /// <summary>Loads the models and compiles the GPU kernels while the user starts talking, so that the first words are not delayed.</summary>
+    private async Task WarmUpWhisperAsync(DictationOptions options)
     {
-        var model = WhisperModels.Get(DictationSettings.Model);
+        try
+        {
+            _transcriber ??= new WhisperTranscriber();
+            _interimTranscriber ??= new WhisperTranscriber(interim: true);
+            if (WhisperModels.IsInstalled(WhisperModels.Get(options.InterimModel))) await _interimTranscriber.PrepareAsync(options);
+            await _transcriber.PrepareAsync(options);
+        }
+        catch (Exception ex) { StatusText.Text = "Diktat: Modell konnte nicht vorbereitet werden: " + ex.Message; }
+    }
+
+    /// <summary>Panel height: at most a third of the window; the text inside scrolls.</summary>
+    private void UpdateDictationHeight() => DictationPanel.MaxHeight = DictationLayout.MaxPanelHeight(ActualHeight);
+
+    private void DictationBoxChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => DictationScroll.ScrollToEnd();
+
+    /// <summary>The model is never downloaded silently: the user is asked first and sees the progress.</summary>
+    private async Task<bool> EnsureModelAsync(string modelName)
+    {
+        var model = WhisperModels.Get(modelName);
         if (WhisperModels.IsInstalled(model)) return true;
         var answer = MessageBox.Show(this,
             $"Für das Diktat wird einmalig das Spracherkennungsmodell „{model.Name}“ ({model.SizeText}) benötigt.\n\n" +
@@ -99,25 +129,54 @@ public partial class MainWindow
     {
         _dictation?.Dispose();
         var options = DictationSettings;
-        _transcriber ??= new WhisperTranscriber();
-        var transcriber = _transcriber;
-        var session = _dictation = new DictationSession(() => new MicrophoneSource(options.Microphone), transcriber, options);
-        // Session events come from worker threads; only the current session may touch the UI.
+        var session = _dictation = CreateEngine(options);
+        // Engine events come from worker threads; only the current engine may touch the UI.
         void Ui(Action action) => Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_dictation, session) && !_closing) action(); });
         session.StateChanged += state => Ui(() => ApplyDictationState(state));
         session.Level += level => Ui(() => DictationLevel.Value = level * 100);
-        session.Partial += text => Ui(() => {
-            DictationPartial.Text = "… " + text;
-            DictationPartial.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        });
+        session.Interim += (confirmed, tentative) => Ui(() => ShowInterim(confirmed, tentative));
         session.Completed += result => Ui(() => DictationCompleted(result));
-        session.Failed += ex => Ui(() => {
-            DictationStatus.Text = "Fehler: " + ex.Message;
-            StatusText.Text = "Diktat: " + ex.Message;
-        });
+        session.Failed += ex => Ui(() => DictationFailed(ex));
         _dictationCaret = Math.Clamp(DictationBox.SelectionStart, 0, DictationBox.Text.Length);
         DictationPartial.Visibility = Visibility.Collapsed;
         session.Start();
+    }
+
+    /// <summary>The recognizer chosen in the settings; Whisper falls back to the whole-segment provisional text when the small model is missing.</summary>
+    private ISpeechEngine CreateEngine(DictationOptions options)
+    {
+        _webSpeech = null;
+        switch (options.Engine)
+        {
+            case SpeechEngineIds.WebSpeech:
+                return _webSpeech = new WebSpeechEngine(Post, options);
+            case SpeechEngineIds.Windows:
+                return new WindowsSpeechEngine(options);
+            default:
+                _transcriber ??= new WhisperTranscriber();
+                _interimTranscriber ??= new WhisperTranscriber(interim: true);
+                bool smallModel = options.InterimModel != options.Model && WhisperModels.IsInstalled(WhisperModels.Get(options.InterimModel));
+                return new DictationSession(() => new MicrophoneSource(options.Microphone), _transcriber, options, interim: smallModel ? _interimTranscriber : null);
+        }
+    }
+
+    /// <summary>Confirmed words in the normal color, the tentative rest in italics: they may still change.</summary>
+    private void ShowInterim(string confirmed, string tentative)
+    {
+        DictationPartial.Inlines.Clear();
+        if (confirmed.Length > 0) DictationPartial.Inlines.Add(new Run(confirmed + " ") { Foreground = DictationBox.Foreground, FontStyle = FontStyles.Normal });
+        if (tentative.Length > 0) DictationPartial.Inlines.Add(new Run(tentative));
+        DictationPartial.Visibility = confirmed.Length + tentative.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DictationScroll.ScrollToEnd();
+    }
+
+    private void DictationFailed(Exception ex)
+    {
+        DictationStatus.Text = ex is SpeechUnavailableException ? "Engine nicht verfügbar" : "Fehler: " + ex.Message;
+        StatusText.Text = "Diktat: " + ex.Message;
+        if (ex is SpeechUnavailableException)
+            MessageBox.Show(this, ex.Message + "\n\nIn den Einstellungen unter „Diktat“ kann die Engine „Whisper (lokal, GPU)“ gewählt werden; sie braucht weder Dienst noch Schlüssel.",
+                "Diktat", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void ApplyDictationState(DictationState state)
@@ -156,6 +215,7 @@ public partial class MainWindow
     private void DictationCompleted(DictationResult result)
     {
         DictationPartial.Visibility = Visibility.Collapsed;
+        LogSpeechMetrics(result);
         if (result.Text.Length > 0)
         {
             // New text goes where the cursor was; the final text replaces the provisional one.
@@ -166,6 +226,16 @@ public partial class MainWindow
         }
         else DictationStatus.Text = "Keine Sprache erkannt";
         if (IsActive) DictationBox.Focus();
+    }
+
+    /// <summary>Measuring mode in the app (TERMINALMGR_SPEECH_METRICS=1): timings of each round go to the status line and to speech-metrics.log.</summary>
+    private void LogSpeechMetrics(DictationResult result)
+    {
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_SPEECH_METRICS") != "1" || _dictation is not { } engine) return;
+        string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {engine.Id}: {engine.Metrics.Summary()} · {result.Text.Length} Zeichen";
+        StatusText.Text = "Diktat: " + line;
+        try { System.IO.File.AppendAllText(System.IO.Path.Combine(_dataDirectory, "speech-metrics.log"), line + Environment.NewLine); }
+        catch (System.IO.IOException) { /* diagnostics only */ }
     }
 
     private void DictationBoxKeyDown(object sender, KeyEventArgs e)
@@ -230,5 +300,6 @@ public partial class MainWindow
         _modelDownload?.Cancel();
         _dictation?.Dispose();
         _transcriber?.Dispose();
+        _interimTranscriber?.Dispose();
     }
 }

@@ -119,9 +119,32 @@
     fitActive();
     send({ type:'created',id,cols:term.cols,rows:term.rows });
   }
+  // Dictation engine "Web Speech API": the host starts and stops the recognizer, the results go back as messages.
+  let recognition = null;
+  function speechCommand(m) {
+    const post = event => send({ type:'speech', ...event });
+    if (m.cmd === 'start') {
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Recognition) { post({ event:'error', error:'unsupported' }); post({ event:'end' }); return; }
+      recognition?.abort();
+      const r = recognition = new Recognition();
+      r.lang = m.lang || 'de-DE'; r.continuous = true; r.interimResults = true;
+      r.onstart = () => post({ event:'started' });
+      r.onresult = e => {
+        for (let i = e.resultIndex; i < e.results.length; i++)
+          post({ event: e.results[i].isFinal ? 'final' : 'interim', index:i, text:e.results[i][0].transcript });
+      };
+      r.onerror = e => post({ event:'error', error:e.error });
+      r.onend = () => { if (recognition === r) recognition = null; post({ event:'end' }); };
+      try { r.start(); } catch (x) { post({ event:'error', error:String(x) }); post({ event:'end' }); }
+    }
+    else if (m.cmd === 'stop') recognition?.stop();
+    else if (m.cmd === 'abort') { const r = recognition; recognition = null; r?.abort(); }
+  }
   window.chrome.webview.addEventListener('message', ({data:m}) => {
     const s = sessions.get(m.id);
     switch(m.type) {
+      case 'speech': speechCommand(m); break;
       case 'create': create(m.id); break;
       case 'select': select(m.id); break;
       case 'output': s?.term.write(m.data); break;
