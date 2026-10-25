@@ -130,7 +130,7 @@ try {
     Write-Host "Desktop:   $(Join-Path $desktop 'TerminalMgr.lnk')"
     Write-Host "Startmenü: $(Join-Path $programs 'TerminalMgr.lnk')"
 
-    $version = (Get-Item $exe).VersionInfo.ProductVersion
+    $version = ((Get-Item $exe).VersionInfo.ProductVersion -split '\+')[0]   # ohne angehängten Commit-Hash
     Write-Host ''
     Write-Host "TerminalMgr $version installiert in $installDir" -ForegroundColor Green
     if ($Start) { Start-Process $exe -WorkingDirectory $installDir }
