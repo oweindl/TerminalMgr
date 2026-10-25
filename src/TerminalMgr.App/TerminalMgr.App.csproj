@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/TerminalMgr.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../TerminalMgr.Windows/TerminalMgr.Windows.csproj" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <Resource Include="Assets/TerminalMgr.ico" />
+    <Resource Include="Assets/TerminalMgr.png" />
+    <Content Include="Terminal/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CheckTerminalAssets" BeforeTargets="PrepareForBuild" Condition="!Exists('Terminal/vendor/xterm.js')">
+    <Error Text="Terminal-Assets fehlen. Zuerst in web: npm ci und npm run bundle ausführen." />
+  </Target>
+</Project>
