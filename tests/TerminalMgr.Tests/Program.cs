@@ -522,6 +522,36 @@ try
         Check((new StartupRegistration().CurrentCommand() ?? "") == realBefore, "The real autostart entry was touched");
     });
 
+    Test("OSC 52: write requests decode to text (UTF-8, selection names, line breaks in base64)", () =>
+    {
+        string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
+        Check(Osc52.TryDecode("c;" + B64("Hallo Welt"), out var t1) && t1 == "Hallo Welt", "Plain");
+        Check(Osc52.TryDecode(";" + B64("ohne Auswahl"), out var t2) && t2 == "ohne Auswahl", "Empty selection");
+        Check(Osc52.TryDecode("cp;" + B64("äöü ß 日本\nzweite Zeile\ttab"), out var t3) && t3 == "äöü ß 日本\nzweite Zeile\ttab", "Unicode and layout");
+        Check(Osc52.TryDecode("c;" + B64("abc").Insert(2, "\r\n"), out var t4) && t4 == "abc", "Whitespace inside base64 must be ignored");
+        Check(Osc52.TryDecode("c;" + B64("ab").TrimEnd('='), out var t5) && t5 == "ab", "Missing padding is tolerated");
+        Check(Osc52.TryDecode("s0;" + B64("x"), out _), "Cut buffer names");
+    });
+    Test("OSC 52: read requests, clears, garbage and oversize are never acted upon", () =>
+    {
+        foreach (string bad in new[] { null!, "", "c;?", ";?", "c;", "c", "c;!!!not base64!!!", "c;A", "x;SGVsbG8=", "c;" + Convert.ToBase64String([0xff, 0xfe, 0xfd]) })
+            Check(!Osc52.TryDecode(bad, out var text) && text == "", "Accepted '" + bad + "'");
+        string tooLarge = Convert.ToBase64String(Encoding.UTF8.GetBytes(new string('a', ClipboardList.MaxTextLength + 1)));
+        Check(!Osc52.TryDecode("c;" + tooLarge, out _), "Oversize accepted");
+        Check(Osc52.TryDecode("c;" + Convert.ToBase64String(Encoding.UTF8.GetBytes(new string('a', ClipboardList.MaxTextLength))), out var max) && max.Length == ClipboardList.MaxTextLength, "Maximum size refused");
+    });
+    Test("OSC 52 is on by default and old settings files keep that", () =>
+    {
+        Check(new AppSettings().AcceptOsc52, "Default off");
+        var directory = Path.Combine(root, "osc52");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "settings.json"), "{\"FontSize\":13}");
+        Check(new SettingsStore(directory).Load().AcceptOsc52, "Old file turned it off");
+        var store = new SettingsStore(Path.Combine(root, "osc52b"));
+        store.Save(new() { AcceptOsc52 = false });
+        Check(!store.Load().AcceptOsc52, "Round trip");
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");
@@ -674,6 +704,7 @@ if (args.Contains("--ssh-smoke"))
         passed++; Console.WriteLine("PASS Real SSH tmux session discovery: " + sessions.Count + " sessions");
         passed += await RealTmuxWindowScenario();
         passed += await RealExitCodeScenario();
+        passed += await RealOsc52Scenario();
     }
     catch (Exception ex) { failures.Add("SSH smoke: " + ex.Message); Console.WriteLine("FAIL " + ex.Message); }
     finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
@@ -743,6 +774,56 @@ if (args.Any(a => a.StartsWith("--whisper-smoke")))
 }
 Console.WriteLine($"{passed} passed, {failures.Count} failed");
 Environment.ExitCode = failures.Count == 0 ? 0 : 1;
+
+// Does tmux hand a copy of Claude Code on to the terminal as OSC 52 without any change of the tmux configuration?
+// Claude Code copies with "tmux load-buffer -w -"; the same command is used here on a throw-away session with an attached client.
+async Task<int> RealOsc52Scenario()
+{
+    string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
+    var profile = new Profile { Name = "linuxdev", Destination = "linuxdev" };
+    async Task<string> Remote(string command)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "linuxdev", command }) start.ArgumentList.Add(a);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        return await stdout + await stderr;
+    }
+    PtySession? client = null;
+    try
+    {
+        await Remote("tmux kill-session -t tmgr-osc 2>/dev/null; tmux new-session -d -s tmgr-osc && true");
+        string setClipboard = (await Remote("tmux show-options -s set-clipboard")).Trim();
+        var session = (await new TmuxSessionQuery().ListAsync(profile)).Single(s => s.Name == "tmgr-osc");
+        var screen = new StringBuilder();
+        client = new PtySession();
+        client.Output += s => { lock (screen) screen.Append(s); };
+        client.Start(ssh, SshCommand.TmuxAttachArguments(profile, session.Id), 120, 30);
+        await Task.Delay(1500);
+        const string copied = "Claude Code kopiert: äöü mit Umlauten\nund zweiter Zeile";
+        await Remote("printf '%s' " + SshCommand.ShellQuote(copied) + " | tmux load-buffer -w -");
+        string payload = "";
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < deadline && payload.Length == 0)
+        {
+            string text; lock (screen) text = screen.ToString();
+            var match = System.Text.RegularExpressions.Regex.Match(text, "\u001b\\]52;([^\u0007\u001b]*)(?:\u0007|\u001b\\\\)");
+            if (match.Success) payload = match.Groups[1].Value;
+            else await Task.Delay(100);
+        }
+        Check(payload.Length > 0, $"tmux did not forward OSC 52 (set-clipboard: '{setClipboard}'). Add 'set -s set-clipboard on' to ~/.tmux.conf.");
+        Check(Osc52.TryDecode(payload, out var decoded) && decoded == copied, "Forwarded text differs: " + payload);
+        Console.WriteLine($"PASS Real tmux forwards a copy of Claude Code as OSC 52 without extra configuration ({setClipboard})");
+        return 1;
+    }
+    finally
+    {
+        if (client is not null) await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await Remote("tmux kill-session -t tmgr-osc 2>/dev/null; true");
+    }
+}
 
 // Which exit code does OpenSSH give for a dropped connection and for normal ends? The reconnect option relies on it.
 async Task<int> RealExitCodeScenario()

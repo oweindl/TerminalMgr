@@ -24,6 +24,7 @@
   }
   const parseModifier = text => { const s = parseShortcut(text + '+X'); return { ctrl:s.ctrl, alt:s.alt, shift:s.shift }; };
   // Defaults until the host sends the configured ones: dictation, copy, paste, and Alt+1..9 for switching sessions.
+  const terminalSettings = { osc52:true, debug:false };
   let shortcuts = [parseShortcut('Ctrl+Y', 'dictation'), parseShortcut('Ctrl+Shift+C', 'copy'), parseShortcut('Ctrl+Shift+V', 'paste')];
   let sessionModifier = parseModifier('Alt');
   // Terminals pad lines with spaces up to the window width; copied text must not carry them.
@@ -55,7 +56,12 @@
     term.loadAddon(fit);
     term.open(element);
     // Clipboard is only changed through an explicit copy action.
-    term.parser.registerOscHandler(52, () => true);
+    // OSC 52 ("set clipboard"): tmux forwards what Claude Code or copy-mode copies this way. Write requests go to the host,
+    // which decodes and validates them; read requests ("?") are never answered, so a program can not read the clipboard.
+    term.parser.registerOscHandler(52, data => {
+      if (terminalSettings.osc52 && data.length <= 4_000_000) send({ type:'osc52', id, data });
+      return true;
+    });
     term.onData(data => send({ type:'input',id,data }));
     term.onResize(({cols,rows}) => send({ type:'resize',id,cols,rows }));
     // Copies the selection (without padding spaces) to the host and clears it, so the next right click pastes.
@@ -83,12 +89,24 @@
     // PuTTY-style mouse: right click copies a selection (and clears it), otherwise pastes the active
     // clipboard entry. The right button is never forwarded to the session, even with mouse tracking
     // (tmux "mouse on", vim, htop). Shift + left drag still selects locally.
+    // The selection is taken when the right button goes down: later output (tmux status line, redraws) may clear it
+    // before the contextmenu event arrives.
+    let rightSelection = '';
     for (const type of ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'auxclick'])
-      element.addEventListener(type, e => { if (e.button === 2) e.stopPropagation(); }, true);
+      element.addEventListener(type, e => {
+        if (e.button !== 2) return;
+        if (e.type === 'mousedown' || e.type === 'pointerdown') rightSelection = term.hasSelection() ? term.getSelection() : '';
+        e.stopPropagation();
+      }, true);
     element.addEventListener('contextmenu', e => {
       e.preventDefault();
       e.stopPropagation();
-      if (term.hasSelection()) copySelection(); else send({ type:'contextPaste',id });
+      const text = trimTrailingSpaces(rightSelection || (term.hasSelection() ? term.getSelection() : ''));
+      rightSelection = '';
+      if (terminalSettings.debug)
+        send({ type:'diag', id, text:`Rechtsklick: Markierung ${text.length} Zeichen, Maus-Tracking ${term.modes.mouseTrackingMode}` });
+      if (text) { term.clearSelection(); send({ type:'copy',id,text }); }
+      else send({ type:'contextPaste',id });
     }, true);
     element.addEventListener('dragover', e => e.preventDefault());
     element.addEventListener('drop', e => {
@@ -112,6 +130,10 @@
         // "Paste and run": Enter goes through the same input path, so it always follows the pasted text.
         if (m.enter) s?.term.input('\r', true);
         s?.term.focus();
+        break;
+      case 'terminalSettings':
+        terminalSettings.osc52 = m.osc52 !== false;
+        terminalSettings.debug = m.debug === true;
         break;
       case 'shortcuts':
         shortcuts = Object.entries(m.shortcuts ?? {}).map(([action, text]) => parseShortcut(text, action));

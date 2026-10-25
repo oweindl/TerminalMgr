@@ -178,6 +178,69 @@ test('Paste without run does not press Enter', async ({page}) => {
   expect((await inputs(page)).join('')).toBe('nur text');
 });
 
+const b64 = text => Buffer.from(text, 'utf8').toString('base64');
+const output = (page, data) => page.evaluate(d => window.__hostMessage({type:'output',id:'one',data:d}), data);
+
+test('OSC 52 from tmux (Claude Code copy) reaches the host while mouse tracking is on; BEL and ST both work', async ({page}) => {
+  await output(page, '\x1b[?1000h\x1b[?1006h\x1b[?25l● Claude Code\r\n> markierter Satz\r\n');
+  await output(page, `\x1b]52;c;${b64('markierter Satz')}\x07`);
+  await output(page, `\x1b]52;;${b64('zweiter Text mit Umlauten äöü')}\x1b\\`);
+  await expect.poll(async () => (await messages(page, 'osc52')).length).toBe(2);
+  const sent = await messages(page, 'osc52');
+  expect(sent[0]).toMatchObject({id:'one', data:`c;${b64('markierter Satz')}`});
+  expect(sent[1].data).toBe(`;${b64('zweiter Text mit Umlauten äöü')}`);
+  await expect(page.locator('.xterm-rows')).toContainText('markierter Satz'); // the sequence itself stays invisible
+  await expect(page.locator('.xterm-rows')).not.toContainText(']52');
+});
+
+test('OSC 52 read requests are never answered and the sequence can be switched off', async ({page}) => {
+  await output(page, '\x1b]52;c;?\x07');
+  await page.waitForTimeout(200);
+  expect(await inputs(page)).toEqual([]); // no reply that would reveal the clipboard
+  await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:false, debug:false}));
+  await output(page, `\x1b]52;c;${b64('ignoriert')}\x07`);
+  await page.waitForTimeout(200);
+  const writes = (await messages(page, 'osc52')).filter(m => m.data.endsWith(b64('ignoriert')));
+  expect(writes).toHaveLength(0);
+  await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:true, debug:false}));
+  await output(page, `\x1b]52;c;${b64('wieder an')}\x07`);
+  await expect.poll(async () => (await messages(page, 'osc52')).some(m => m.data.endsWith(b64('wieder an')))).toBe(true);
+});
+
+test('Right click copies the selection even if output arrives between pressing and releasing the button', async ({page}) => {
+  // Realistic: tmux keeps redrawing its status line and Claude Code keeps streaming while the user selects with Shift+drag.
+  await output(page, '\x1b[?1000h\x1b[?1006h');
+  const lines = Array.from({length: 12}, (_, i) => `Ausgabezeile ${i + 1} mit etwas Text`).join('\r\n');
+  await output(page, lines + '\r\n');
+  await expect(page.locator('.xterm-rows')).toContainText('Ausgabezeile 12');
+  const row = page.locator('.xterm-rows > div').nth(2);
+  const box = await row.boundingBox();
+  const y = box.y + box.height / 2;
+  await page.keyboard.down('Shift');
+  await page.mouse.move(box.x + 2, y);
+  await page.mouse.down();
+  await output(page, '\x1b[s\x1b[1;1H\x1b[7m[main] 0:bash*\x1b[0m\x1b[u');       // status line redraw while dragging
+  await page.mouse.move(box.x + 150, y, {steps:5});
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await page.mouse.move(box.x + 60, y);
+  await page.mouse.down({button:'right'});
+  await output(page, '\x1b[s\x1b[1;1H\x1b[7m[main] 0:bash*\x1b[0m\x1b[u\x1b[?25l');   // more output before the button is released
+  await page.mouse.up({button:'right'});
+  await expect.poll(async () => (await messages(page, 'copy')).length).toBe(1);
+  expect((await messages(page, 'copy'))[0].text).toMatch(/Ausgabezeile/);
+  expect(await messages(page, 'contextPaste')).toHaveLength(0);
+  expect(await inputs(page)).not.toContain('\x1b[<2;'); // the right button never reaches the program
+});
+
+test('Debug mode reports selection and mouse tracking mode of a right click', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:true, debug:true}));
+  await output(page, '\x1b[?1002h\x1b[?1006hzeile\r\n');
+  await page.locator('.xterm-rows > div').first().click({button:'right'});
+  await expect.poll(async () => (await messages(page, 'diag')).length).toBe(1);
+  expect((await messages(page, 'diag'))[0].text).toMatch(/Markierung 0 Zeichen, Maus-Tracking drag/);
+});
+
 test('Remote output remains terminal text and cannot create page HTML', async ({page}) => {
   await page.evaluate(() => window.__hostMessage({type:'output',id:'one',data:'<img src=x onerror=alert(1)>'}));
   await expect(page.locator('.xterm-rows')).toContainText('<img');
