@@ -191,6 +191,241 @@ try
         Check(!ClipboardCapturePolicy.ShouldCapture(false, false, null, false), "Non-text captured");
     });
 
+    // Synthetic 16 kHz audio: a 220 Hz tone at the given amplitude (0..1) or silence (amplitude 0).
+    short[] Tone(double seconds, double amplitude) => Enumerable.Range(0, (int)(seconds * 16000))
+        .Select(i => (short)(Math.Sin(2 * Math.PI * 220 * i / 16000.0) * amplitude * short.MaxValue)).ToArray();
+    StopReason Run(SilenceDetector detector, params short[][] parts)
+    {
+        foreach (var part in parts) detector.Feed(part);
+        return detector.Reason;
+    }
+    Test("Shortcut parsing accepts modifier combinations and normalizes them", () =>
+    {
+        Check(Shortcut.Parse("ctrl+y") == new Shortcut(true, false, false, "Y") && Shortcut.Parse("ctrl+y").ToString() == "Ctrl+Y", "Ctrl+Y");
+        Check(Shortcut.Parse("Shift + Strg + d").ToString() == "Ctrl+Shift+D", "Order or German modifier");
+        Check(Shortcut.Parse("Alt+1").ToString() == "Alt+1" && Shortcut.Parse("F5").ToString() == "F5" && Shortcut.Parse("Ctrl+Enter").ToString() == "Ctrl+Enter", "Digits, F-keys, Enter");
+        Check(Shortcut.Parse("Ctrl+Escape").Key == "Esc" && Shortcut.Parse("Alt+.").Key == ".", "Aliases and punctuation");
+    });
+    Test("Shortcut parsing rejects keys that would swallow normal typing", () =>
+    {
+        foreach (string bad in new[] { "", "Y", "Shift+Y", "Ctrl+", "Ctrl+Ctrl+Y", "Ctrl+Y+Z", "Ctrl+Pfeil", "+", "Ctrl+F13" })
+            Check(!Shortcut.TryParse(bad, out _), "Accepted '" + bad + "'");
+        Check(Shortcut.TryParse("F12", out _) && Shortcut.TryParse("F1", out _), "F-keys without modifier must be allowed");
+    });
+    Test("Shortcut matching uses the modifier set exactly and DOM key codes", () =>
+    {
+        var s = Shortcut.Parse("Ctrl+Y");
+        Check(s.Matches(true, false, false, Shortcut.FromDomCode("KeyY")), "Ctrl+Y not matched");
+        Check(!s.Matches(true, false, true, "Y") && !s.Matches(true, true, false, "Y") && !s.Matches(false, false, false, "Y") && !s.Matches(true, false, false, "Z"), "Too lenient");
+        Check(Shortcut.FromDomCode("Digit7") == "7" && Shortcut.FromDomCode("F9") == "F9" && Shortcut.FromDomCode("Escape") == "Esc" && Shortcut.FromDomCode("ArrowUp") == "Up" && Shortcut.FromDomCode("ShiftLeft") is null, "DOM mapping");
+    });
+    Test("Silence detection: speech then 1.5 s of silence ends the recording", () =>
+    {
+        var d = new SilenceDetector();
+        Check(Run(d, Tone(1.0, 0.2), Tone(1.4, 0)) == StopReason.None && d.SpeechHeard, "Stopped too early");
+        Check(Run(d, Tone(0.2, 0)) == StopReason.Silence, "Did not stop after 1.5 s");
+        Check(d.Elapsed >= TimeSpan.FromSeconds(2.45) && d.Elapsed <= TimeSpan.FromSeconds(2.7), "Elapsed " + d.Elapsed);
+    });
+    Test("Silence detection: pauses shorter than the limit do not end the recording", () =>
+    {
+        var d = new SilenceDetector();
+        Check(Run(d, Tone(0.5, 0.2), Tone(1.2, 0), Tone(0.5, 0.2), Tone(1.2, 0), Tone(0.5, 0.2)) == StopReason.None, "Cut off inside a sentence");
+    });
+    Test("Silence detection: nothing said ends after 5 s, leading silence alone does not end a dictation", () =>
+    {
+        var quiet = new SilenceDetector();
+        Check(Run(quiet, Tone(4.8, 0)) == StopReason.None && Run(quiet, Tone(0.4, 0)) == StopReason.NoSpeech && !quiet.SpeechHeard, "No-speech timeout");
+        var late = new SilenceDetector();
+        Check(Run(late, Tone(3.0, 0), Tone(1.0, 0.2)) == StopReason.None && late.SpeechHeard, "Late speech must be accepted");
+        Check(Run(late, Tone(1.6, 0)) == StopReason.Silence, "Silence after late speech");
+    });
+    Test("Silence detection: background noise below the threshold and a short click count as silence", () =>
+    {
+        var noise = new SilenceDetector();
+        Check(Run(noise, Tone(5.2, 0.005)) == StopReason.NoSpeech && !noise.SpeechHeard, "Quiet noise taken as speech");
+        var click = new SilenceDetector();
+        Check(Run(click, Tone(0.01, 0.9), Tone(5.2, 0)) == StopReason.NoSpeech && !click.SpeechHeard, "Click taken as speech");
+    });
+    Test("Silence detection: duration and threshold are adjustable; level meter follows loudness", () =>
+    {
+        var fast = new SilenceDetector(silenceSeconds: 0.5);
+        Check(Run(fast, Tone(0.3, 0.2), Tone(0.6, 0)) == StopReason.Silence, "0.5 s limit ignored");
+        var strict = new SilenceDetector(threshold: 0.3);
+        Check(Run(strict, Tone(1.0, 0.2), Tone(4.5, 0)) == StopReason.NoSpeech, "Threshold ignored");
+        var meter = new SilenceDetector();
+        meter.Feed(Tone(0.1, 0)); double silent = meter.Level;
+        meter.Feed(Tone(0.1, 0.5)); double loud = meter.Level;
+        Check(silent == 0 && loud > 0.9 && loud <= 1, $"Level {silent}/{loud}");
+    });
+    Test("Dictation text: non-speech markers, control characters and doubled spaces are removed", () =>
+    {
+        Check(DictationText.Clean(" [BLANK_AUDIO] ") == "", "Blank audio");
+        Check(DictationText.Clean(" Starte tmux  neu (Musik) [Applaus] ♪ jetzt\x1b[0m.\n") == "Starte tmux neu jetzt[0m.", "Mixed: " + DictationText.Clean(" Starte tmux  neu (Musik) [Applaus] ♪ jetzt\x1b[0m.\n"));
+        Check(DictationText.Clean("Ruf foo(bar) auf") == "Ruf foo(bar) auf" && DictationText.Clean("*Musik* Hallo") == "Hallo", "Legitimate parentheses must stay");
+    });
+    Test("Dictation text: new text goes to the caret with spaces only where words would touch", () =>
+    {
+        Check(DictationText.InsertAtCaret("", 0, "Hallo") == ("Hallo", 5), "Empty");
+        Check(DictationText.InsertAtCaret("Hallo", 5, "Welt") == ("Hallo Welt", 10), "Append needs a space");
+        Check(DictationText.InsertAtCaret("Hallo Welt", 5, "liebe") == ("Hallo liebe Welt", 11), "Middle needs spaces on both sides");
+        Check(DictationText.InsertAtCaret("Hallo ", 6, "Welt") == ("Hallo Welt", 10), "No double space after blank");
+        Check(DictationText.InsertAtCaret("Hallo Welt", 5, ", du") == ("Hallo, du Welt", 9), "Punctuation sticks to the word before");
+        Check(DictationText.InsertAtCaret("Hallo", 99, "x").Text == "Hallo x" && DictationText.InsertAtCaret("a", -3, "b").Text == "b a", "Caret is clamped");
+    });
+    Test("Dictation text: paste text loses control characters and surrounding blank lines but keeps inner lines and tabs", () =>
+    {
+        Check(DictationText.ForPaste("\n  zeile eins\x1b[31m\r\n\tzeile zwei\x03\n\n") == "zeile eins[31m\n\tzeile zwei", "Paste text: " + DictationText.ForPaste("\n  zeile eins\x1b[31m\r\n\tzeile zwei\x03\n\n"));
+    });
+    Test("Whisper models live in the user's model folder and are recognized by size and magic", () =>
+    {
+        Check(WhisperModels.Get(null).Name == WhisperModels.DefaultName && WhisperModels.Get("unbekannt").Name == WhisperModels.DefaultName && WhisperModels.Get("SMALL").Name == "small", "Lookup");
+        var turbo = WhisperModels.Get("large-v3-turbo-q5_0");
+        Check(turbo.Url.ToString() == "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin", "URL " + turbo.Url);
+        Check(turbo.SizeText.StartsWith("ca. 0") && turbo.SizeText.EndsWith(" GB") && WhisperModels.Get("tiny").SizeText == "ca. 78 MB", "Size text: " + turbo.SizeText);
+        Check(WhisperModels.PathOf(turbo).StartsWith(AppPaths.ModelsDirectory()) && !AppPaths.IsInside(WhisperModels.PathOf(turbo), AppContext.BaseDirectory), "Model path");
+        var tiny = WhisperModels.Get("tiny");
+        var directory = Path.Combine(root, "models");
+        Directory.CreateDirectory(directory);
+        Check(!WhisperModels.IsInstalled(tiny, directory), "Missing file reported as installed");
+        File.WriteAllBytes(WhisperModels.PathOf(tiny, directory), "lmgg"u8.ToArray());
+        Check(!WhisperModels.IsInstalled(tiny, directory) && WhisperModels.LooksLikeModel(WhisperModels.PathOf(tiny, directory)), "Truncated download accepted or magic missed");
+        using (var stream = File.OpenWrite(WhisperModels.PathOf(tiny, directory))) stream.SetLength(tiny.ApproxBytes);
+        Check(WhisperModels.IsInstalled(tiny, directory), "Full-size file not accepted");
+        File.WriteAllText(Path.Combine(directory, "other.bin"), "<html>");
+        Check(!WhisperModels.LooksLikeModel(Path.Combine(directory, "other.bin")) && !WhisperModels.LooksLikeModel(Path.Combine(directory, "gibtsnicht.bin")), "HTML error page taken as model");
+    });
+    Test("Dictation options: defaults, round trip and normalization of bad values", () =>
+    {
+        var defaults = new AppSettings().Dictation;
+        Check(defaults.Shortcut == "Ctrl+Y" && defaults.Language == "de" && defaults.SilenceSeconds == 1.5 && defaults.Model == "large-v3-turbo-q5_0" && defaults.InitialPrompt.Contains("tmux"), "Defaults");
+        var store = new SettingsStore(Path.Combine(root, "dictation"));
+        store.Save(new() { Dictation = defaults with { Microphone = "Headset", Language = "auto", Shortcut = "Ctrl+Shift+D" } });
+        var loaded = store.Load().Dictation;
+        Check(loaded.Microphone == "Headset" && loaded.Language == "auto" && loaded.Shortcut == "Ctrl+Shift+D", "Round trip");
+        var fixedUp = (defaults with { Shortcut = "Y", Language = "fr", Model = "x", SilenceSeconds = 99, LevelThreshold = 0 }).Normalized();
+        Check(fixedUp.Shortcut == "Ctrl+Y" && fixedUp.Language == "de" && fixedUp.Model == WhisperModels.DefaultName && fixedUp.SilenceSeconds == 10 && fixedUp.LevelThreshold == 0.002, "Normalization");
+    });
+
+    bool WaitUntil(Func<bool> condition, int milliseconds = 8000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(milliseconds);
+        while (DateTime.UtcNow < deadline) { if (condition()) return true; Thread.Sleep(10); }
+        return condition();
+    }
+    void FeedSeconds(FakeSource source, double seconds, double amplitude)
+    {
+        for (double t = 0; t < seconds - 1e-9; t += 0.1) source.Feed(Tone(0.1, amplitude));
+    }
+    (DictationSession Session, List<string> Partials, List<DictationState> States, List<DictationResult> Results, List<Exception> Errors) Observe(DictationSession session)
+    {
+        var partials = new List<string>(); var states = new List<DictationState>(); var results = new List<DictationResult>(); var errors = new List<Exception>();
+        session.Partial += t => { lock (partials) partials.Add(t); };
+        session.StateChanged += s => { lock (states) states.Add(s); };
+        session.Completed += r => { lock (results) results.Add(r); };
+        session.Failed += e => { lock (errors) errors.Add(e); };
+        return (session, partials, states, results, errors);
+    }
+    Test("Dictation: provisional text while speaking, ends after 1.5 s of silence, final text replaces it", () =>
+    {
+        var source = new FakeSource();
+        var transcriber = new FakeTranscriber { Responder = samples => samples > 3.2 * 16000 ? "Das ist der endgültige Text" : "Das ist" };
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions(), partialSeconds: 1.0));
+        o.Session.Start();
+        FeedSeconds(source, 2.0, 0.2);
+        Check(WaitUntil(() => { lock (o.Partials) return o.Partials.Count > 0; }), "No provisional text while speaking");
+        Check(o.Results.Count == 0 && o.Session.State == DictationState.Recording, "Ended while speaking");
+        FeedSeconds(source, 1.7, 0);
+        Check(WaitUntil(() => { lock (o.Results) return o.Results.Count > 0; }), "No final result");
+        Check(o.Results[0].Text == "Das ist der endgültige Text" && o.Results[0].Reason == StopReason.Silence && !o.Results[0].Manual, "Final result: " + o.Results[0]);
+        Check(transcriber.Calls.Last() >= 3.4 * 16000, "Final run must see the whole segment, saw " + transcriber.Calls.Last());
+        Check(o.States.SequenceEqual([DictationState.Recording, DictationState.Processing, DictationState.Idle]), "States: " + string.Join(",", o.States));
+        Check(WaitUntil(() => source.Disposed), "Microphone not released");
+    });
+    Test("Dictation: no speech for 5 s ends without calling the recognizer", () =>
+    {
+        var source = new FakeSource(); var transcriber = new FakeTranscriber();
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions()));
+        o.Session.Start();
+        FeedSeconds(source, 5.2, 0);
+        Check(WaitUntil(() => { lock (o.Results) return o.Results.Count > 0; }), "No result");
+        Check(o.Results[0].Text == "" && o.Results[0].Reason == StopReason.NoSpeech && transcriber.Calls.Count == 0, "Silence was transcribed");
+    });
+    Test("Dictation: manual stop transcribes what was said; cancel reports nothing and allows a new round", () =>
+    {
+        var source = new FakeSource(); var transcriber = new FakeTranscriber { Responder = _ => "fertig" };
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions()));
+        o.Session.Start();
+        FeedSeconds(source, 1.0, 0.2);
+        o.Session.Stop();
+        Check(WaitUntil(() => { lock (o.Results) return o.Results.Count > 0; }) && o.Results[0] is { Text: "fertig", Manual: true }, "Manual stop");
+        var second = new FakeSource();
+        var o2 = Observe(new DictationSession(() => second, transcriber, new DictationOptions()));
+        o2.Session.Start();
+        FeedSeconds(second, 1.0, 0.2);
+        o2.Session.Cancel();
+        Thread.Sleep(300);
+        Check(o2.Results.Count == 0 && o2.Session.State == DictationState.Idle && WaitUntil(() => second.Disposed), "Cancel must not report a result");
+        FeedSeconds(second, 1.0, 0.2); // late audio of the canceled round is ignored
+        Check(o2.Results.Count == 0 && o2.Partials.Count == 0, "Late audio leaked into the next round");
+    });
+    Test("Dictation: recognizer errors and a missing microphone are reported and leave the session usable", () =>
+    {
+        var source = new FakeSource(); var transcriber = new FakeTranscriber { Error = new InvalidOperationException("Modell kaputt") };
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions()));
+        o.Session.Start();
+        FeedSeconds(source, 1.0, 0.2);
+        o.Session.Stop();
+        Check(WaitUntil(() => o.Errors.Count > 0) && o.Errors[0].Message == "Modell kaputt" && o.Session.State == DictationState.Idle && o.Results.Count == 0, "Recognizer error");
+        var broken = new FakeSource { StartError = new InvalidOperationException("Es ist kein Mikrofon vorhanden.") };
+        var o2 = Observe(new DictationSession(() => broken, new FakeTranscriber(), new DictationOptions()));
+        o2.Session.Start();
+        Check(WaitUntil(() => o2.Errors.Count > 0) && o2.Session.State == DictationState.Idle, "Microphone error");
+        o2.Session.Start();
+        Check(o2.Errors.Count == 2, "Session unusable after an error");
+        var unplugged = new FakeSource();
+        var o3 = Observe(new DictationSession(() => unplugged, new FakeTranscriber(), new DictationOptions()));
+        o3.Session.Start();
+        FeedSeconds(unplugged, 0.5, 0.2);
+        unplugged.Break(new IOException("Mikrofon getrennt"));
+        Check(WaitUntil(() => o3.Errors.Count > 0) && o3.Session.State == DictationState.Idle && o3.Results.Count == 0, "Unplugged microphone");
+    });
+    Test("Dictation: provisional recognition never runs twice at the same time", () =>
+    {
+        var source = new FakeSource(); var transcriber = new FakeTranscriber { Delay = 150, Responder = _ => "x" };
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions(), partialSeconds: 0.3));
+        o.Session.Start();
+        FeedSeconds(source, 3.0, 0.2);
+        Check(WaitUntil(() => transcriber.Calls.Count > 0), "No provisional run");
+        o.Session.Cancel();
+        Check(transcriber.MaxConcurrent == 1, "Concurrent runs: " + transcriber.MaxConcurrent);
+    });
+    Test("Model download: progress, atomic placement, rejection of HTML pages and clean cancel", () =>
+    {
+        var tiny = WhisperModels.Get("tiny");
+        var directory = Path.Combine(root, "download");
+        var good = new byte[1_000_000]; "lmgg"u8.CopyTo(good);
+        var progress = new List<(long, long)>();
+        ModelDownloader.DownloadAsync(tiny, directory, new Progress<(long, long)>(p => { lock (progress) progress.Add(p); }), CancellationToken.None,
+            new Uri("https://example.invalid/m.bin"), new StubHandler(() => new MemoryStream(good), good.Length)).GetAwaiter().GetResult();
+        string target = WhisperModels.PathOf(tiny, directory);
+        Check(File.Exists(target) && new FileInfo(target).Length == good.Length && !File.Exists(target + ".part"), "Download not placed");
+        Check(WaitUntil(() => { lock (progress) return progress.Count > 0 && progress[^1] == (good.Length, good.Length); }, 2000), "Progress incomplete");
+        File.Delete(target);
+
+        bool rejected = false;
+        try { ModelDownloader.DownloadAsync(tiny, directory, null, CancellationToken.None, new Uri("https://example.invalid/m.bin"),
+            new StubHandler(() => new MemoryStream("<html>404</html>"u8.ToArray()), 16)).GetAwaiter().GetResult(); }
+        catch (InvalidDataException) { rejected = true; }
+        Check(rejected && !File.Exists(target) && !File.Exists(target + ".part"), "HTML page accepted as model");
+
+        using var cts = new CancellationTokenSource();
+        var hang = Task.Run(async () => { try { await ModelDownloader.DownloadAsync(tiny, directory, null, cts.Token, new Uri("https://example.invalid/m.bin"),
+            new StubHandler(() => new HangingStream(), 10_000_000)); return false; } catch (OperationCanceledException) { return true; } });
+        Check(WaitUntil(() => File.Exists(target + ".part")), "Download did not start");
+        cts.Cancel();
+        Check(hang.Wait(5000) && hang.Result && !File.Exists(target) && !File.Exists(target + ".part"), "Cancel left files behind");
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");
@@ -346,6 +581,69 @@ if (args.Contains("--ssh-smoke"))
     catch (Exception ex) { failures.Add("SSH smoke: " + ex.Message); Console.WriteLine("FAIL " + ex.Message); }
     finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
 }
+if (args.Any(a => a.StartsWith("--whisper-smoke")))
+{
+    // Real whisper.cpp through Whisper.net on speech synthesized by Windows (no microphone needed).
+    // The model is downloaded once into a temp folder, never into the repository. Usage: --whisper-smoke[=tiny|small-q5_1|...]
+    string modelName = args.First(a => a.StartsWith("--whisper-smoke")).Split('=', 2) is { Length: 2 } parts ? parts[1] : "tiny";
+    try
+    {
+        var model = WhisperModels.Get(modelName);
+        string directory = Path.Combine(Path.GetTempPath(), "TerminalMgr-whisper-smoke");
+        if (!WhisperModels.IsInstalled(model, directory))
+        {
+            Console.WriteLine($"Downloading {model.Name} ({model.SizeText}) ...");
+            long last = 0;
+            await ModelDownloader.DownloadAsync(model, directory, new Progress<(long Done, long Total)>(p => {
+                if (p.Done - last > 20_000_000) { last = p.Done; Console.WriteLine($"  {p.Done / 1_000_000} / {p.Total / 1_000_000} MB"); }
+            }), CancellationToken.None);
+        }
+        using var transcriber = new WhisperTranscriber(directory);
+        short[] Speak(string culture, string sentence)
+        {
+            using var synth = new System.Speech.Synthesis.SpeechSynthesizer();
+            var voice = synth.GetInstalledVoices().FirstOrDefault(v => v.VoiceInfo.Culture.Name.StartsWith(culture));
+            if (voice is null) return [];
+            synth.SelectVoice(voice.VoiceInfo.Name);
+            using var wav = new MemoryStream();
+            synth.SetOutputToWaveStream(wav);
+            synth.Speak(sentence);
+            // 16-bit PCM mono; the synthesizer's native rate is converted to 16 kHz with a simple resample.
+            wav.Position = 0;
+            using var reader = new NAudio.Wave.WaveFileReader(wav);
+            using var resampled = new NAudio.Wave.MediaFoundationResampler(new NAudio.Wave.WaveFormatConversionStream(new NAudio.Wave.WaveFormat(reader.WaveFormat.SampleRate, 16, 1), reader), new NAudio.Wave.WaveFormat(16000, 16, 1));
+            var pcm = new MemoryStream();
+            var buffer = new byte[16000];
+            int read;
+            while ((read = resampled.Read(buffer, 0, buffer.Length)) > 0) pcm.Write(buffer, 0, read);
+            var samples = new short[pcm.Length / 2];
+            Buffer.BlockCopy(pcm.ToArray(), 0, samples, 0, samples.Length * 2);
+            return samples;
+        }
+        var english = Speak("en", "Hello world. This is a test of the dictation feature.");
+        Check(english.Length > 16000, "English voice produced no audio");
+        var options = new DictationOptions { Language = "en", Model = model.Name, InitialPrompt = "" };
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        string textEn = await transcriber.TranscribeAsync(english, options, CancellationToken.None);
+        Console.WriteLine($"  EN ({sw.Elapsed.TotalSeconds:0.0} s, backend {transcriber.Backend}): {textEn}");
+        Check(textEn.Contains("test", StringComparison.OrdinalIgnoreCase) && textEn.Contains("hello", StringComparison.OrdinalIgnoreCase), "English not recognized: " + textEn);
+        passed++; Console.WriteLine("PASS Real whisper.cpp recognizes synthesized English speech offline");
+        var german = Speak("de", "Starte bitte den tmux Server und öffne Claude Code.");
+        if (german.Length > 16000)
+        {
+            sw.Restart();
+            string textDe = await transcriber.TranscribeAsync(german, options with { Language = "de", InitialPrompt = "tmux, Claude Code" }, CancellationToken.None);
+            Console.WriteLine($"  DE ({sw.Elapsed.TotalSeconds:0.0} s): {textDe}");
+            Check(textDe.Contains("tmux", StringComparison.OrdinalIgnoreCase) || textDe.Contains("Server", StringComparison.OrdinalIgnoreCase) || textDe.Contains("Claude", StringComparison.OrdinalIgnoreCase), "German not recognized: " + textDe);
+            passed++; Console.WriteLine("PASS Real whisper.cpp recognizes synthesized German speech with technical terms");
+        }
+        // Silence must not turn into invented text through the session logic.
+        var silent = new short[16000 * 2];
+        string textSilent = await transcriber.TranscribeAsync(silent, options, CancellationToken.None);
+        Console.WriteLine($"  Silence -> '{textSilent}'");
+    }
+    catch (Exception ex) { failures.Add("Whisper smoke: " + ex.Message); Console.WriteLine("FAIL " + ex); }
+}
 Console.WriteLine($"{passed} passed, {failures.Count} failed");
 Environment.ExitCode = failures.Count == 0 ? 0 : 1;
 
@@ -418,4 +716,69 @@ async Task<int> RealTmuxWindowScenario()
         await Remote("tmux kill-session -t tmgr-ta 2>/dev/null; tmux kill-session -t tmgr-tb 2>/dev/null; true");
     }
     return checks;
+}
+
+sealed class FakeSource : IAudioSource
+{
+    public event Action<short[]>? Samples;
+    public event Action<Exception>? Failed;
+    public bool Disposed;
+    public Exception? StartError;
+    public void Start() { if (StartError is not null) throw StartError; }
+    public void Stop() { }
+    public void Dispose() => Disposed = true;
+    public void Feed(short[] samples) => Samples?.Invoke(samples);
+    public void Break(Exception error) => Failed?.Invoke(error);
+}
+
+sealed class FakeTranscriber : ITranscriber
+{
+    private int _running;
+    public readonly List<int> Calls = [];
+    public int Delay, MaxConcurrent;
+    public Exception? Error;
+    public Func<int, string> Responder = _ => "text";
+    public async Task<string> TranscribeAsync(short[] samples, DictationOptions options, CancellationToken cancellationToken)
+    {
+        lock (Calls) { Calls.Add(samples.Length); MaxConcurrent = Math.Max(MaxConcurrent, Interlocked.Increment(ref _running)); }
+        try
+        {
+            if (Delay > 0) await Task.Delay(Delay, cancellationToken);
+            if (Error is not null) throw Error;
+            return Responder(samples.Length);
+        }
+        finally { Interlocked.Decrement(ref _running); }
+    }
+}
+
+sealed class StubHandler(Func<Stream> body, long length) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var content = new StreamContent(body());
+        content.Headers.ContentLength = length;
+        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content });
+    }
+}
+
+/// <summary>Delivers a little data and then waits until the download is canceled.</summary>
+sealed class HangingStream : Stream
+{
+    private bool _first = true;
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        if (_first) { _first = false; "lmgg"u8.CopyTo(buffer.Span); return 4; }
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        return 0;
+    }
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
