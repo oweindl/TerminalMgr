@@ -67,8 +67,17 @@ public sealed record ShortcutOptions
     };
 }
 
+public sealed record UpdateOptions
+{
+    /// <summary>Look for a newer release when the app starts (on by default; fails quietly without network).</summary>
+    public bool CheckOnStart { get; init; } = true;
+    /// <summary>"Skip this version": a release with exactly this version is not offered again.</summary>
+    public string? SkippedVersion { get; init; }
+}
+
 public sealed record AppSettings
 {
+    public UpdateOptions Update { get; init; } = new();
     public DictationOptions Dictation { get; init; } = new();
     public ShortcutOptions Shortcuts { get; init; } = new();
     /// <summary>Start TerminalMgr when the user signs in to Windows (off by default).</summary>
