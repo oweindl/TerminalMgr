@@ -11,6 +11,24 @@ public sealed class ClipboardList
     public int MaxUnpinned { get; set; } = 100;
     public ClipboardEntry? Active => _activeText is null ? null : _items.FirstOrDefault(c => c.Text == _activeText);
 
+    /// <summary>The one entry that is unfolded in the list to its full text; at most one at a time.</summary>
+    public string? ExpandedText { get; private set; }
+
+    /// <summary>
+    /// Unfolds a shortened entry, or folds it again when it already is unfolded; any other entry folds. Entries that are shown
+    /// completely cannot be unfolded. Returns whether the entry is unfolded afterwards.
+    /// </summary>
+    public bool ToggleExpanded(ClipboardEntry entry)
+    {
+        if (ExpandedText == entry.Text || !ClipboardText.Preview(entry.Text).Truncated || _items.All(c => c.Text != entry.Text))
+        {
+            ExpandedText = null;
+            return false;
+        }
+        ExpandedText = entry.Text;
+        return true;
+    }
+
     public void LoadPinned(IEnumerable<ClipboardEntry> pinned)
     {
         _items.Clear();
@@ -52,12 +70,14 @@ public sealed class ClipboardList
     {
         _items.RemoveAll(c => c.Text == entry.Text);
         if (_activeText == entry.Text) _activeText = _items.FirstOrDefault()?.Text;
+        ForgetMissingExpanded();
     }
 
     public void ClearUnpinned()
     {
         _items.RemoveAll(c => !c.Pinned);
         if (Active is null) _activeText = _items.FirstOrDefault()?.Text;
+        ForgetMissingExpanded();
     }
 
     private void TrimUnpinned()
@@ -66,5 +86,11 @@ public sealed class ClipboardList
         while (_items.Count(c => !c.Pinned) > limit)
             _items.RemoveAt(_items.FindLastIndex(c => !c.Pinned));
         if (Active is null) _activeText = _items.FirstOrDefault()?.Text;
+        ForgetMissingExpanded();
+    }
+
+    private void ForgetMissingExpanded()
+    {
+        if (ExpandedText is not null && _items.All(c => c.Text != ExpandedText)) ExpandedText = null;
     }
 }

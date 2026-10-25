@@ -820,6 +820,32 @@ try
         }
     });
 
+    Test("Clipboard list: only shortened entries count as truncated", () =>
+    {
+        Check(!ClipboardText.Preview("kurz").Truncated && !ClipboardText.Preview("eins\nzwei").Truncated, "Short texts must show completely");
+        Check(ClipboardText.Preview("eins\nzwei\ndrei").Truncated && ClipboardText.Preview(new string('x', 500)).Truncated, "Three lines or one long line are shortened");
+        Check(!ClipboardText.Preview(new string('x', 120)).Truncated && ClipboardText.Preview(new string('x', 121)).Truncated, "Boundary of the line length");
+    });
+    Test("Clipboard list: at most one entry is unfolded, folding again and removal reset it, complete entries never unfold", () =>
+    {
+        var list = new ClipboardList();
+        string longA = string.Join('\n', Enumerable.Range(1, 30).Select(i => "a" + i)), longB = string.Join('\n', Enumerable.Range(1, 30).Select(i => "b" + i));
+        list.Add(longA, "dev"); list.Add(longB, "dev"); list.Add("kurz", "dev");
+        var a = list.Items.Single(c => c.Text == longA); var b = list.Items.Single(c => c.Text == longB); var kurz = list.Items.Single(c => c.Text == "kurz");
+        Check(list.ToggleExpanded(a) && list.ExpandedText == longA, "Unfold A");
+        Check(list.ToggleExpanded(b) && list.ExpandedText == longB, "Unfolding B must fold A");
+        Check(!list.ToggleExpanded(b) && list.ExpandedText is null, "Second click folds again");
+        list.ToggleExpanded(a);
+        Check(!list.ToggleExpanded(kurz) && list.ExpandedText is null, "A short entry must not unfold and folds the open one");
+        list.ToggleExpanded(a); list.Remove(a);
+        Check(list.ExpandedText is null, "Removing the unfolded entry");
+        list.ToggleExpanded(b); list.ClearUnpinned();
+        Check(list.ExpandedText is null && !list.ToggleExpanded(b), "Clearing the history");
+        var limited = new ClipboardList { MaxUnpinned = 1 };
+        limited.Add(longA, "dev"); limited.ToggleExpanded(limited.Items[0]); limited.Add(longB, "dev");
+        Check(limited.ExpandedText is null, "Trimming the list must forget an entry that dropped out");
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");

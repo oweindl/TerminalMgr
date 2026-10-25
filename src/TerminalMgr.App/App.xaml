@@ -12,6 +12,33 @@
     <Style TargetType="TextBox"><Setter Property="Background" Value="#0F151A"/><Setter Property="Foreground" Value="#E2E8ED"/><Setter Property="BorderBrush" Value="#34414C"/><Setter Property="Padding" Value="8"/><Setter Property="CaretBrush" Value="#31D5B7"/><Setter Property="Margin" Value="0,4,0,10"/></Style>
     <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#E2E8ED"/><Setter Property="Margin" Value="0,8"/></Style>
     <Style TargetType="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#E2E8ED"/><Setter Property="BorderThickness" Value="0"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/></Style>
+    <!-- Dark, thin scroll bars instead of the bright system ones (lists, text boxes, release notes, popups). -->
+    <Style TargetType="ScrollBar">
+      <Setter Property="Background" Value="Transparent"/><Setter Property="Width" Value="10"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
+        <Grid Background="Transparent">
+          <Track x:Name="PART_Track" IsDirectionReversed="True">
+            <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+            <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+            <Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border CornerRadius="4" Background="#3F505C" Margin="2,1"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+          </Track>
+        </Grid>
+      </ControlTemplate></Setter.Value></Setter>
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Horizontal">
+          <Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="10"/>
+          <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
+            <Grid Background="Transparent">
+              <Track x:Name="PART_Track">
+                <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+                <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+                <Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border CornerRadius="4" Background="#3F505C" Margin="1,2"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+              </Track>
+            </Grid>
+          </ControlTemplate></Setter.Value></Setter>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
     <Style TargetType="ListBoxItem">
       <Setter Property="Padding" Value="12"/><Setter Property="Margin" Value="4,2"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="Item" CornerRadius="5" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="#21453F"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Item" Property="BorderBrush" Value="#3A7165"/><Setter TargetName="Item" Property="BorderThickness" Value="1"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>

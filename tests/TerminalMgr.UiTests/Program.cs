@@ -24,6 +24,79 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private static void TestClipboardFullText()
+    {
+        var shortItem = new ClipItem(new ClipboardEntry("kurz", "dev", DateTimeOffset.Now));
+        string longText = string.Join('\n', Enumerable.Range(1, 40).Select(i => "Zeile " + i));
+        var longItem = new ClipItem(new ClipboardEntry(longText, "dev", DateTimeOffset.Now));
+        Check(!shortItem.IsTruncated && longItem.IsTruncated && longItem.FullText == longText, "Truncation flag");
+        shortItem.IsExpanded = true;
+        Check(!shortItem.IsExpanded && shortItem.CollapsedVisibility == Visibility.Visible, "A complete entry must not unfold");
+        var changes = new List<string>();
+        longItem.PropertyChanged += (_, e) => changes.Add(e.PropertyName ?? "");
+        longItem.IsExpanded = true;
+        Check(longItem.IsExpanded && longItem.ExpandedVisibility == Visibility.Visible && longItem.CollapsedVisibility == Visibility.Collapsed && changes.Contains("IsExpanded") && changes.Contains("ExpandedVisibility"), "Unfolding must notify the bindings");
+        Check(new ClipItem(longItem.Entry, expanded: true).IsExpanded && !new ClipItem(shortItem.Entry, expanded: true).IsExpanded, "State handed over when the list is rebuilt");
+
+        // Optional: render the list (collapsed and unfolded entries) to a picture for a visual check; no window and no mouse needed.
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") is { Length: > 0 } renderDirectory)
+        {
+            var main = new MainWindow();
+            var list = (ListBox)main.FindName("ClipsList");
+            var oneLine = new ClipItem(new ClipboardEntry(new string('y', 400), "devbox", DateTimeOffset.Now));
+            list.ItemsSource = new[] { new ClipItem(longItem.Entry, expanded: true), new ClipItem(new ClipboardEntry("kurzer Eintrag", "Windows", DateTimeOffset.Now)), oneLine };
+            list.Width = 330; list.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x17, 0x1D, 0x23));
+            list.Measure(new Size(330, 900)); list.Arrange(new Rect(0, 0, 330, 900)); list.UpdateLayout();
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(330, 900, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(list);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            Directory.CreateDirectory(renderDirectory);
+            using var png = File.Create(Path.Combine(renderDirectory, "clipboard-list.png"));
+            encoder.Save(png);
+        }
+
+        // The hover popup in a real (shown) window with the pointer test hook.
+        var host = new Border { Width = 200, Height = 60 };
+        var window = new Window { Width = 500, Height = 300, Content = host, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = 100, Top = 100 };
+        window.Show();
+        try
+        {
+            bool overTarget = true, overPopup = false;
+            var hover = new HoverPreview(Dispatcher.CurrentDispatcher, () => (800, 1000), TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(120), e => ReferenceEquals(e, host) ? overTarget : overPopup);
+            var entered = System.Diagnostics.Stopwatch.StartNew();
+            hover.Enter(host, longText);
+            Check(!hover.IsOpen, "The popup must not open at once");
+            Pump(() => hover.IsOpen, 2000);
+            Check(entered.ElapsedMilliseconds >= 150, $"The popup opened after only {entered.ElapsedMilliseconds} ms; the delay is 200 ms");
+            Check(hover.IsOpen && hover.ShownText == longText && hover.ShownText.Split('\n').Length == 40, "Popup shows the complete text with its line breaks");
+            Check(hover.MaxHeight == 600 && hover.MaxWidth == 800 && hover.TextBox.IsReadOnly && hover.TextBox.FontFamily.Source.Contains("Cascadia"), $"Limits {hover.MaxWidth}x{hover.MaxHeight}");
+            overTarget = false; hover.Leave(host);
+            Pump(() => !hover.IsOpen, 2000);
+            Check(!hover.IsOpen, "Popup closes after the pointer left");
+
+            overTarget = true; hover.Enter(host, "x"); overTarget = false; hover.Leave(host);
+            Pump(() => false, 450);
+            Check(!hover.IsOpen, "Leaving before the delay must not open it");
+
+            overTarget = true; hover.Enter(host, longText);
+            Pump(() => hover.IsOpen, 2000);
+            overTarget = false; overPopup = true; hover.Leave(host);
+            Pump(() => false, 500);
+            Check(hover.IsOpen, "The popup must stay open while the pointer is over it (to scroll and select)");
+            overPopup = false;
+            Pump(() => !hover.IsOpen, 2000);
+            Check(!hover.IsOpen, "Popup closes once the pointer left the popup too");
+
+            var small = new HoverPreview(Dispatcher.CurrentDispatcher, () => (100, 100), TimeSpan.FromMilliseconds(50), pointerOver: _ => true);
+            small.Enter(host, "kurz"); Pump(() => small.IsOpen, 1000);
+            Check(small.MaxHeight == 120 && small.MaxWidth == 240, "Small windows keep a usable minimum");
+            small.Close();
+        }
+        finally { window.Close(); }
+        Console.WriteLine("PASS Clipboard full text: unfolding state, hover popup delay, grace time, stays open over the popup, limits");
+    }
+
     private static void TestUpdateDialog()
     {
         var release = new UpdateRelease(new Version(0, 2, 14), "v0.2.14", "- fix: a\n- feat: b", new Uri("https://github.com/x/y/a.zip"), new Uri("https://github.com/x/y/a.zip.sha256"), "a.zip", 1000);
@@ -168,6 +241,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestClipboardFullText();
             TestUpdateDialog();
             TestVersionIsShown();
             TestShortcutKeys();

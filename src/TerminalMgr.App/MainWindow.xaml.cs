@@ -494,10 +494,41 @@ public partial class MainWindow : Window
     {
         if (sender is MenuItem { Tag: ProfileItem item }) { ProfilesList.SelectedItem = item; EditProfile(sender, e); }
     }
-    private void ClipPressed(object sender, MouseButtonEventArgs e) => _clipPressPoint = e.GetPosition(null);
+    private HoverPreview? _clipHover;
+    // Width of the terminal area and the window height limit the popup that shows the full text of a shortened entry.
+    private HoverPreview ClipHover => _clipHover ??= new(Dispatcher, () => (TerminalView.ActualWidth, ActualHeight));
+
+    private void ClipEnter(object sender, MouseEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ClipItem { IsTruncated: true, IsExpanded: false } item } card) ClipHover.Enter(card, item.FullText);
+    }
+    private void ClipLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is FrameworkElement card) ClipHover.Leave(card);
+    }
+
+    private void ClipPressed(object sender, MouseButtonEventArgs e)
+    {
+        _clipPressPoint = e.GetPosition(null);
+        // A click on a shortened entry also unfolds it (the entry becomes active anyway); clicks inside the unfolded text or on
+        // a button only select text or press the button. A double click pastes and does not fold again.
+        if (e.ClickCount == 1 && sender is FrameworkElement { DataContext: ClipItem item } && item.IsTruncated &&
+            e.OriginalSource is DependencyObject source && FindAncestor<Button>(source) is null && FindAncestor<TextBox>(source) is null)
+            ToggleClipExpanded(item);
+    }
+
+    private void ToggleClipExpanded(ClipItem item)
+    {
+        _clipList.ToggleExpanded(item.Entry);
+        ClipHover.Close();
+        if (ClipsList.ItemsSource is IEnumerable<ClipItem> items)
+            foreach (var other in items) other.IsExpanded = other.Entry.Text == _clipList.ExpandedText;
+    }
+
     private void DragClip(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed || sender is not FrameworkElement { DataContext: ClipItem item } source) return;
+        if (e.OriginalSource is DependencyObject origin && FindAncestor<TextBox>(origin) is not null) return; // selecting text in the unfolded entry is no drag
         var now = e.GetPosition(null);
         if (Math.Abs(now.X - _clipPressPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(now.Y - _clipPressPoint.Y) < SystemParameters.MinimumVerticalDragDistance) return;
@@ -566,7 +597,7 @@ public partial class MainWindow : Window
         string search = ClipSearch?.Text ?? "";
         var items = _clipList.Items.Where(c => (PinnedOnly?.IsChecked != true || c.Pinned)
             && (c.Text.Contains(search, StringComparison.OrdinalIgnoreCase) || c.Source.Contains(search, StringComparison.OrdinalIgnoreCase)))
-            .Select(c => new ClipItem(c)).ToList();
+            .Select(c => new ClipItem(c, c.Text == _clipList.ExpandedText)).ToList();
         _renderingClips = true;
         try
         {

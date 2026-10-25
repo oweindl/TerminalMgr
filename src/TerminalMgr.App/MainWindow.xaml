@@ -91,12 +91,16 @@
     </StackPanel>
     <ListBox x:Name="ClipsList" SelectionChanged="ClipSelected" MouseDoubleClick="ClipDoubleClick" VirtualizingPanel.ScrollUnit="Pixel">
      <ListBox.ItemTemplate><DataTemplate>
-      <Border x:Name="Card" Background="#202A32" CornerRadius="6" Padding="10" BorderThickness="2" BorderBrush="Transparent" ToolTip="{Binding Tooltip}" PreviewMouseLeftButtonDown="ClipPressed" MouseMove="DragClip">
+      <Border x:Name="Card" Background="#202A32" CornerRadius="6" Padding="10" BorderThickness="2" BorderBrush="Transparent" PreviewMouseLeftButtonDown="ClipPressed" MouseMove="DragClip" MouseEnter="ClipEnter" MouseLeave="ClipLeave">
        <StackPanel>
         <DockPanel><TextBlock Text="{Binding Source}" Foreground="#43D4B7"/><TextBlock Text="{Binding Time}" Foreground="#91A5B4" HorizontalAlignment="Right"/></DockPanel>
-        <TextBlock Text="{Binding Line1}" FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,8,0,0"/>
-        <TextBlock Text="{Binding Line2}" Visibility="{Binding Line2Visibility}" FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-        <TextBlock Text="{Binding LengthLabel}" Visibility="{Binding LengthVisibility}" Foreground="#91A5B4" FontSize="10" Margin="0,4,0,0"/>
+        <StackPanel Visibility="{Binding CollapsedVisibility}">
+         <TextBlock Text="{Binding Line1}" FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,8,0,0"/>
+         <TextBlock Text="{Binding Line2}" Visibility="{Binding Line2Visibility}" FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+         <TextBlock Text="{Binding LengthLabel}" Visibility="{Binding LengthVisibility}" Foreground="#91A5B4" FontSize="10" Margin="0,4,0,0"/>
+        </StackPanel>
+        <!-- Unfolded: the full text, about 15 lines, scrollable inside the entry; selectable and copyable. -->
+        <TextBox Text="{Binding FullText, Mode=OneWay}" Visibility="{Binding ExpandedVisibility}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Foreground="#E2E8ED" FontFamily="Cascadia Mono, Consolas" FontSize="12" Padding="0" Margin="0,8,0,0" MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
         <WrapPanel Margin="0,6,0,0"><Button Content="Einfügen" Click="PasteClip" Tag="{Binding}"/><Button Content="{Binding PinLabel}" Click="PinClip" Tag="{Binding}"/><Button Content="×" Click="RemoveClip" Tag="{Binding}" ToolTip="Eintrag entfernen"/></WrapPanel>
        </StackPanel>
       </Border>
