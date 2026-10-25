@@ -2,47 +2,49 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using TerminalMgr.Core;
 using TerminalMgr.Windows;
 
 namespace TerminalMgr.App;
 
-/// <summary>Application settings. Sections are added by the features that own them.</summary>
+/// <summary>Application settings: general, shortcuts, clipboard and dictation.</summary>
 public sealed class SettingsDialog : Window
 {
     private const string DefaultMicrophone = "Windows-Standard";
     private readonly AppSettings _original;
     private readonly StackPanel _panel = new() { Margin = new Thickness(24) };
-    private readonly TextBox _historyLimit, _shortcut, _prompt, _silence, _threshold;
-    private readonly ComboBox _microphone, _model, _language;
+    private readonly CheckBox _startWithWindows;
+    private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
+    private readonly ComboBox _microphone, _model, _language, _sessionModifier;
     public AppSettings? Result { get; private set; }
 
     public SettingsDialog(AppSettings settings)
     {
         _original = settings;
         var dictation = settings.Dictation.Normalized();
+        var shortcuts = settings.Shortcuts.Normalized();
         Style = (Style)FindResource(typeof(Window));
         Title = "Einstellungen";
-        Width = 600; Height = 780; MinHeight = 420; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Width = 620; Height = 860; MinHeight = 420; WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Content = new ScrollViewer { Content = _panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+
+        Heading("Allgemein");
+        _startWithWindows = new CheckBox { Content = "TerminalMgr bei der Windows-Anmeldung starten", IsChecked = settings.StartWithWindows };
+        _panel.Children.Add(_startWithWindows);
+
+        Heading("Tastenkürzel");
+        _panel.Children.Add(new TextBlock { Text = "Feld anklicken und Kombination drücken. Mit Ctrl oder Alt, nur F1 bis F12 gehen allein. Ctrl+B bleibt für tmux reserviert.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 0, 0, 8) });
+        _dictationShortcut = ShortcutField("Diktat starten und stoppen", dictation.Shortcut, new DictationOptions().Shortcut);
+        _copyShortcut = ShortcutField("Markierung kopieren", shortcuts.Copy, new ShortcutOptions().Copy);
+        _pasteShortcut = ShortcutField("Zwischenablage einfügen", shortcuts.Paste, new ShortcutOptions().Paste);
+        _sessionModifier = Combo("Session wechseln: Tasten plus 1 bis 9", ShortcutRules.SessionModifiers.Select(m => m + "+1 … 9"), shortcuts.SessionModifier + "+1 … 9");
 
         Heading("Clipboard");
         _historyLimit = Field("Ungeheftete Einträge im Verlauf (1 bis 1000)", settings.ClipHistoryLimit.ToString());
 
         Heading("Diktat");
-        _panel.Children.Add(new TextBlock { Text = "Tastenkürzel (Feld anklicken und Kombination drücken; mit Ctrl oder Alt)" });
-        _shortcut = new TextBox { Text = dictation.Shortcut, IsReadOnly = true, IsReadOnlyCaretVisible = false };
-        _shortcut.PreviewKeyDown += CaptureShortcut;
-        var shortcutRow = new DockPanel { LastChildFill = true };
-        var reset = new Button { Content = "Standard", ToolTip = "Ctrl+Y" };
-        reset.Click += (_, _) => _shortcut.Text = new DictationOptions().Shortcut;
-        DockPanel.SetDock(reset, Dock.Right);
-        shortcutRow.Children.Add(reset);
-        shortcutRow.Children.Add(_shortcut);
-        _panel.Children.Add(shortcutRow);
-        _panel.Children.Add(new TextBlock { Text = "In bash/readline ist Ctrl+Y „yank“. Mit der Standardbelegung ist es in TerminalMgr nicht erreichbar; hier lässt sich das ändern.",
-            TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 0, 0, 10) });
-
         _microphone = Combo("Mikrofon", MicrophoneNames(), dictation.Microphone is { Length: > 0 } m ? m : DefaultMicrophone);
         _model = Combo("Modell (wird beim ersten Diktat nach Rückfrage geladen)", WhisperModels.All.Select(ModelLabel), ModelLabel(WhisperModels.Get(dictation.Model)));
         _language = Combo("Sprache", ["Deutsch", "Englisch", "Automatisch erkennen"], dictation.Language switch { "en" => "Englisch", "auto" => "Automatisch erkennen", _ => "Deutsch" });
@@ -67,6 +69,27 @@ public sealed class SettingsDialog : Window
         _panel.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap });
         var box = new TextBox { Text = value };
         _panel.Children.Add(box);
+        return box;
+    }
+
+    /// <summary>A read-only box that records the pressed combination, a reset button and a note when the key is also used in the terminal.</summary>
+    private TextBox ShortcutField(string label, string value, string standard)
+    {
+        _panel.Children.Add(new TextBlock { Text = label });
+        var box = new TextBox { Text = value, IsReadOnly = true, IsReadOnlyCaretVisible = false, Margin = new Thickness(0, 4, 0, 2) };
+        var hint = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Goldenrod, FontSize = 11, Margin = new Thickness(0, 0, 0, 10) };
+        void ShowHint() => hint.Text = Shortcut.TryParse(box.Text, out var s) ? ShortcutRules.TerminalHint(s) ?? "" : "";
+        box.TextChanged += (_, _) => ShowHint();
+        box.PreviewKeyDown += CaptureShortcut;
+        var reset = new Button { Content = "Standard", ToolTip = standard, Margin = new Thickness(6, 0, 0, 0) };
+        reset.Click += (_, _) => box.Text = standard;
+        var row = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(reset, Dock.Right);
+        row.Children.Add(reset);
+        row.Children.Add(box);
+        _panel.Children.Add(row);
+        _panel.Children.Add(hint);
+        ShowHint();
         return box;
     }
 
@@ -96,11 +119,10 @@ public sealed class SettingsDialog : Window
         if (pressed is null) return; // only a modifier so far
         if (!Shortcut.TryParse(pressed.ToString(), out var shortcut))
         {
-            MessageBox.Show(this, "Bitte mit Ctrl oder Alt kombinieren (nur F1 bis F12 gehen allein), damit normales Tippen nicht blockiert wird.",
-                Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            Warn("Bitte mit Ctrl oder Alt kombinieren (nur F1 bis F12 gehen allein), damit normales Tippen nicht blockiert wird.");
             return;
         }
-        _shortcut.Text = shortcut.ToString();
+        ((TextBox)sender).Text = shortcut.ToString();
     }
 
     private static bool TryNumber(string text, out double value) =>
@@ -115,10 +137,15 @@ public sealed class SettingsDialog : Window
         if (!TryNumber(_threshold.Text, out double threshold) || threshold is < 0.002 or > 0.2)
         { Warn("Die Pegelschwelle muss zwischen 0,002 und 0,2 liegen."); return; }
         string microphone = (string)_microphone.SelectedItem;
-        Result = _original with {
+        var candidate = _original with {
             ClipHistoryLimit = limit,
+            StartWithWindows = _startWithWindows.IsChecked == true,
+            Shortcuts = new ShortcutOptions {
+                Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
+                SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)]
+            }.Normalized(),
             Dictation = new DictationOptions {
-                Shortcut = _shortcut.Text,
+                Shortcut = _dictationShortcut.Text,
                 Microphone = microphone == DefaultMicrophone ? null : microphone,
                 Model = WhisperModels.All[Math.Max(0, _model.SelectedIndex)].Name,
                 Language = _language.SelectedIndex switch { 1 => "en", 2 => "auto", _ => "de" },
@@ -127,6 +154,8 @@ public sealed class SettingsDialog : Window
                 LevelThreshold = threshold
             }.Normalized()
         };
+        if (ShortcutRules.FindConflict(candidate) is { } conflict) { Warn(conflict); return; }
+        Result = candidate;
         DialogResult = true;
     }
 

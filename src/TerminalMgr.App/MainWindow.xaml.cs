@@ -28,6 +28,8 @@ public partial class MainWindow : Window
     // What the app knows about the tmux session each connection hangs on (by ID after a pick, by name from the profile).
     private readonly Dictionary<string, (string? Id, string? Name)> _tmuxAttached = [];
     private readonly Dictionary<string, string> _tmuxLabel = [];
+    private readonly Dictionary<string, ReconnectTracker> _reconnect = [];
+    private readonly Dictionary<string, CancellationTokenSource> _reconnectWait = [];
     private readonly Dictionary<string, PtySession> _sessions = [];
     private readonly HashSet<string> _connecting = [];
     private readonly HashSet<string> _terminals = [];
@@ -61,7 +63,7 @@ public partial class MainWindow : Window
             foreach (var profile in settings.Profiles) _profiles.Add(new(profile));
             _clipList.MaxUnpinned = Math.Clamp(settings.ClipHistoryLimit, 1, 1000);
             _clipList.LoadPinned(settings.PinnedClips);
-            DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
+            ApplySettingsToUi();
             if (_profiles.Count == 0)
             {
                 var config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
@@ -170,16 +172,18 @@ public partial class MainWindow : Window
         if (_ready && !_closed) TerminalView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message));
     }
 
-    private async Task ConnectAsync(ProfileItem item, string? tmuxSessionId = null, string? tmuxWindowId = null)
+    /// <param name="automatic">True for an automatic reconnect: it must not steal the selection from what the user is doing.</param>
+    private async Task ConnectAsync(ProfileItem item, string? tmuxSessionId = null, string? tmuxWindowId = null, bool automatic = false)
     {
         string id = item.Profile.Id;
         if (!_ready) { StatusText.Text = "Das Terminal wird noch vorbereitet."; return; }
         if (_closing || _sessions.ContainsKey(id) || !_connecting.Add(id)) return;
+        if (!automatic) CancelReconnect(id, reset: true);
         PtySession? pty = null;
         try
         {
             item.Profile.Validate();
-            ProfilesList.SelectedItem = item;
+            if (!automatic) ProfilesList.SelectedItem = item;
             if (_terminals.Remove(id)) Post(new { type = "remove", id });
             var completion = new TaskCompletionSource<(int Cols, int Rows)>(TaskCreationOptions.RunContinuationsAsynchronously);
             _created[id] = completion;
@@ -199,10 +203,12 @@ public partial class MainWindow : Window
                 if (_sessions.TryGetValue(id, out var current) && ReferenceEquals(current, owned))
                 {
                     _sessions.Remove(id);
+                    string? attachedId = _tmuxAttached.TryGetValue(id, out var attached) ? attached.Id : null;
                     ForgetTmux(id);
                     item.Status = "Beendet · Exit " + code;
                     Post(new { type = "output", id, data = "\r\n\x1b[90m[SSH beendet, Exit " + code + "]\x1b[0m\r\n" });
                     await owned.DisposeAsync();
+                    ScheduleReconnect(item, code, attachedId);
                 }
             });
             _sessions[id] = pty;
@@ -213,9 +219,10 @@ public partial class MainWindow : Window
             if (tmuxSessionId is not null) _tmuxAttached[id] = (tmuxSessionId, null);
             else if (item.Profile.Mode == StartMode.Tmux) _tmuxAttached[id] = (null, item.Profile.TmuxSession);
             pty.Start(ssh, arguments, size.Cols, size.Rows);
+            Reconnect(id).Connected(DateTimeOffset.Now);
             item.Status = item.Profile.AutoConnect ? "● SSH läuft · Autostart" : "● SSH läuft";
-            StatusText.Text = "SSH läuft. Anmeldung und Host-Key-Abfragen erscheinen im Terminal.";
-            Post(new { type = "focus", id });
+            StatusText.Text = automatic ? item.Name + ": wieder verbunden." : "SSH läuft. Anmeldung und Host-Key-Abfragen erscheinen im Terminal.";
+            if (!automatic || Selected == item) Post(new { type = "focus", id });
         }
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception ex)
@@ -228,8 +235,62 @@ public partial class MainWindow : Window
         finally { _connecting.Remove(id); _created.Remove(id); }
     }
 
+    private ReconnectTracker Reconnect(string id)
+    {
+        if (!_reconnect.TryGetValue(id, out var tracker)) _reconnect[id] = tracker = new();
+        return tracker;
+    }
+
+    /// <summary>Stops a waiting reconnect. A wanted action of the user (connect, disconnect, delete) also starts the counter over.</summary>
+    private void CancelReconnect(string id, bool reset)
+    {
+        if (_reconnectWait.Remove(id, out var wait)) wait.Cancel();
+        if (reset) Reconnect(id).Reset();
+    }
+
+    /// <summary>Called when a connection ended on its own. Only a lost connection of a profile with the option is retried.</summary>
+    private void ScheduleReconnect(ProfileItem item, int exitCode, string? tmuxSessionId)
+    {
+        string id = item.Profile.Id;
+        if (_closing) return;
+        var decision = Reconnect(id).Lost(item.Profile.AutoReconnect, exitCode, DateTimeOffset.Now);
+        if (!decision.Retry)
+        {
+            if (item.Profile.AutoReconnect && ReconnectTracker.IsConnectionLost(exitCode))
+            {
+                item.Status = "Wiederverbindung aufgegeben";
+                Post(new { type = "output", id, data = "\x1b[90m[" + decision.Reason + "]\x1b[0m\r\n" });
+            }
+            return;
+        }
+        CancelReconnect(id, reset: false);
+        var wait = _reconnectWait[id] = new CancellationTokenSource();
+        _ = ReconnectAfterAsync(item, decision, tmuxSessionId, wait);
+    }
+
+    private async Task ReconnectAfterAsync(ProfileItem item, ReconnectDecision decision, string? tmuxSessionId, CancellationTokenSource wait)
+    {
+        string id = item.Profile.Id;
+        try
+        {
+            string attempt = $"{decision.Attempt}/{ReconnectTracker.MaxAttempts}";
+            Post(new { type = "output", id, data = $"\x1b[90m[Verbindung abgebrochen. Neuer Versuch in {decision.Delay.TotalSeconds:0} s ({attempt})]\x1b[0m\r\n" });
+            for (int left = (int)Math.Ceiling(decision.Delay.TotalSeconds); left > 0; left--)
+            {
+                item.Status = $"Verbindung verloren · neuer Versuch in {left} s ({attempt})";
+                await Task.Delay(TimeSpan.FromSeconds(1), wait.Token);
+            }
+            if (_closing || _sessions.ContainsKey(id)) return; // the user connected by hand in the meantime
+            item.Status = $"Verbinde neu … ({attempt})";
+            await ConnectAsync(item, tmuxSessionId, null, automatic: true);
+        }
+        catch (OperationCanceledException) { }
+        finally { if (_reconnectWait.TryGetValue(id, out var current) && ReferenceEquals(current, wait)) _reconnectWait.Remove(id); }
+    }
+
     private async Task DisconnectAsync(ProfileItem item)
     {
+        CancelReconnect(item.Profile.Id, reset: true);
         if (_sessions.Remove(item.Profile.Id, out var session))
         {
             ForgetTmux(item.Profile.Id);
@@ -589,8 +650,22 @@ public partial class MainWindow : Window
         _settings = result;
         _clipList.MaxUnpinned = result.ClipHistoryLimit;
         PostShortcuts();
-        DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
+        ApplySettingsToUi();
         RenderClips(); SaveSettings();
+    }
+
+    /// <summary>Texts that name a shortcut, and the "start with Windows" entry, follow the settings.</summary>
+    private void ApplySettingsToUi()
+    {
+        var shortcuts = _settings.Shortcuts.Normalized();
+        DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
+        SessionHint.Text = $"{shortcuts.SessionModifier}+1 … {shortcuts.SessionModifier}+9 · Session wechseln";
+        string? exe = Environment.ProcessPath;
+        // Only the installed/published app registers itself, never "dotnet run" or a test host.
+        if (exe is null || !string.Equals(Path.GetFileName(exe), "TerminalMgr.App.exe", StringComparison.OrdinalIgnoreCase)) return;
+        try { new StartupRegistration().Apply(_settings.StartWithWindows, exe); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        { StatusText.Text = "Der Start mit Windows konnte nicht eingerichtet werden: " + ex.Message; }
     }
 
     private void SaveSettings()
@@ -628,16 +703,20 @@ public partial class MainWindow : Window
     private void WindowKeyDown(object sender, KeyEventArgs e)
     {
         // The dictation shortcut also works while a WPF control has the focus (Ctrl+Y would otherwise be "redo" in a text box).
-        if (Shortcut.TryParse(DictationSettings.Shortcut, out var dictation) && ShortcutKeys.FromEvent(e) == dictation)
+        if (ShortcutKeys.FromEvent(e) is not { } pressed) return;
+        if (Shortcut.TryParse(DictationSettings.Shortcut, out var dictation) && pressed == dictation)
         {
             if (!e.IsRepeat) ToggleDictation();
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers != ModifierKeys.Alt) return;
-        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
-        int index = key - Key.D1;
-        if (index >= 0 && index < Math.Min(9, _profiles.Count)) { ProfilesList.SelectedIndex = index; e.Handled = true; }
+        // Session switching: the configured modifier plus 1 to 9 (the terminal page handles the same keys while it has the focus).
+        if (pressed.Key.Length == 1 && pressed.Key[0] is >= '1' and <= '9' &&
+            Shortcut.Parse(_settings.Shortcuts.Normalized().SessionModifier + "+" + pressed.Key) == pressed)
+        {
+            int index = pressed.Key[0] - '1';
+            if (index < Math.Min(9, _profiles.Count)) { ProfilesList.SelectedIndex = index; e.Handled = true; }
+        }
     }
 
     private async void WindowClosing(object? sender, CancelEventArgs e)
@@ -648,6 +727,7 @@ public partial class MainWindow : Window
         _closing = true;
         SaveSettings();
         _shutdown.Cancel();
+        foreach (var wait in _reconnectWait.Values) wait.Cancel();
         DisposeDictation();
         StatusText.Text = "SSH-Sessions werden geschlossen …";
         await Task.WhenAll(_sessions.Values.Select(s => s.DisposeAsync().AsTask()));
