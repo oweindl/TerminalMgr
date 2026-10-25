@@ -127,6 +127,14 @@ Das Skript baut die Terminal-Assets (`npm ci`, `npm run bundle`), führt alle Te
 
 Schalter: `-Force` (nicht nachfragen, eine nicht reagierende App beenden), `-SkipTests` (nur zum schnellen Neu-Installieren eines bereits getesteten Stands), `-Start` (App danach starten).
 
+### Updates
+
+Beim Start fragt TerminalMgr anonym die öffentliche GitHub-Release-Liste ab (`/repos/oweindl/TerminalMgr/releases/latest`, Zeitlimit 5 s). Ohne Netz, ohne Release oder bei einem privaten Repository startet die App unverändert weiter, nur die Statuszeile meldet es. Gibt es eine neuere Version, fragt ein Dialog mit den Release-Notes: **Jetzt aktualisieren**, **Später** (fragt beim nächsten Start wieder) oder **Diese Version überspringen**. Die Prüfung läuft vor den Auto-Verbindungen; wartet der Dialog, starten sie erst danach.
+
+„Jetzt aktualisieren“ lädt `TerminalMgr-win-x64-<version>.zip` und die `.sha256`-Datei (nur von GitHub-Adressen, mit Fortschrittsanzeige), prüft die Prüfsumme und entpackt nach `%LOCALAPPDATA%\TerminalMgr\update\<version>`. Dann kopiert die App den kleinen Updater (`TerminalMgr.Updater.exe`, .NET Framework 4.8, auf jedem Windows 10/11 vorhanden) in den Temp-Ordner, startet ihn und beendet sich. Der Updater wartet auf das Ende der App, benennt den Installationsordner in `TerminalMgr.old` um, setzt die neue Version ein, startet sie und löscht die Sicherung erst, wenn ihr Fenster erschienen ist und sie noch läuft. Sonst spielt er die Sicherung zurück und startet die alte Version wieder; das Protokoll steht in `%LOCALAPPDATA%\TerminalMgr\update\updater.log`. Falsche Prüfsumme, abgebrochener oder unvollständiger Download lassen die installierte Version unverändert. Einstellungen, angeheftete Einträge und Modelle liegen außerhalb des Installationsordners und bleiben erhalten; Desktop- und Startmenü-Verknüpfung bleiben gültig.
+
+Ausgetauscht wird nur die installierte Kopie unter `%LOCALAPPDATA%\Programs\TerminalMgr`; ein Entwicklungs-Build zeigt nur einen Hinweis. Unter *Einstellungen*: Prüfung beim Start ein/aus (Vorgabe ein), „Jetzt nach Updates suchen“, übersprungene Version zurücksetzen. Der Updater-Ablauf lässt sich mit `scripts\Test-UpdateFlow.ps1` real prüfen (alte Version, lokales Release, Dialog per UI-Automatisierung; Erfolg, kaputtes Paket mit Rückfall, falsche Prüfsumme). Für Tests leiten `TERMINALMGR_INSTALL_DIR`, `TERMINALMGR_DATA_DIR` und `TERMINALMGR_UPDATE_URL` Installationsordner, Datenordner und Update-Adresse um.
+
 ### Version und Release
 
 In `Directory.Build.props` steht nur Major.Minor (`MajorMinor`, jetzt 0.2). Die Version eines Releases ist Major.Minor plus die Laufnummer des Workflows als Patch, z. B. 0.2.14; lokale Builds heißen 0.2.0. Die Version steht in der EXE (`FileVersion`, `InformationalVersion` mit Commit) und erscheint in der Titelzeile und unter *Einstellungen*. Major.Minor erhöht man von Hand in `Directory.Build.props`.

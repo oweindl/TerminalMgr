@@ -14,7 +14,10 @@ public sealed class SettingsDialog : Window
     private const string DefaultMicrophone = "Windows-Standard";
     private readonly AppSettings _original;
     private readonly StackPanel _panel = new() { Margin = new Thickness(24) };
-    private readonly CheckBox _startWithWindows, _acceptOsc52;
+    private readonly CheckBox _startWithWindows, _acceptOsc52, _checkUpdates;
+    private string? _skippedVersion;
+    /// <summary>The user pressed "Jetzt nach Updates suchen": the settings are saved and the caller runs the check.</summary>
+    public bool CheckForUpdatesNow { get; private set; }
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _language, _sessionModifier;
     public AppSettings? Result { get; private set; }
@@ -32,6 +35,20 @@ public sealed class SettingsDialog : Window
         Heading("Allgemein");
         _startWithWindows = new CheckBox { Content = "TerminalMgr bei der Windows-Anmeldung starten", IsChecked = settings.StartWithWindows };
         _panel.Children.Add(_startWithWindows);
+
+        Heading("Updates");
+        _skippedVersion = settings.Update.SkippedVersion;
+        _checkUpdates = new CheckBox { Content = "Beim Start nach neuen Versionen suchen", IsChecked = settings.Update.CheckOnStart,
+            ToolTip = "Fragt anonym die öffentliche GitHub-Release-Liste ab; ohne Netz startet die App unverändert weiter." };
+        _panel.Children.Add(_checkUpdates);
+        var updateButtons = new WrapPanel();
+        var checkNow = new Button { Content = "Jetzt nach Updates suchen", ToolTip = "Speichert die Einstellungen und sucht sofort nach einer neueren Version." };
+        checkNow.Click += (_, _) => { CheckForUpdatesNow = true; Save(); };
+        var resetSkipped = new Button { Content = _skippedVersion is null ? "Keine Version übersprungen" : $"Übersprungene Version {_skippedVersion} zurücksetzen", IsEnabled = _skippedVersion is not null };
+        resetSkipped.Click += (_, _) => { _skippedVersion = null; resetSkipped.Content = "Keine Version übersprungen"; resetSkipped.IsEnabled = false; };
+        updateButtons.Children.Add(checkNow);
+        updateButtons.Children.Add(resetSkipped);
+        _panel.Children.Add(updateButtons);
 
         Heading("Tastenkürzel");
         _panel.Children.Add(new TextBlock { Text = "Feld anklicken und Kombination drücken. Mit Ctrl oder Alt, nur F1 bis F12 gehen allein. Ctrl+B bleibt für tmux reserviert.",
@@ -147,6 +164,7 @@ public sealed class SettingsDialog : Window
             ClipHistoryLimit = limit,
             StartWithWindows = _startWithWindows.IsChecked == true,
             AcceptOsc52 = _acceptOsc52.IsChecked == true,
+            Update = new UpdateOptions { CheckOnStart = _checkUpdates.IsChecked == true, SkippedVersion = _skippedVersion },
             Shortcuts = new ShortcutOptions {
                 Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
                 SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)]

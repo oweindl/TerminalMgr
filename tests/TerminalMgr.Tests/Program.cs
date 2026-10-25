@@ -554,6 +554,272 @@ try
         Check(!store.Load().AcceptOsc52, "Round trip");
     });
 
+    string ReleaseJson(string tag = "v0.2.14", bool draft = false, bool pre = false, string host = "https://github.com", bool withSha = true, string? zipName = null)
+    {
+        string ver = tag.TrimStart('v');
+        string zip = zipName ?? $"TerminalMgr-win-x64-{ver}.zip";
+        string sha = withSha ? $",{{\"name\":\"{zip}.sha256\",\"size\":97,\"browser_download_url\":\"{host}/oweindl/TerminalMgr/releases/download/{tag}/{zip}.sha256\"}}" : "";
+        return $"{{\"tag_name\":\"{tag}\",\"draft\":{draft.ToString().ToLower()},\"prerelease\":{pre.ToString().ToLower()},\"body\":\"- fix: Rechtsklick\\n- feat: Update\"," +
+               $"\"assets\":[{{\"name\":\"{zip}\",\"size\":81748735,\"browser_download_url\":\"{host}/oweindl/TerminalMgr/releases/download/{tag}/{zip}\"}}{sha}]}}";
+    }
+    Test("Update: version texts and numeric ordering (0.2.9 < 0.2.10)", () =>
+    {
+        foreach (var (text, expected) in new[] { ("v0.2.14", "0.2.14"), ("0.2.14", "0.2.14"), ("0.2.14+219c1be", "0.2.14"), (" v1.0.0 ", "1.0.0") })
+            Check(UpdateInfo.TryParseVersion(text, out var v) && v.ToString() == expected, "Parse " + text);
+        foreach (string bad in new[] { "", "0.2", "latest", "v1.2.3.4", "0.2.x", "vv0.2.1", "0.2.1-beta" })
+            Check(!UpdateInfo.TryParseVersion(bad, out _), "Accepted '" + bad + "'");
+        Check(UpdateInfo.IsNewer(new Version(0, 2, 9), new Version(0, 2, 10)) && !UpdateInfo.IsNewer(new Version(0, 2, 10), new Version(0, 2, 10)) && !UpdateInfo.IsNewer(new Version(0, 3, 0), new Version(0, 2, 99)), "Ordering");
+    });
+    Test("Update: latest release JSON gives version, notes and both download files; unusable releases give nothing", () =>
+    {
+        bool Allowed(Uri u) => UpdateInfo.IsAllowedDownload(u);
+        var release = UpdateInfo.ParseLatestRelease(ReleaseJson(), Allowed);
+        Check(release is not null && release.Version.ToString() == "0.2.14" && release.Tag == "v0.2.14" && release.ZipName == "TerminalMgr-win-x64-0.2.14.zip" && release.ZipSize == 81748735, "Release: " + release);
+        Check(release!.Notes.Contains("fix: Rechtsklick") && release.ZipUrl.AbsolutePath.EndsWith("/TerminalMgr-win-x64-0.2.14.zip") && release.ChecksumUrl.AbsolutePath.EndsWith(".zip.sha256"), "Notes or URLs");
+        Check(UpdateInfo.ParseLatestRelease(ReleaseJson(draft: true), Allowed) is null && UpdateInfo.ParseLatestRelease(ReleaseJson(pre: true), Allowed) is null, "Draft or pre-release used");
+        Check(UpdateInfo.ParseLatestRelease(ReleaseJson(withSha: false), Allowed) is null, "Release without checksum used");
+        Check(UpdateInfo.ParseLatestRelease(ReleaseJson(zipName: "other.zip"), Allowed) is null, "Wrong asset name used");
+        Check(UpdateInfo.ParseLatestRelease(ReleaseJson(host: "https://evil.example.test"), Allowed) is null, "Foreign download host used");
+        Check(UpdateInfo.ParseLatestRelease(ReleaseJson("nightly"), Allowed) is null, "Non-version tag used");
+        foreach (string junk in new[] { "", "not json", "[]", "{}", "{\"tag_name\":\"v1.0.0\"}", "{\"message\":\"Not Found\"}" })
+            Check(UpdateInfo.ParseLatestRelease(junk, Allowed) is null, "Junk accepted: " + junk);
+    });
+    Test("Update: only GitHub's download hosts over https are allowed; loopback only for tests", () =>
+    {
+        foreach (string ok in new[] { "https://github.com/oweindl/TerminalMgr/releases/download/v1/x.zip", "https://objects.githubusercontent.com/x", "https://release-assets.githubusercontent.com/y" })
+            Check(UpdateInfo.IsAllowedDownload(new Uri(ok)), "Refused " + ok);
+        foreach (string bad in new[] { "http://github.com/x", "https://github.com.evil.test/x", "https://evilgithubusercontent.com/x", "https://example.test/x", "ftp://github.com/x", "http://127.0.0.1:8080/x" })
+            Check(!UpdateInfo.IsAllowedDownload(new Uri(bad)), "Allowed " + bad);
+        Check(UpdateInfo.IsAllowedDownload(new Uri("http://127.0.0.1:8080/x"), allowLoopback: true) && !UpdateInfo.IsAllowedDownload(new Uri("http://evil.example.test/x"), allowLoopback: true), "Loopback rule");
+    });
+    Test("Update: a newer release is offered unless the user skipped exactly that version", () =>
+    {
+        var r = UpdateInfo.ParseLatestRelease(ReleaseJson("v0.2.14"), u => true)!;
+        Check(UpdateInfo.ShouldOffer(new Version(0, 2, 0), r, null) && UpdateInfo.ShouldOffer(new Version(0, 2, 13), r, "0.2.13") && UpdateInfo.ShouldOffer(new Version(0, 2, 13), r, "garbage"), "Newer must be offered");
+        Check(!UpdateInfo.ShouldOffer(new Version(0, 2, 0), r, "0.2.14") && !UpdateInfo.ShouldOffer(new Version(0, 2, 0), r, "v0.2.14"), "Skipped version offered again");
+        Check(!UpdateInfo.ShouldOffer(new Version(0, 2, 14), r, null) && !UpdateInfo.ShouldOffer(new Version(0, 3, 0), r, null), "Same or newer version offered");
+    });
+    Test("Update: checksum files in sha256sum format, and hashing a file", () =>
+    {
+        const string abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        Check(UpdateInfo.ParseChecksum(abc + "  TerminalMgr-win-x64-0.2.14.zip\n", "TerminalMgr-win-x64-0.2.14.zip") == abc, "sha256sum format");
+        Check(UpdateInfo.ParseChecksum(abc.ToUpper() + " *TerminalMgr-win-x64-0.2.14.zip\r\n", "TerminalMgr-win-x64-0.2.14.zip") == abc, "Binary marker and upper case");
+        Check(UpdateInfo.ParseChecksum(abc + "\n", "x.zip") == abc, "Hash only");
+        Check(UpdateInfo.ParseChecksum(abc + "  other.zip\n", "x.zip") is null && UpdateInfo.ParseChecksum("zz" + abc[2..] + "  x.zip", "x.zip") is null && UpdateInfo.ParseChecksum("", "x.zip") is null && UpdateInfo.ParseChecksum("<html>Not Found</html>", "x.zip") is null, "Wrong file or garbage accepted");
+        var file = Path.Combine(root, "abc.bin");
+        File.WriteAllText(file, "abc");
+        Check(UpdateInfo.ComputeSha256(file) == abc, "SHA-256 of 'abc'");
+    });
+    Test("Update: only the installed copy replaces itself", () =>
+    {
+        string install = @"C:\Users\x\AppData\Local\Programs\TerminalMgr";
+        Check(UpdateInfo.IsInstalledCopy(install + @"\TerminalMgr.App.exe", install), "Installed copy refused");
+        Check(!UpdateInfo.IsInstalledCopy(@"C:\Users\x\Documents\TerminalMgr\src\bin\TerminalMgr.App.exe", install), "Development build allowed");
+        Check(!UpdateInfo.IsInstalledCopy(install + @"-evil\TerminalMgr.App.exe", install) && !UpdateInfo.IsInstalledCopy(install + @"\dotnet.exe", install) && !UpdateInfo.IsInstalledCopy(null, install) && !UpdateInfo.IsInstalledCopy("", install), "Look-alike allowed");
+    });
+    Test("Paths: test overrides for data and install folder never apply to explicit folders", () =>
+    {
+        string? dataBefore = Environment.GetEnvironmentVariable("TERMINALMGR_DATA_DIR"), installBefore = Environment.GetEnvironmentVariable("TERMINALMGR_INSTALL_DIR");
+        try
+        {
+            Environment.SetEnvironmentVariable("TERMINALMGR_DATA_DIR", Path.Combine(root, "data-override"));
+            Environment.SetEnvironmentVariable("TERMINALMGR_INSTALL_DIR", Path.Combine(root, "install-override"));
+            Check(AppPaths.DataDirectory() == Path.Combine(root, "data-override") && AppPaths.InstallDirectory() == Path.Combine(root, "install-override"), "Override ignored");
+            Check(AppPaths.UpdateDirectory() == Path.Combine(root, "data-override", "update") && AppPaths.ModelsDirectory() == Path.Combine(root, "data-override", "models"), "Derived folders");
+            Check(AppPaths.DataDirectory(@"C:\L") == @"C:\L\TerminalMgr" && AppPaths.InstallDirectory(@"C:\L") == @"C:\L\Programs\TerminalMgr", "Explicit local app data must win");
+        }
+        finally { Environment.SetEnvironmentVariable("TERMINALMGR_DATA_DIR", dataBefore); Environment.SetEnvironmentVariable("TERMINALMGR_INSTALL_DIR", installBefore); }
+        Check(AppPaths.InstallDirectory().EndsWith(@"Programs\TerminalMgr") && AppPaths.UpdateDirectory().EndsWith(@"TerminalMgr\update"), "Defaults");
+    });
+    Test("Update settings: check on start by default, skipped version round-trips, old files keep the defaults", () =>
+    {
+        Check(new AppSettings().Update.CheckOnStart && new AppSettings().Update.SkippedVersion is null, "Defaults");
+        var store = new SettingsStore(Path.Combine(root, "updateopts"));
+        store.Save(new() { Update = new() { CheckOnStart = false, SkippedVersion = "0.2.14" } });
+        var loaded = store.Load().Update;
+        Check(!loaded.CheckOnStart && loaded.SkippedVersion == "0.2.14", "Round trip");
+        var old = Path.Combine(root, "updateold");
+        Directory.CreateDirectory(old);
+        File.WriteAllText(Path.Combine(old, "settings.json"), "{\"FontSize\":12}");
+        Check(new SettingsStore(old).Load().Update.CheckOnStart, "Old file turned the check off");
+    });
+    (string Install, string Staged, List<string> Log) SwapFixture(string name)
+    {
+        string baseDir = Path.Combine(root, "swap-" + name);
+        string install = Path.Combine(baseDir, "Programs", "TerminalMgr"), staged = Path.Combine(baseDir, "update", "app");
+        Directory.CreateDirectory(Path.Combine(install, "sub")); Directory.CreateDirectory(Path.Combine(staged, "sub"));
+        File.WriteAllText(Path.Combine(install, "version.txt"), "old"); File.WriteAllText(Path.Combine(install, "sub", "x.txt"), "old-sub");
+        File.WriteAllText(Path.Combine(staged, "version.txt"), "new"); File.WriteAllText(Path.Combine(staged, "sub", "x.txt"), "new-sub");
+        return (install, staged, new List<string>());
+    }
+    Test("Update swap: new version replaces the old one and the backup is removed only after a successful start", () =>
+    {
+        var f = SwapFixture("ok");
+        bool backupExistedDuringStart = false;
+        var result = UpdateSwap.Apply(f.Install, f.Staged, () => { backupExistedDuringStart = Directory.Exists(f.Install + ".old") && File.ReadAllText(Path.Combine(f.Install, "version.txt")) == "new"; return true; }, () => throw new Exception("must not start the old app"), f.Log.Add);
+        Check(result.Success && File.ReadAllText(Path.Combine(f.Install, "version.txt")) == "new" && File.ReadAllText(Path.Combine(f.Install, "sub", "x.txt")) == "new-sub", "Not replaced: " + result.Message);
+        Check(backupExistedDuringStart, "The backup must exist while the new version is being started");
+        Check(!Directory.Exists(f.Install + ".old") && !Directory.Exists(f.Staged), "Backup or staged folder left behind");
+    });
+    Test("Update swap: a new version that does not come up is rolled back and the old app is started", () =>
+    {
+        var f = SwapFixture("fail");
+        bool oldStarted = false;
+        var result = UpdateSwap.Apply(f.Install, f.Staged, () => false, () => oldStarted = true, f.Log.Add);
+        Check(!result.Success && oldStarted, "Failure not reported or old app not started");
+        Check(File.ReadAllText(Path.Combine(f.Install, "version.txt")) == "old" && File.ReadAllText(Path.Combine(f.Install, "sub", "x.txt")) == "old-sub", "Old version not restored");
+        Check(!Directory.Exists(f.Install + ".old") && Directory.GetDirectories(Path.GetDirectoryName(f.Install)!).Length == 1, "Backup or failed folder left behind");
+        var thrown = SwapFixture("throw");
+        bool started2 = false;
+        var r2 = UpdateSwap.Apply(thrown.Install, thrown.Staged, () => throw new InvalidOperationException("Absturz"), () => started2 = true, thrown.Log.Add);
+        Check(!r2.Success && started2 && File.ReadAllText(Path.Combine(thrown.Install, "version.txt")) == "old", "Exception while starting the new app must roll back");
+    });
+    Test("Update swap: missing staged folder, a leftover backup and locked files", () =>
+    {
+        var none = SwapFixture("missing");
+        Directory.Delete(none.Staged, true);
+        var r = UpdateSwap.Apply(none.Install, none.Staged, () => true, () => { }, none.Log.Add);
+        Check(!r.Success && File.ReadAllText(Path.Combine(none.Install, "version.txt")) == "old", "Missing staged folder");
+        var leftover = SwapFixture("leftover");
+        Directory.CreateDirectory(leftover.Install + ".old"); File.WriteAllText(Path.Combine(leftover.Install + ".old", "junk.txt"), "j");
+        Check(UpdateSwap.Apply(leftover.Install, leftover.Staged, () => true, () => { }, leftover.Log.Add).Success && File.ReadAllText(Path.Combine(leftover.Install, "version.txt")) == "new", "Leftover backup blocked the update");
+        var locked = SwapFixture("locked");
+        using (new FileStream(Path.Combine(locked.Install, "version.txt"), FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var lr = UpdateSwap.Apply(locked.Install, locked.Staged, () => true, () => throw new Exception("old app must not be started when nothing changed"), locked.Log.Add, lockRetrySeconds: 1);
+            Check(!lr.Success && lr.Message.Contains("unverändert"), "Locked install folder: " + lr.Message);
+        }
+        Check(File.ReadAllText(Path.Combine(locked.Install, "version.txt")) == "old" && Directory.Exists(locked.Staged), "A failed swap must leave the old version and the staged folder alone");
+    });
+
+    // A fake release on a local HTTP server: JSON for "latest", the ZIP (folder TerminalMgr-win-x64 with a fake app) and its checksum.
+    (LocalServer Server, string Zip, string Sha) FakeRelease(string name, string version = "0.2.14", bool withExe = true)
+    {
+        string source = Path.Combine(root, "rel-" + name, "TerminalMgr-win-x64");
+        Directory.CreateDirectory(Path.Combine(source, "Terminal"));
+        if (withExe) File.WriteAllText(Path.Combine(source, "TerminalMgr.App.exe"), "MZ fake app " + version);
+        File.WriteAllText(Path.Combine(source, "Terminal", "index.html"), "<html></html>");
+        var filler = new byte[300_000];
+        new Random(42).NextBytes(filler); // random data does not compress, so the zip stays large enough to see progress
+        File.WriteAllBytes(Path.Combine(source, "filler.bin"), filler);
+        string zip = Path.Combine(root, "rel-" + name, $"TerminalMgr-win-x64-{version}.zip");
+        System.IO.Compression.ZipFile.CreateFromDirectory(source, zip, System.IO.Compression.CompressionLevel.Fastest, includeBaseDirectory: true);
+        string sha = $"{UpdateInfo.ComputeSha256(zip)}  {Path.GetFileName(zip)}\n";
+        var server = new LocalServer();
+        string baseUrl = server.BaseUrl;
+        server.Routes["/api/latest"] = c => LocalServer.Text(c, $"{{\"tag_name\":\"v{version}\",\"body\":\"- fix: Test\",\"assets\":[" +
+            $"{{\"name\":\"{Path.GetFileName(zip)}\",\"size\":{new FileInfo(zip).Length},\"browser_download_url\":\"{baseUrl}dl/{Path.GetFileName(zip)}\"}}," +
+            $"{{\"name\":\"{Path.GetFileName(zip)}.sha256\",\"size\":{sha.Length},\"browser_download_url\":\"{baseUrl}dl/{Path.GetFileName(zip)}.sha256\"}}]}}");
+        server.Routes["/dl/" + Path.GetFileName(zip)] = c => LocalServer.Bytes(c, File.ReadAllBytes(zip));
+        server.Routes["/dl/" + Path.GetFileName(zip) + ".sha256"] = c => LocalServer.Text(c, sha);
+        return (server, zip, sha);
+    }
+    Test("Update service: finds the latest release, offers only allowed download addresses", () =>
+    {
+        var (server, _, _) = FakeRelease("check");
+        using (server)
+        {
+            using var service = new UpdateService(new Uri(server.BaseUrl + "api/latest"), allowLoopback: true);
+            var result = service.CheckAsync().GetAwaiter().GetResult();
+            Check(result.Error is null && result.Release is { } r && r.Version.ToString() == "0.2.14" && r.Notes.Contains("fix: Test") && r.ZipUrl.Host == "127.0.0.1", "Check failed: " + result.Error);
+            using var strict = new UpdateService(new Uri(server.BaseUrl + "api/latest"), allowLoopback: false);
+            var refused = strict.CheckAsync().GetAwaiter().GetResult();
+            Check(refused.Release is null && refused.Error!.Contains("verwendbare"), "Loopback downloads must be refused outside tests: " + refused.Error);
+        }
+    });
+    Test("Update service: stages a verified download with progress and leaves no loose files", () =>
+    {
+        var (server, _, _) = FakeRelease("stage");
+        using (server)
+        {
+            using var service = new UpdateService(new Uri(server.BaseUrl + "api/latest"), allowLoopback: true);
+            var release = service.CheckAsync().GetAwaiter().GetResult().Release!;
+            string updateRoot = Path.Combine(root, "update-ok");
+            long lastDone = 0, lastTotal = 0;
+            string app = service.StageAsync(release, updateRoot, new Progress<(long, long)>(p => { lastDone = p.Item1; lastTotal = p.Item2; }), CancellationToken.None).GetAwaiter().GetResult();
+            Check(File.Exists(Path.Combine(app, "TerminalMgr.App.exe")) && File.Exists(Path.Combine(app, "Terminal", "index.html")) && app == Path.Combine(updateRoot, "0.2.14", "app"), "Staged folder wrong: " + app);
+            Check(WaitUntil(() => lastDone == lastTotal && lastTotal > 300_000, 2000), $"Progress {lastDone}/{lastTotal}");
+            Check(Directory.GetFileSystemEntries(Path.Combine(updateRoot, "0.2.14")).Select(Path.GetFileName).SequenceEqual(["app"]), "Zip or extract folder left behind");
+            File.WriteAllText(Path.Combine(updateRoot, "updater.log"), "log");
+            Directory.CreateDirectory(Path.Combine(updateRoot, "0.2.1"));
+            UpdateService.CleanUp(updateRoot);
+            Check(File.Exists(Path.Combine(updateRoot, "updater.log")) && Directory.GetDirectories(updateRoot).Length == 0, "Clean-up must remove staged folders but keep the log");
+        }
+    });
+    Test("Update service: wrong checksum, truncated download, broken package and cancel leave nothing behind", () =>
+    {
+        string Fails(string name, Action<LocalServer, string> sabotage, Func<UpdateService, UpdateRelease, string, CancellationToken, Task>? run = null, CancellationToken token = default)
+        {
+            var (server, zip, _) = FakeRelease(name);
+            using (server)
+            {
+                sabotage(server, zip);
+                using var service = new UpdateService(new Uri(server.BaseUrl + "api/latest"), allowLoopback: true);
+                var release = service.CheckAsync().GetAwaiter().GetResult().Release!;
+                string updateRoot = Path.Combine(root, "update-" + name);
+                try { service.StageAsync(release, updateRoot, null, token).GetAwaiter().GetResult(); return "no exception"; }
+                catch (Exception ex)
+                {
+                    bool clean = !Directory.Exists(updateRoot) || Directory.GetFileSystemEntries(updateRoot).Length == 0;
+                    return (clean ? "" : "LEFTOVER ") + ex.GetType().Name + ": " + ex.Message;
+                }
+            }
+        }
+        string wrong = Fails("badsum", (s, zip) => s.Routes["/dl/" + Path.GetFileName(zip) + ".sha256"] = c => LocalServer.Text(c, new string('0', 64) + "  " + Path.GetFileName(zip) + "\n"));
+        Check(wrong.StartsWith("InvalidDataException") && wrong.Contains("Prüfsumme"), "Wrong checksum: " + wrong);
+        string garbage = Fails("junksum", (s, zip) => s.Routes["/dl/" + Path.GetFileName(zip) + ".sha256"] = c => LocalServer.Text(c, "<html>Not Found</html>"));
+        Check(garbage.StartsWith("InvalidDataException"), "Garbage checksum file: " + garbage);
+        string truncated = Fails("cut", (s, zip) => s.Routes["/dl/" + Path.GetFileName(zip)] = c => LocalServer.Truncated(c, File.ReadAllBytes(zip), 100_000));
+        Check(!truncated.StartsWith("no exception") && !truncated.StartsWith("LEFTOVER"), "Truncated download: " + truncated);
+        string notFound = Fails("gone", (s, zip) => s.Routes.Remove("/dl/" + Path.GetFileName(zip)));
+        Check(!notFound.StartsWith("no exception") && !notFound.StartsWith("LEFTOVER"), "Missing file: " + notFound);
+        // A package without TerminalMgr.App.exe must be refused even if the checksum is right.
+        var (server2, zip2, _) = FakeRelease("noexe", withExe: false);
+        using (server2)
+        {
+            using var service = new UpdateService(new Uri(server2.BaseUrl + "api/latest"), allowLoopback: true);
+            var release = service.CheckAsync().GetAwaiter().GetResult().Release!;
+            string r = "no exception";
+            try { service.StageAsync(release, Path.Combine(root, "update-noexe"), null, CancellationToken.None).GetAwaiter().GetResult(); } catch (InvalidDataException ex) { r = ex.Message; }
+            Check(r.Contains("TerminalMgr.App.exe") && Directory.GetFileSystemEntries(Path.Combine(root, "update-noexe")).Length == 0, "Package without exe: " + r);
+        }
+        var (server3, zip3, _) = FakeRelease("cancel");
+        using (server3)
+        {
+            server3.Routes["/dl/" + Path.GetFileName(zip3)] = c => LocalServer.Slow(c, File.ReadAllBytes(zip3));
+            using var service = new UpdateService(new Uri(server3.BaseUrl + "api/latest"), allowLoopback: true);
+            var release = service.CheckAsync().GetAwaiter().GetResult().Release!;
+            using var cts = new CancellationTokenSource(300);
+            string updateRoot = Path.Combine(root, "update-cancel");
+            bool canceled = false;
+            try { service.StageAsync(release, updateRoot, null, cts.Token).GetAwaiter().GetResult(); } catch (OperationCanceledException) { canceled = true; }
+            Check(canceled && (!Directory.Exists(updateRoot) || Directory.GetFileSystemEntries(updateRoot).Length == 0), "Cancel must stop the download and clean up");
+        }
+    });
+    Test("Update service: no network, 404 and a slow server end quickly with a short message", () =>
+    {
+        var (dead, _, _) = FakeRelease("dead");
+        string deadUrl = dead.BaseUrl + "api/latest";
+        dead.Dispose(); // nobody listens there any more
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        using (var offline = new UpdateService(new Uri(deadUrl), allowLoopback: true))
+        {
+            var r = offline.CheckAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Check(r.Release is null && r.Error!.Contains("keine Verbindung") && clock.Elapsed < TimeSpan.FromSeconds(5), $"Offline: {r.Error} after {clock.Elapsed}");
+        }
+        var (server, _, _) = FakeRelease("slow");
+        using (server)
+        {
+            server.Routes.Remove("/api/latest");
+            using var service = new UpdateService(new Uri(server.BaseUrl + "api/latest"), allowLoopback: true);
+            Check(service.CheckAsync().GetAwaiter().GetResult().Error!.Contains("Kein Release gefunden"), "404 message");
+            server.Routes["/api/latest"] = c => LocalServer.Slow(c, Encoding.UTF8.GetBytes("{}"));
+            clock.Restart();
+            var slow = service.CheckAsync(TimeSpan.FromMilliseconds(600)).GetAwaiter().GetResult();
+            Check(slow.Error!.Contains("Zeitüberschreitung") && clock.Elapsed < TimeSpan.FromSeconds(3), $"Slow server: {slow.Error} after {clock.Elapsed}");
+        }
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");
@@ -929,6 +1195,72 @@ async Task<int> RealTmuxWindowScenario()
         await Remote("tmux kill-session -t tmgr-ta 2>/dev/null; tmux kill-session -t tmgr-tb 2>/dev/null; true");
     }
     return checks;
+}
+
+/// <summary>A tiny HTTP server on a free loopback port for the update tests; no internet and no GitHub involved.</summary>
+sealed class LocalServer : IDisposable
+{
+    private readonly System.Net.HttpListener _listener = new();
+    public readonly Dictionary<string, Func<System.Net.HttpListenerContext, Task>> Routes = [];
+    public string BaseUrl { get; }
+
+    public LocalServer()
+    {
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        BaseUrl = $"http://127.0.0.1:{port}/";
+        _listener.Prefixes.Add(BaseUrl);
+        _listener.Start();
+        _ = Task.Run(async () =>
+        {
+            while (_listener.IsListening)
+            {
+                System.Net.HttpListenerContext context;
+                try { context = await _listener.GetContextAsync(); } catch (Exception) { return; }
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (Routes.TryGetValue(context.Request.Url!.AbsolutePath, out var handler)) await handler(context);
+                        else { context.Response.StatusCode = 404; context.Response.Close(); }
+                    }
+                    catch (Exception) { try { context.Response.Abort(); } catch (Exception) { } }
+                });
+            }
+        });
+    }
+
+    public static Task Text(System.Net.HttpListenerContext c, string text) => Bytes(c, Encoding.UTF8.GetBytes(text));
+    public static async Task Bytes(System.Net.HttpListenerContext c, byte[] data)
+    {
+        c.Response.ContentLength64 = data.Length;
+        await c.Response.OutputStream.WriteAsync(data);
+        c.Response.Close();
+    }
+    /// <summary>Announces the full length, delivers only part of it and drops the connection.</summary>
+    public static async Task Truncated(System.Net.HttpListenerContext c, byte[] data, int deliver)
+    {
+        c.Response.ContentLength64 = data.Length;
+        await c.Response.OutputStream.WriteAsync(data.AsMemory(0, deliver));
+        await c.Response.OutputStream.FlushAsync();
+        c.Response.Abort();
+    }
+    /// <summary>Delivers the body slowly (about 3 s in total).</summary>
+    public static async Task Slow(System.Net.HttpListenerContext c, byte[] data)
+    {
+        c.Response.ContentLength64 = data.Length;
+        await Task.Delay(2000); // even a tiny body must be late, whatever the speed of the machine
+        for (int i = 0; i < data.Length; i += Math.Max(1, data.Length / 10))
+        {
+            await Task.Delay(300);
+            await c.Response.OutputStream.WriteAsync(data.AsMemory(i, Math.Min(Math.Max(1, data.Length / 10), data.Length - i)));
+            await c.Response.OutputStream.FlushAsync();
+        }
+        c.Response.Close();
+    }
+    public void Dispose() { try { _listener.Stop(); _listener.Close(); } catch (Exception) { } }
 }
 
 sealed class FakeSource : IAudioSource
