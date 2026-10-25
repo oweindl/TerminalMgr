@@ -1,4 +1,12 @@
 <Project>
+  <!-- The one place that holds the version. The release workflow checks that the tag vX.Y.Z matches it. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>$(Version).0</AssemblyVersion>
+    <FileVersion>$(Version).0</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <Product>TerminalMgr</Product>
+  </PropertyGroup>
   <PropertyGroup>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

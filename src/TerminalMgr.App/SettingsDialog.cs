@@ -53,7 +53,10 @@ public sealed class SettingsDialog : Window
         _silence = Field("Stilledauer bis zum Ende der Aufnahme in Sekunden (0,5 bis 10)", dictation.SilenceSeconds.ToString(CultureInfo.CurrentCulture));
         _threshold = Field("Pegelschwelle für Sprache (0,002 bis 0,2; Vorgabe 0,015, höher = unempfindlicher)", dictation.LevelThreshold.ToString(CultureInfo.CurrentCulture));
 
-        var buttons = new WrapPanel { Margin = new Thickness(0, 20, 0, 0) };
+        _panel.Children.Add(new TextBlock {
+            Text = $"TerminalMgr {AppInfo.Version} · Einstellungen, angeheftete Clipboard-Einträge und Modelle: {AppPaths.DataDirectory()}",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 18, 0, 0) });
+        var buttons = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
         _panel.Children.Add(buttons);
         var save = new Button { Content = "Speichern", IsDefault = true };
         save.Click += (_, _) => Save();

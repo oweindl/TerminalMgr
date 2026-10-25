@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Title = "TerminalMgr " + AppInfo.Version;
         _dataDirectory = AppPaths.DataDirectory();
         _store = new SettingsStore(_dataDirectory);
         ProfilesList.ItemsSource = _profiles;

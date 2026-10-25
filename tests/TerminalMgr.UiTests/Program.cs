@@ -24,6 +24,19 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private static void TestVersionIsShown()
+    {
+        // Directory.Build.props is the single source: it must reach the assembly, the window title and the file version.
+        string props = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Directory.Build.props"));
+        string declared = System.Text.RegularExpressions.Regex.Match(props, "<Version>([^<]+)</Version>").Groups[1].Value;
+        Check(declared.Length > 0 && AppInfo.Version == declared, $"AppInfo.Version '{AppInfo.Version}' differs from Directory.Build.props '{declared}'");
+        var main = new MainWindow();
+        Check(main.Title == "TerminalMgr " + declared, "Window title: " + main.Title);
+        var file = System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(AppInfo).Assembly.Location);
+        Check(file.FileVersion == declared + ".0" && file.ProductVersion!.StartsWith(declared), $"File version {file.FileVersion} / {file.ProductVersion}");
+        Console.WriteLine("PASS Version from Directory.Build.props reaches the title bar, the assembly and the file version: " + declared);
+    }
+
     private static void TestShortcutKeys()
     {
         Check(ShortcutKeys.FromWpf(System.Windows.Input.Key.Y) == "Y" && ShortcutKeys.FromWpf(System.Windows.Input.Key.D7) == "7"
@@ -132,6 +145,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestVersionIsShown();
             TestShortcutKeys();
             TestTmuxMenu();
             TestClipboardMonitoring();
