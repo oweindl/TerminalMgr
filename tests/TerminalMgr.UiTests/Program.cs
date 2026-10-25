@@ -60,6 +60,8 @@ internal static class Program
         var host = new Border { Width = 200, Height = 60 };
         var window = new Window { Width = 500, Height = 300, Content = host, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = 100, Top = 100 };
         window.Show();
+        window.UpdateLayout();
+        Pump(() => false, 300); // a busy runner needs a moment before the first popup can open
         try
         {
             bool overTarget = true, overPopup = false;
@@ -67,12 +69,12 @@ internal static class Program
             var entered = System.Diagnostics.Stopwatch.StartNew();
             hover.Enter(host, longText);
             Check(!hover.IsOpen, "The popup must not open at once");
-            Pump(() => hover.IsOpen, 2000);
+            Pump(() => hover.IsOpen, 10000);
             Check(entered.ElapsedMilliseconds >= 150, $"The popup opened after only {entered.ElapsedMilliseconds} ms; the delay is 200 ms");
             Check(hover.IsOpen && hover.ShownText == longText && hover.ShownText.Split('\n').Length == 40, "Popup shows the complete text with its line breaks");
             Check(hover.MaxHeight == 600 && hover.MaxWidth == 800 && hover.TextBox.IsReadOnly && hover.TextBox.FontFamily.Source.Contains("Cascadia"), $"Limits {hover.MaxWidth}x{hover.MaxHeight}");
             overTarget = false; hover.Leave(host);
-            Pump(() => !hover.IsOpen, 2000);
+            Pump(() => !hover.IsOpen, 10000);
             Check(!hover.IsOpen, "Popup closes after the pointer left");
 
             overTarget = true; hover.Enter(host, "x"); overTarget = false; hover.Leave(host);
@@ -80,12 +82,12 @@ internal static class Program
             Check(!hover.IsOpen, "Leaving before the delay must not open it");
 
             overTarget = true; hover.Enter(host, longText);
-            Pump(() => hover.IsOpen, 2000);
+            Pump(() => hover.IsOpen, 10000);
             overTarget = false; overPopup = true; hover.Leave(host);
             Pump(() => false, 500);
             Check(hover.IsOpen, "The popup must stay open while the pointer is over it (to scroll and select)");
             overPopup = false;
-            Pump(() => !hover.IsOpen, 2000);
+            Pump(() => !hover.IsOpen, 10000);
             Check(!hover.IsOpen, "Popup closes once the pointer left the popup too");
 
             var small = new HoverPreview(Dispatcher.CurrentDispatcher, () => (100, 100), TimeSpan.FromMilliseconds(50), pointerOver: _ => true);

@@ -21,7 +21,7 @@ if (args.Contains("--pty-child"))
 var passed = 0;
 var failures = new List<string>();
 void Check(bool value, string message) { if (!value) throw new Exception(message); }
-bool benchOnly = args.Any(a => a.StartsWith("--dictation-bench")); // the measuring mode runs on its own
+bool benchOnly = args.Any(a => a.StartsWith("--dictation-bench") || a == "--engine-smoke"); // the measuring mode runs on its own
 void Test(string name, Action action)
 {
     if (benchOnly) return;
@@ -1375,6 +1375,26 @@ if (args.Any(a => a.StartsWith("--whisper-smoke")))
         Console.WriteLine($"  Silence -> '{textSilent}'");
     }
     catch (Exception ex) { failures.Add("Whisper smoke: " + ex.Message); Console.WriteLine("FAIL " + ex); }
+}
+if (args.Contains("--engine-smoke"))
+{
+    // Does the Windows speech recognizer work at all on this machine? It records from the default microphone on its own.
+    try
+    {
+        var options = new DictationOptions { Language = "de" }.Normalized();
+        Console.WriteLine("Windows-Spracherkennung, Sprache vorbereiten: " + (await WindowsSpeechEngine.CheckAsync(options) ?? "ok"));
+        using var engine = new WindowsSpeechEngine(options);
+        var outcome = new TaskCompletionSource<string>();
+        engine.Interim += (c, t) => outcome.TrySetResult("Zwischenstand: " + c + " | " + t);
+        engine.Completed += r => outcome.TrySetResult("Ergebnis: '" + r.Text + "'");
+        engine.Failed += ex => outcome.TrySetResult((ex is SpeechUnavailableException ? "nicht verfügbar: " : "Fehler: ") + ex.Message);
+        engine.Start();
+        var spoken = Task.Run(() => { Thread.Sleep(2000); var audio = SpeechBench.Synthesize("de", "Starte bitte den Server."); Console.WriteLine("  (Windows-Stimme spricht über die Lautsprecher)"); SpeakAloud("Starte bitte den Server."); });
+        Console.WriteLine("Windows-Spracherkennung: " + await outcome.Task.WaitAsync(TimeSpan.FromSeconds(20)));
+        engine.Cancel();
+    }
+    catch (Exception ex) { Console.WriteLine("Windows-Spracherkennung: " + ex.Message); }
+    static void SpeakAloud(string text) { using var synth = new System.Speech.Synthesis.SpeechSynthesizer(); synth.SelectVoice("Microsoft Hedda Desktop"); synth.Speak(text); }
 }
 if (args.Any(a => a.StartsWith("--dictation-bench")))
 {
