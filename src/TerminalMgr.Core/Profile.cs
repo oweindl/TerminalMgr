@@ -9,6 +9,8 @@ public sealed record Profile
     public string Destination { get; init; } = "";
     public string? ConfigPath { get; init; }
     public bool AutoConnect { get; init; }
+    /// <summary>Connect again after the connection was lost (off by default).</summary>
+    public bool AutoReconnect { get; init; }
     public StartMode Mode { get; init; }
     public string TmuxSession { get; init; } = "main";
     public string Command { get; init; } = "";
@@ -50,9 +52,27 @@ public sealed record DictationOptions
     };
 }
 
+/// <summary>App shortcuts besides dictation (which keeps its own setting): terminal copy/paste and the session switch.</summary>
+public sealed record ShortcutOptions
+{
+    public string Copy { get; init; } = "Ctrl+Shift+C";
+    public string Paste { get; init; } = "Ctrl+Shift+V";
+    /// <summary>Modifier for session switching together with 1–9, one of <see cref="ShortcutRules.SessionModifiers"/>.</summary>
+    public string SessionModifier { get; init; } = "Alt";
+
+    public ShortcutOptions Normalized() => this with {
+        Copy = Shortcut.TryParse(Copy, out var copy) ? copy.ToString() : "Ctrl+Shift+C",
+        Paste = Shortcut.TryParse(Paste, out var paste) ? paste.ToString() : "Ctrl+Shift+V",
+        SessionModifier = ShortcutRules.SessionModifiers.Contains(SessionModifier) ? SessionModifier : "Alt"
+    };
+}
+
 public sealed record AppSettings
 {
     public DictationOptions Dictation { get; init; } = new();
+    public ShortcutOptions Shortcuts { get; init; } = new();
+    /// <summary>Start TerminalMgr when the user signs in to Windows (off by default).</summary>
+    public bool StartWithWindows { get; init; }
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     public int FontSize { get; init; } = 14;
