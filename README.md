@@ -66,6 +66,7 @@ Tests:
 
 ~~~powershell
 dotnet run --project tests/TerminalMgr.Tests -c Release
+dotnet run --project tests/TerminalMgr.UiTests -c Release
 cd web
 npm test
 ~~~

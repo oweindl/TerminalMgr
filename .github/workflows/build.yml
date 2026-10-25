@@ -19,6 +19,7 @@ jobs:
         working-directory: web
       - run: dotnet build TerminalMgr.sln -c Release
       - run: dotnet run --project tests/TerminalMgr.Tests -c Release --no-build
+      - run: dotnet run --project tests/TerminalMgr.UiTests -c Release --no-build
       - run: npm test
         working-directory: web
       - run: dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64

@@ -24,21 +24,7 @@
      <Button Content="Autostart-Profile verbinden" Click="ConnectAutomatic"/>
      <TextBlock Text="Alt+1 … Alt+9 · Session wechseln" FontSize="11" Foreground="#91A5B4" TextWrapping="Wrap" Margin="6,8"/>
     </StackPanel>
-    <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick">
-     <ListBox.ItemContainerStyle>
-      <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
-       <Setter Property="ContextMenu"><Setter.Value>
-        <ContextMenu>
-         <MenuItem Header="tmux-Session auswählen …" Click="ChooseTmuxSession" Tag="{Binding}"/>
-         <MenuItem Header="tmux-Fensterwahl öffnen (Ctrl+B w)" Click="OpenTmuxWindowPicker" Tag="{Binding}"/>
-         <Separator/>
-         <MenuItem Header="Verbinden" Click="ContextConnect" Tag="{Binding}"/>
-         <MenuItem Header="Trennen" Click="ContextDisconnect" Tag="{Binding}"/>
-         <MenuItem Header="Profil bearbeiten …" Click="ContextEdit" Tag="{Binding}"/>
-        </ContextMenu>
-       </Setter.Value></Setter>
-      </Style>
-     </ListBox.ItemContainerStyle>
+    <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
      <ListBox.ItemTemplate><DataTemplate><StackPanel>
       <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"/>
       <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#91A5B4" Margin="0,5,0,0"/>

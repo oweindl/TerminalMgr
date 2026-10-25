@@ -250,6 +250,28 @@ public partial class MainWindow : Window
             : $"Ctrl+B → tmux   ·   {_fontSize} px";
     }
 
+    private void ServerRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source) return;
+        var container = ItemsControl.ContainerFromElement(ProfilesList, source) as ListBoxItem;
+        if (container?.DataContext is not ProfileItem item) return;
+        ProfilesList.SelectedItem = item;
+        var menu = new ContextMenu { PlacementTarget = container };
+        void Add(string label, RoutedEventHandler click)
+        {
+            var entry = new MenuItem { Header = label, Tag = item };
+            entry.Click += click;
+            menu.Items.Add(entry);
+        }
+        Add("tmux-Session auswählen …", ChooseTmuxSession);
+        Add("tmux-Fensterwahl öffnen (Ctrl+B w)", OpenTmuxWindowPicker);
+        menu.Items.Add(new Separator());
+        Add("Verbinden", ContextConnect);
+        Add("Trennen", ContextDisconnect);
+        Add("Profil bearbeiten …", ContextEdit);
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
     private async void ChooseTmuxSession(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: ProfileItem item }) return;
