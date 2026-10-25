@@ -6,6 +6,7 @@ using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
@@ -17,7 +18,12 @@ namespace TerminalMgr.App;
 public partial class MainWindow : Window
 {
     private readonly ObservableCollection<ProfileItem> _profiles = [];
-    private readonly List<ClipboardEntry> _clips = [];
+    private readonly ClipboardList _clipList = new();
+    private AppSettings _settings = new();
+    private HwndSource? _hwndSource;
+    private uint _ownClipboardSequence;
+    private bool _renderingClips;
+    private Point _clipPressPoint;
     private readonly Dictionary<string, PtySession> _sessions = [];
     private readonly HashSet<string> _connecting = [];
     private readonly HashSet<string> _terminals = [];
@@ -35,7 +41,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TerminalMgr");
+        _dataDirectory = AppPaths.DataDirectory();
         _store = new SettingsStore(_dataDirectory);
         ProfilesList.ItemsSource = _profiles;
         _flush = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => FlushOutput(), Dispatcher);
@@ -46,10 +52,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            var settings = _store.Load();
+            var settings = _settings = _store.Load();
             _fontSize = Math.Clamp(settings.FontSize, 10, 28);
             foreach (var profile in settings.Profiles) _profiles.Add(new(profile));
-            _clips.AddRange(settings.PinnedClips.Where(c => c.Pinned));
+            _clipList.MaxUnpinned = Math.Clamp(settings.ClipHistoryLimit, 1, 1000);
+            _clipList.LoadPinned(settings.PinnedClips);
             if (_profiles.Count == 0)
             {
                 var config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
@@ -130,16 +137,18 @@ public partial class MainWindow : Window
                     if (index >= 0 && index < _profiles.Count) ProfilesList.SelectedIndex = index;
                     break;
                 case "copy":
-                    string text = m.GetProperty("text").GetString() ?? "";
+                    string text = ClipboardText.TrimTrailingSpaces(m.GetProperty("text").GetString() ?? "");
                     if (text.Length > 0)
                     {
                         AddClip(text, _profiles.FirstOrDefault(p => p.Profile.Id == id)?.Name ?? "Terminal");
-                        try { Clipboard.SetText(text); }
-                        catch (System.Runtime.InteropServices.COMException) { StatusText.Text = "Eintrag gesammelt; Windows-Zwischenablage ist belegt."; }
+                        SetWindowsClipboard(text);
                     }
                     break;
                 case "pasteRequest":
                     PasteSystemClipboard(id);
+                    break;
+                case "contextPaste":
+                    PasteActiveClip(id);
                     break;
             }
         }
@@ -305,10 +314,14 @@ public partial class MainWindow : Window
     {
         if (sender is MenuItem { Tag: ProfileItem item }) { ProfilesList.SelectedItem = item; EditProfile(sender, e); }
     }
+    private void ClipPressed(object sender, MouseButtonEventArgs e) => _clipPressPoint = e.GetPosition(null);
     private void DragClip(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed && sender is TextBlock { Tag: ClipItem item } block)
-            DragDrop.DoDragDrop(block, new DataObject(DataFormats.UnicodeText, item.Entry.Text), DragDropEffects.Copy);
+        if (e.LeftButton != MouseButtonState.Pressed || sender is not FrameworkElement { DataContext: ClipItem item } source) return;
+        var now = e.GetPosition(null);
+        if (Math.Abs(now.X - _clipPressPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(now.Y - _clipPressPoint.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        DragDrop.DoDragDrop(source, new DataObject(DataFormats.UnicodeText, item.Entry.Text), DragDropEffects.Copy);
     }
     private void AddProfile(object sender, RoutedEventArgs e)
     {
@@ -364,57 +377,127 @@ public partial class MainWindow : Window
     private void AddClip(string text, string source)
     {
         if (string.IsNullOrEmpty(text)) return;
-        if (text.Length > 1_000_000) { StatusText.Text = "Clipboard-Eintrag ist größer als 1 MB."; return; }
-        if (_clips.Any(c => c.Text == text && c.Pinned)) return;
-        _clips.RemoveAll(c => c.Text == text && !c.Pinned);
-        _clips.Insert(0, new(text, source, DateTimeOffset.Now));
-        while (_clips.Count(c => !c.Pinned) > 100)
-            _clips.RemoveAt(_clips.FindLastIndex(c => !c.Pinned));
+        if (_clipList.Add(text, source) is null) StatusText.Text = "Clipboard-Eintrag ist größer als 1 MB.";
         RenderClips();
     }
     private void RenderClips()
     {
         if (ClipsList is null) return;
         string search = ClipSearch?.Text ?? "";
-        ClipsList.ItemsSource = _clips.Where(c => (PinnedOnly?.IsChecked != true || c.Pinned)
+        var items = _clipList.Items.Where(c => (PinnedOnly?.IsChecked != true || c.Pinned)
             && (c.Text.Contains(search, StringComparison.OrdinalIgnoreCase) || c.Source.Contains(search, StringComparison.OrdinalIgnoreCase)))
             .Select(c => new ClipItem(c)).ToList();
+        _renderingClips = true;
+        try
+        {
+            ClipsList.ItemsSource = items;
+            ClipsList.SelectedItem = items.FirstOrDefault(i => i.Entry.Text == _clipList.Active?.Text);
+            if (ClipsList.SelectedItem is not null && _clipList.Items.FirstOrDefault()?.Text == _clipList.Active?.Text) ClipsList.ScrollIntoView(ClipsList.SelectedItem);
+        }
+        finally { _renderingClips = false; }
     }
     private void FilterClips(object sender, RoutedEventArgs e) => RenderClips();
-    private void ImportClipboard(object sender, RoutedEventArgs e)
+    private void ClipSelected(object sender, SelectionChangedEventArgs e)
     {
-        try { if (Clipboard.ContainsText()) AddClip(Clipboard.GetText(), "Windows"); }
-        catch (Exception ex) { ShowError("Zwischenablage konnte nicht gelesen werden.", ex); }
+        if (!_renderingClips && ClipsList.SelectedItem is ClipItem clip) _clipList.Activate(clip.Entry);
+    }
+    private void ClipDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source || FindAncestor<Button>(source) is not null) return;
+        if (ItemsControl.ContainerFromElement(ClipsList, source) is ListBoxItem { DataContext: ClipItem clip })
+        {
+            _clipList.Activate(clip.Entry);
+            if (Selected is { } item) PasteActiveClip(item.Profile.Id);
+        }
+    }
+    private static T? FindAncestor<T>(DependencyObject node) where T : DependencyObject
+    {
+        for (; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node)) if (node is T match) return match;
+        return null;
     }
     private void PasteSystemClipboard(string id)
     {
         try { if (_sessions.ContainsKey(id) && Clipboard.ContainsText()) Post(new { type = "paste", id, text = Clipboard.GetText() }); }
         catch (Exception ex) { ShowError("Einfügen fehlgeschlagen.", ex); }
     }
+    private void PasteActiveClip(string id)
+    {
+        if (!_sessions.ContainsKey(id)) { StatusText.Text = "Zum Einfügen zuerst eine laufende Session auswählen."; return; }
+        if (_clipList.Active is not { } clip) { StatusText.Text = "Die Clipboard-Liste ist leer."; return; }
+        Post(new { type = "paste", id, text = clip.Text });
+    }
     private void PasteClip(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: ClipItem clip } && Selected is { } item && _sessions.ContainsKey(item.Profile.Id))
+        {
+            _clipList.Activate(clip.Entry);
             Post(new { type = "paste", id = item.Profile.Id, text = clip.Entry.Text });
+        }
         else StatusText.Text = "Zum Einfügen zuerst eine laufende Session auswählen.";
     }
     private void PinClip(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: ClipItem clip }) return;
-        int index = _clips.IndexOf(clip.Entry);
-        if (index >= 0) _clips[index] = clip.Entry with { Pinned = !clip.Entry.Pinned };
+        _clipList.TogglePin(clip.Entry);
         RenderClips(); SaveSettings();
     }
     private void RemoveClip(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: ClipItem clip }) { _clips.Remove(clip.Entry); RenderClips(); SaveSettings(); }
+        if (sender is Button { Tag: ClipItem clip }) { _clipList.Remove(clip.Entry); RenderClips(); SaveSettings(); }
     }
-    private void ClearClipboardHistory(object sender, RoutedEventArgs e) { _clips.RemoveAll(c => !c.Pinned); RenderClips(); }
+    private void ClearClipboardHistory(object sender, RoutedEventArgs e) { _clipList.ClearUnpinned(); RenderClips(); }
+
+    private void SetWindowsClipboard(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+            _ownClipboardSequence = ClipboardNative.SequenceNumber; // our own write must not be captured again
+        }
+        catch (System.Runtime.InteropServices.COMException) { StatusText.Text = "Eintrag gesammelt; Windows-Zwischenablage ist belegt."; }
+    }
+
+    private void WindowSourceInitialized(object? sender, EventArgs e)
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        _hwndSource = HwndSource.FromHwnd(handle);
+        _hwndSource?.AddHook(WindowMessageHook);
+        if (!ClipboardNative.AddListener(handle)) StatusText.Text = "Zwischenablage kann nicht überwacht werden.";
+    }
+    private IntPtr WindowMessageHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == ClipboardNative.WmClipboardUpdate) Dispatcher.BeginInvoke(CaptureWindowsClipboard);
+        return IntPtr.Zero;
+    }
+    private void CaptureWindowsClipboard()
+    {
+        if (_closing) return;
+        bool own = ClipboardNative.SequenceNumber == _ownClipboardSequence;
+        if (own) return;
+        var snapshot = ClipboardNative.Snapshot(_hwndSource?.Handle ?? IntPtr.Zero);
+        if (snapshot is null) { StatusText.Text = "Windows-Zwischenablage ist belegt; Änderung nicht übernommen."; return; }
+        if (ClipboardCapturePolicy.ShouldCapture(!string.IsNullOrEmpty(snapshot.Text), snapshot.ExcludeFormatPresent, snapshot.CanIncludeInHistory, own))
+            AddClip(snapshot.Text!, "Windows");
+    }
+    private void OpenSettings(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SettingsDialog(_settings) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
+        _settings = result;
+        _clipList.MaxUnpinned = result.ClipHistoryLimit;
+        RenderClips(); SaveSettings();
+    }
 
     private void SaveSettings()
     {
         if (!_canSave) return;
-        try { _store.Save(new() { Profiles = _profiles.Select(p => p.Profile).ToList(),
-            PinnedClips = _clips.Where(c => c.Pinned).ToList(), FontSize = _fontSize }); }
+        try
+        {
+            _settings = _settings with { Profiles = _profiles.Select(p => p.Profile).ToList(),
+                PinnedClips = _clipList.Items.Where(c => c.Pinned).ToList(), FontSize = _fontSize,
+                ClipHistoryLimit = _clipList.MaxUnpinned };
+            _store.Save(_settings);
+        }
         catch (Exception ex) { ShowError("Einstellungen konnten nicht gespeichert werden.", ex); }
     }
     private void FontSmaller(object sender, RoutedEventArgs e) => SetFont(_fontSize - 1);
@@ -457,6 +540,7 @@ public partial class MainWindow : Window
         await Task.WhenAll(_sessions.Values.Select(s => s.DisposeAsync().AsTask()));
         _sessions.Clear();
         _flush.Stop();
+        if (_hwndSource is not null) { ClipboardNative.RemoveListener(_hwndSource.Handle); _hwndSource.RemoveHook(WindowMessageHook); }
         _closed = true;
         TerminalView.Dispose();
         Close();

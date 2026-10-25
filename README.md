@@ -38,16 +38,23 @@ Die tmux-Auswahl verwendet eine separate nicht interaktive SSH-Abfrage mit SSH-K
 
 ### Clipboard
 
-- Terminaltext markieren und Ctrl+Shift+C: in Windows kopieren und mit Serverherkunft sammeln.
-- Ctrl+Shift+V: Windows-Zwischenablage ins Terminal einfügen.
-- „Aus Zwischenablage“: einen Windows-Eintrag explizit übernehmen.
-- „Einfügen“ oder Text einer Karte ziehen: in die aktive Session übernehmen.
-- „Anheften“: Eintrag über Neustarts erhalten. Ungehefteter Verlauf bleibt nur im Speicher.
-- Bei aktivem tmux-Mausmodus zur lokalen Textauswahl die Umschalttaste verwenden.
+Maus wie bei PuTTY:
+
+- Links ziehen markiert (Doppelklick: Wort, Dreifachklick: Zeile). **Rechtsklick mit Markierung** kopiert in die Windows-Zwischenablage und in die Liste und hebt die Markierung auf. **Rechtsklick ohne Markierung** fügt den aktiven Listeneintrag in die Session ein.
+- Nachgestellte Leerzeichen je Zeile (Terminalbreite) werden beim Kopieren entfernt.
+- Der Rechtsklick im Terminal gehört immer der App und erreicht nie die Session. Bei aktivem Maus-Tracking (tmux `mouse on`, vim, htop) markiert **Umschalt + Ziehen** trotzdem lokal.
+- Ctrl+Shift+C kopiert die Markierung wie der Rechtsklick, Ctrl+Shift+V fügt die Windows-Zwischenablage ein.
+
+Clipboard-Liste (rechts, neueste oben):
+
+- Alles, was in Sessions markiert oder in einem anderen Programm kopiert wird, landet automatisch oben und ist aktiv. Die Herkunft ist der Sessionname oder „Windows“. Einträge von Passwortmanagern (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` = 0) werden nicht übernommen.
+- Erneut kopierter Text erzeugt kein Duplikat, sondern rückt nach oben.
+- Klick macht einen Eintrag aktiv (der nächste Rechtsklick fügt ihn ein), Doppelklick fügt ihn sofort in die aktive Session ein. Die Vorschau zeigt zwei Zeilen; längere Texte enden mit „…“ und zeigen z. B. „42 Zeilen“. Der Tooltip zeigt einen größeren Ausschnitt.
+- „Anheften“ erhält einen Eintrag über Neustarts. Ungeheftete Einträge bleiben im Speicher, höchstens 100 (einstellbar unter *Einstellungen*).
 
 Einfügen nutzt Bracketed Paste. Die App sendet keinen zusätzlichen Enter-Tastendruck. Remote-OSC52 ist deaktiviert; tmux-interne Copy-Mode-Puffer werden noch nicht automatisch in den lokalen Manager übernommen.
 
-Einstellungen und angeheftete Texte liegen in %LOCALAPPDATA%\TerminalMgr\settings.json. SSH-Schlüssel und Passwörter verwaltet OpenSSH. Angeheftete Texte werden als Klartext gespeichert.
+Einstellungen und angeheftete Texte liegen in %LOCALAPPDATA%\TerminalMgr\settings.json, also außerhalb des Installationsordners und bleiben bei Updates erhalten. SSH-Schlüssel und Passwörter verwaltet OpenSSH. Angeheftete Texte werden als Klartext gespeichert.
 
 ## Entwickeln
 
