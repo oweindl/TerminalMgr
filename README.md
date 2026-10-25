@@ -102,7 +102,8 @@ npm test
 Browsertests verwenden den installierten Microsoft Edge. Die Konsolentests starten echte lokale ConPTY-Kindprozesse. Zwei optionale lokale Integrationstests laufen nicht in CI:
 
 ~~~powershell
-# echte SSH-Prüfungen auf dem Alias linuxdev: Terminaltyp, Größe, tmux-Fensterliste, Anhängen und Wechseln (legt Test-Sessions tmgr-ta/tmgr-tb an und räumt sie auf)
+# echte SSH-Prüfungen auf einem eigenen Test-Host (SSH-Alias in TERMINALMGR_SSH_TEST_HOST, der Server braucht tmux; Anmeldung per Key oder Agent): Terminaltyp, Größe, tmux-Fensterliste, Anhängen und Wechseln (legt Test-Sessions tmgr-ta/tmgr-tb an und räumt sie auf)
+$env:TERMINALMGR_SSH_TEST_HOST = "mein-alias"
 dotnet run --project tests/TerminalMgr.Tests -c Release -- --ssh-smoke
 # echtes whisper.cpp mit Windows-Sprachausgabe als Testaudio; lädt das Modell einmalig nach %TEMP% (tiny, small-q5_1, ...)
 dotnet run --project tests/TerminalMgr.Tests -c Release -- --whisper-smoke=small-q5_1
@@ -113,6 +114,8 @@ Eigenständiges Windows-x64-Paket:
 ~~~powershell
 dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
 ~~~
+
+Das Repository enthält keine eigenen Serverdaten (keine settings.json, SSH-Config, Hostnamen, Schlüssel); `.gitignore` hält Einstellungen, Exportdateien (`*.tmconfig`), SSH-Config-Kopien, `*.pem` und `id_*` fern. `build.yml` prüft bei jedem Push die gesamte Git-Historie mit gitleaks und bricht bei einem Fund ab (`.gitleaks.toml` nimmt nur das gebündelte xterm.js aus). Lokal: gitleaks von https://github.com/gitleaks/gitleaks/releases laden und `gitleaks git --log-opts="--all" --redact .` ausführen.
 
 ### Lokal installieren
 

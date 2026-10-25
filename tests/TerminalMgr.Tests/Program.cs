@@ -26,14 +26,16 @@ void Test(string name, Action action)
     try { action(); passed++; Console.WriteLine("PASS " + name); }
     catch (Exception ex) { failures.Add(name + ": " + ex.Message); Console.WriteLine("FAIL " + name + ": " + ex.Message); }
 }
+// The real SSH checks (--ssh-smoke) use an SSH alias of the tester's own, never one that is written into the repository.
+string sshHost = Environment.GetEnvironmentVariable("TERMINALMGR_SSH_TEST_HOST") ?? "";
 var root = Path.Combine(Path.GetTempPath(), "TerminalMgr-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
 {
     Test("SSH config mode preserves RemoteCommand / RequestTTY", () =>
     {
-        var a = SshCommand.Arguments(new() { Name = "dev", Destination = "linuxdev" });
-        Check(!a.Contains("-tt") && !a.Contains("RemoteCommand=none") && a.Last() == "linuxdev", "Config mode overrides SSH config");
+        var a = SshCommand.Arguments(new() { Name = "dev", Destination = "devbox" });
+        Check(!a.Contains("-tt") && !a.Contains("RemoteCommand=none") && a.Last() == "devbox", "Config mode overrides SSH config");
     });
     Test("tmux mode overrides RemoteCommand once and quotes new-session program", () =>
     {
@@ -67,7 +69,7 @@ try
     Test("Import multi-alias Host blocks, deduplicate and ignore patterns", () =>
     {
         var config = Path.Combine(root, "config");
-        File.WriteAllText(config, "Host linuxdev\n HostName dev.local\nHost linuxdev webserver webtest omv contabo\n RequestTTY yes\n RemoteCommand tmux new -A -s main\nHost * !bad *.local\nHost linuxdev-code # VS Code\n RequestTTY no\n");
+        File.WriteAllText(config, "Host devbox\n HostName dev.example.test\nHost devbox server1 server2 server3 server4\n RequestTTY yes\n RemoteCommand tmux new -A -s main\nHost * !bad *.example.test\nHost devbox-code # VS Code\n RequestTTY no\n");
         var imported = SshConfigImporter.Import(config);
         Check(imported.Count == 6, "Wrong alias count: " + imported.Count);
         Check(imported.All(p => p.Mode == StartMode.SshConfig && !p.AutoConnect && p.ConfigPath == config), "Unsafe import defaults");
@@ -679,7 +681,12 @@ try
     catch (Exception ex) { failures.Add("ConPTY integration: " + ex.Message); Console.WriteLine("FAIL " + ex); }
 }
 finally { Directory.Delete(root, recursive: true); }
-if (args.Contains("--ssh-smoke"))
+if (args.Contains("--ssh-smoke") && sshHost.Length == 0)
+{
+    failures.Add("SSH smoke: set TERMINALMGR_SSH_TEST_HOST to an SSH alias whose server runs tmux (key or agent login).");
+    Console.WriteLine("FAIL " + failures[^1]);
+}
+else if (args.Contains("--ssh-smoke"))
 {
     var session = new PtySession();
     var transcript = new StringBuilder();
@@ -691,16 +698,16 @@ if (args.Contains("--ssh-smoke"))
     {
         string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
         session.Start(ssh, ["-tt", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            "linuxdev", "printf 'TERM:%s\n' \"$TERM\"; stty size; tput clear && printf 'TERMINFO_OK\n'; tmux -V"], 132, 47);
+            sshHost, "printf 'TERM:%s\n' \"$TERM\"; stty size; tput clear && printf 'TERMINFO_OK\n'; tmux -V"], 132, 47);
         int code = await exited.Task.WaitAsync(TimeSpan.FromSeconds(20));
         await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         string output;
         lock (transcriptLock) output = transcript.ToString();
         Check(code == 0 && output.Contains("TERM:xterm-256color") && output.Contains("47 132") && output.Contains("TERMINFO_OK"),
             "Remote smoke failed (exit " + code + "): " + output);
-        passed++; Console.WriteLine("PASS Real SSH linuxdev: TERM, remote PTY size, terminfo and tmux available");
-        var sessions = await new TmuxSessionQuery().ListAsync(new() { Name = "linuxdev", Destination = "linuxdev" });
-        Check(sessions.Count > 0, "Expected existing tmux sessions on linuxdev");
+        passed++; Console.WriteLine("PASS Real SSH test host: TERM, remote PTY size, terminfo and tmux available");
+        var sessions = await new TmuxSessionQuery().ListAsync(new() { Name = "testhost", Destination = sshHost });
+        Check(sessions.Count > 0, "Expected existing tmux sessions on the test host");
         passed++; Console.WriteLine("PASS Real SSH tmux session discovery: " + sessions.Count + " sessions");
         passed += await RealTmuxWindowScenario();
         passed += await RealExitCodeScenario();
@@ -780,11 +787,11 @@ Environment.ExitCode = failures.Count == 0 ? 0 : 1;
 async Task<int> RealOsc52Scenario()
 {
     string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
-    var profile = new Profile { Name = "linuxdev", Destination = "linuxdev" };
+    var profile = new Profile { Name = "testhost", Destination = sshHost };
     async Task<string> Remote(string command)
     {
         var start = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "linuxdev", command }) start.ArgumentList.Add(a);
+        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", sshHost, command }) start.ArgumentList.Add(a);
         using var process = System.Diagnostics.Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
@@ -837,7 +844,7 @@ async Task<int> RealExitCodeScenario()
         session.Exited += code => exited.TrySetResult(code);
         try
         {
-            session.Start(ssh, ["-tt", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "linuxdev", remoteCommand], 100, 30);
+            session.Start(ssh, ["-tt", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", sshHost, remoteCommand], 100, 30);
             return await exited.Task.WaitAsync(TimeSpan.FromSeconds(30));
         }
         finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
@@ -853,16 +860,16 @@ async Task<int> RealExitCodeScenario()
     return 1;
 }
 
-// Real tmux on linuxdev with throw-away sessions (tmgr-ta / tmgr-tb); the user's own sessions are never touched.
+// Real tmux on the test host with throw-away sessions (tmgr-ta / tmgr-tb); the user's own sessions are never touched.
 async Task<int> RealTmuxWindowScenario()
 {
     int checks = 0;
-    var profile = new Profile { Name = "linuxdev", Destination = "linuxdev" };
+    var profile = new Profile { Name = "testhost", Destination = sshHost };
     string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
     async Task<string> Remote(string command)
     {
         var start = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "linuxdev", command }) start.ArgumentList.Add(a);
+        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", sshHost, command }) start.ArgumentList.Add(a);
         using var process = System.Diagnostics.Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
