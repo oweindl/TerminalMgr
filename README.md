@@ -77,6 +77,16 @@ Gesprochener Text landet in einem Diktatfenster über dem Terminal, ist dort kor
 - **Automatische Wiederverbindung** (Profil, standardmäßig aus): Geht die Verbindung verloren (SSH-Exit 255 oder bei Windows OpenSSH -1 für „Verbindung vom Server geschlossen“), verbindet TerminalMgr nach 2, 4, 8, 16 und danach 30 Sekunden neu, höchstens zehnmal. Eine Verbindung, die länger als eine Minute hielt, setzt den Zähler zurück. Normale Enden (exit, tmux-Detach, Fehler des Startbefehls) und „Trennen“ lösen nichts aus. Eine wiederverbundene Session nimmt dem Benutzer die Auswahl nicht weg. Wurde per tmux-Auswahl an eine bestimmte Session angehängt, hängt der Wiederaufbau wieder an dieselbe.
 - **Start mit Windows** (*Einstellungen*, standardmäßig aus): trägt die EXE unter `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` ein (ohne Administratorrechte, sichtbar unter Windows-Einstellungen > Apps > Autostart). Es registriert sich nur die installierte `TerminalMgr.App.exe`; verschiebt man die App, passt der nächste Start den Eintrag an.
 
+### Konfiguration exportieren und importieren
+
+Profile (mit allen Optionen), App-Einstellungen, angeheftete Clipboard-Einträge und die SSH-Host-Blöcke der Profile gehen in eine `.tmconfig`-Datei (JSON). Optional ist sie mit AES-256-GCM verschlüsselt (Schlüssel per PBKDF2 aus dem Passwort).
+
+- Nie enthalten: private Schlüssel, `known_hosts`, Passwörter, das Whisper-Modell, Mikrofonwahl, „Start mit Windows“ und die übersprungene Update-Version. Verweist ein Host-Block auf eine Schlüsseldatei, nennt der Export sie; sie muss separat kopiert werden.
+- Angeheftete Clipboard-Einträge sind in der Vorgabe abgewählt, weil sie Geheimnisse enthalten können.
+- Der Import zeigt vorher eine Vorschau: neue und gleichnamige Profile (je Konflikt überspringen, ersetzen oder als Kopie anlegen), Modus „Zusammenführen“ oder „Alles ersetzen“. Vor dem Schreiben entstehen `backup\settings-<Zeit>.json` im Datenordner und `config.bak-<Zeit>` neben der SSH-Config; Host-Blöcke werden nur angehängt, bereits definierte Hosts nie überschrieben.
+- Danach prüft die App jedes importierte Profil mit `ssh -G` und meldet fehlende Schlüsseldateien und nicht definierte Hosts.
+- Eine Datei aus einer neueren Programmversion wird mit klarer Meldung abgelehnt.
+
 ## Entwickeln
 
 .NET 8 SDK, Node.js und Windows:

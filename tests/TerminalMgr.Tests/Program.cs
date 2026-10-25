@@ -846,6 +846,202 @@ try
         Check(limited.ExpandedText is null, "Trimming the list must forget an entry that dropped out");
     });
 
+    AppSettings ExportFixture() => new()
+    {
+        Profiles = [new Profile { Id = "p1", Name = "devbox", Destination = "devbox", AutoConnect = true, AutoReconnect = true, Mode = StartMode.Tmux, TmuxSession = "main", Command = "htop" },
+                    new Profile { Id = "p2", Name = "server1", Destination = "srv@example.test", Mode = StartMode.Command, Command = "exec bash -l" }],
+        PinnedClips = [new("geheimes-passwort-hinweis", "devbox", DateTimeOffset.Parse("2026-10-25T10:00:00+00:00"), true), new("lose", "devbox", DateTimeOffset.Now, false)],
+        FontSize = 17, ClipHistoryLimit = 250, AcceptOsc52 = false, StartWithWindows = true,
+        Shortcuts = new() { Copy = "Ctrl+Alt+C", SessionModifier = "Ctrl+Alt" },
+        Update = new() { CheckOnStart = false, SkippedVersion = "0.2.9" },
+        Dictation = new() { Shortcut = "Ctrl+Shift+D", Model = "small", Microphone = "Headset", Language = "auto", InitialPrompt = "tmux, git", SilenceSeconds = 2.5, LevelThreshold = 0.03 }
+    };
+    var all = new ExportSelection(true, true, true, true);
+    Test("Config export: only the chosen parts, and nothing machine-bound or secret", () =>
+    {
+        var settings = ExportFixture();
+        string json = Encoding.UTF8.GetString(ConfigFile.Serialize(ConfigFile.Build(settings, all, []), "0.2.15", DateTimeOffset.Now, null));
+        Check(json.Contains("\"devbox\"") && json.Contains("server1") && json.Contains("geheimes-passwort-hinweis") && !json.Contains("\"lose\""), "Profiles or pinned entries wrong");
+        foreach (string forbidden in new[] { "small", "Headset", "StartWithWindows", "SkippedVersion", "0.2.9", "Microphone", "\"Model\"" })
+            Check(!json.Contains(forbidden), "Export contains '" + forbidden + "'");
+        var none = ConfigFile.Build(settings, new ExportSelection(false, false, false, false), []);
+        Check(none.Profiles is null && none.Settings is null && none.PinnedClips is null && none.SshHosts is null, "Nothing selected must export nothing");
+        string noPins = Encoding.UTF8.GetString(ConfigFile.Serialize(ConfigFile.Build(settings, new ExportSelection(true, true, false, false), []), "0.2.15", DateTimeOffset.Now, null));
+        Check(!noPins.Contains("geheimes-passwort-hinweis") && !noPins.Contains("pinnedClips", StringComparison.OrdinalIgnoreCase), "Pinned entries must stay out unless chosen");
+    });
+    Test("Config file: format header, round trip of profiles and settings, empty parts stay empty", () =>
+    {
+        var settings = ExportFixture();
+        var content = ConfigFile.Build(settings, all, [new SshHostBlock(["devbox"], "Host devbox\n  HostName dev.example.test\n  User me")]);
+        byte[] file = ConfigFile.Serialize(content, "0.2.15", DateTimeOffset.Parse("2026-10-25T12:00:00+00:00"), null);
+        var info = ConfigFile.Inspect(file);
+        Check(info is { FormatVersion: 1, AppVersion: "0.2.15", Encrypted: false } && info.Exported.Year == 2026, "Header: " + info);
+        string text = Encoding.UTF8.GetString(file);
+        Check(text.Contains("\"format\": \"tmconfig\"") && text.Contains("\"formatVersion\": 1"), "Format fields");
+        var (_, back) = ConfigFile.Parse(file, null);
+        Check(back.Profiles!.SequenceEqual(settings.Profiles) && back.Profiles![0].AutoReconnect && back.Profiles[0].Command == "htop", "Profiles differ");
+        Check(back.Settings is { FontSize: 17, ClipHistoryLimit: 250, AcceptOsc52: false, CheckForUpdates: false } s && s.Shortcuts.Copy == "Ctrl+Alt+C" && s.Dictation is { Shortcut: "Ctrl+Shift+D", Language: "auto", SilenceSeconds: 2.5 }, "Settings differ");
+        Check(back.PinnedClips!.Single().Text == "geheimes-passwort-hinweis" && back.SshHosts!.Single().Text.Contains("HostName dev.example.test"), "Pinned or hosts differ");
+        var (_, empty) = ConfigFile.Parse(ConfigFile.Serialize(new ConfigContent(), "0.2.15", DateTimeOffset.Now, null), null);
+        Check(empty.Profiles is null && empty.Settings is null, "Empty file");
+    });
+    Test("Config file: password protection - right password only, no plain text, tampering detected", () =>
+    {
+        var content = ConfigFile.Build(ExportFixture(), all, []);
+        byte[] file = ConfigFile.Serialize(content, "0.2.15", DateTimeOffset.Now, "Geheim-123");
+        string text = Encoding.UTF8.GetString(file);
+        Check(ConfigFile.Inspect(file).Encrypted && !text.Contains("devbox") && !text.Contains("geheimes-passwort-hinweis") && text.Contains("AES-256-GCM") && text.Contains("PBKDF2-SHA256"), "Plain text visible or header wrong");
+        Check(ConfigFile.Parse(file, "Geheim-123").Content.Profiles!.Count == 2, "Right password refused");
+        foreach (string wrong in new[] { "falsch", "geheim-123", "Geheim-123 " })
+        { bool refused = false; try { ConfigFile.Parse(file, wrong); } catch (ConfigPasswordException) { refused = true; } Check(refused, "Wrong password accepted: " + wrong); }
+        bool needsPassword = false; try { ConfigFile.Parse(file, null); } catch (ConfigPasswordException ex) { needsPassword = ex.Message.Contains("passwortgeschützt"); }
+        Check(needsPassword, "A protected file without password must ask for one");
+        Check(!ConfigFile.Serialize(content, "0.2.15", DateTimeOffset.Now, "Geheim-123").AsSpan().SequenceEqual(file), "Salt and nonce must differ between exports");
+        string tampered = text.Replace("\"data\": \"", "\"data\": \"AAAA");
+        bool detected = false; try { ConfigFile.Parse(Encoding.UTF8.GetBytes(tampered), "Geheim-123"); } catch (ConfigPasswordException) { detected = true; } catch (ConfigFormatException) { detected = true; }
+        Check(detected, "Tampered data accepted");
+    });
+    Test("Config file: newer formats, other files, garbage and oversize are refused with a clear message", () =>
+    {
+        byte[] Json(string s) => Encoding.UTF8.GetBytes(s);
+        void Refuses(byte[] file, string expected, string what)
+        { try { ConfigFile.Parse(file, null); throw new Exception("Accepted " + what); } catch (ConfigFormatException ex) { Check(ex.Message.Contains(expected), what + ": " + ex.Message); } }
+        Refuses(Json("{\"format\":\"tmconfig\",\"formatVersion\":2,\"appVersion\":\"9.0.0\",\"exported\":\"2026-10-25T12:00:00+00:00\",\"content\":{}}"), "neueren Version", "newer format");
+        Refuses(Json("{\"format\":\"tmconfig\",\"formatVersion\":0,\"content\":{}}"), "ungültig", "version 0");
+        Refuses(Json("{\"format\":\"other\",\"formatVersion\":1}"), "keine TerminalMgr-Konfigurationsdatei", "other format");
+        Refuses(Json("this is not json"), "keine TerminalMgr-Konfigurationsdatei", "garbage");
+        Refuses(Json(""), "keine TerminalMgr-Konfigurationsdatei", "empty file");
+        Refuses(new byte[(int)ConfigFile.MaxFileBytes + 1], "groß", "oversize");
+        Refuses(Json("{\"format\":\"tmconfig\",\"formatVersion\":1,\"encryption\":{\"algorithm\":\"AES-256-GCM\"}}"), "fehlen", "encrypted without data");
+    });
+    string SshHome(string name, out string config)
+    {
+        string home = Path.Combine(root, "ssh-" + name);
+        Directory.CreateDirectory(Path.Combine(home, ".ssh", "conf.d"));
+        config = Path.Combine(home, ".ssh", "config");
+        File.WriteAllText(Path.Combine(home, ".ssh", "conf.d", "extra.conf"), "Host extra\n  HostName extra.example.test\n  IdentityFile ~/.ssh/extra_key\n");
+        File.WriteAllText(config, "# my servers\nInclude conf.d/*.conf\n\nHost devbox devbox-alt\n  HostName dev.example.test\n  User me\n  IdentityFile ~/.ssh/dev_key\n  RemoteCommand tmux new -A -s main\n\n# comment between\nHost server1\n  HostName s1.example.test\n\nMatch host *.internal\n  User root\n\nHost *\n  ServerAliveInterval 30\n\nHost wild-*\n  User x\n");
+        return home;
+    }
+    Test("SSH config blocks: read with includes, skip Match, pick the blocks of the exported profiles, list key files", () =>
+    {
+        string home = SshHome("read", out string config);
+        var blocks = SshConfigBlocks.Read(config, home);
+        Check(blocks.Select(b => string.Join(",", b.Aliases)).SequenceEqual(["extra", "devbox,devbox-alt", "server1", "*", "wild-*"]), "Blocks: " + string.Join(" | ", blocks.Select(b => string.Join(",", b.Aliases))));
+        Check(blocks[1].Text.StartsWith("Host devbox devbox-alt") && blocks[1].Text.Contains("RemoteCommand tmux new -A -s main") && !blocks[1].Text.Contains("server1") && !blocks[2].Text.Contains("Match"), "Block boundaries wrong");
+        var profiles = new[] { new Profile { Name = "a", Destination = "devbox-alt" }, new Profile { Name = "b", Destination = "devbox" }, new Profile { Name = "c", Destination = "server1" }, new Profile { Name = "d", Destination = "nicht-vorhanden" }, new Profile { Name = "e", Destination = "me@host.example.test" }, new Profile { Name = "f", Destination = "*" } };
+        var picked = SshConfigBlocks.ForProfiles(profiles, config, home);
+        Check(picked.Count == 2 && picked[0].Aliases.Contains("devbox") && picked[1].Aliases.Single() == "server1", "Picked: " + string.Join(" | ", picked.Select(b => string.Join(",", b.Aliases))));
+        Check(SshConfigBlocks.IdentityFiles(picked).SequenceEqual(["~/.ssh/dev_key"]), "Key files: " + string.Join(",", SshConfigBlocks.IdentityFiles(picked)));
+        var aliases = SshConfigBlocks.ExistingAliases(config, home);
+        Check(aliases.SetEquals(["extra", "devbox", "devbox-alt", "server1"]) && aliases.Contains("DEVBOX"), "Existing aliases: " + string.Join(",", aliases));
+        Check(SshConfigBlocks.Read(Path.Combine(root, "gibtsnicht"), home).Count == 0, "Missing file");
+    });
+    Test("SSH config blocks: appending keeps the old text, marks the import and keeps the line ending style", () =>
+    {
+        var block = new SshHostBlock(["neu"], "Host neu\n  HostName n.example.test");
+        string lf = SshConfigBlocks.AppendBlocks("Host alt\n  User x", [block], DateTimeOffset.Parse("2026-10-25T12:00:00+00:00"));
+        Check(lf.StartsWith("Host alt\n  User x\n") && lf.Contains("# Importiert von TerminalMgr am 2026-10-25") && lf.Contains("Host neu\n  HostName n.example.test") && !lf.Contains('\r'), "LF: " + lf.Replace("\n", "\\n"));
+        string crlf = SshConfigBlocks.AppendBlocks("Host alt\r\n  User x\r\n", [block], DateTimeOffset.Now);
+        Check(crlf.StartsWith("Host alt\r\n  User x\r\n") && crlf.Contains("Host neu\r\n  HostName") && !crlf.Replace("\r\n", "").Contains('\n'), "CRLF must stay uniform");
+        Check(SshConfigBlocks.AppendBlocks("", [block], DateTimeOffset.Now).Contains("Host neu"), "Empty config");
+    });
+    Test("Config import: new profiles are added, same names are conflicts resolved by skip, replace or copy", () =>
+    {
+        var current = new AppSettings { Profiles = [new Profile { Id = "c1", Name = "Devbox", Destination = "old-dev" }, new Profile { Id = "c2", Name = "keep", Destination = "keep" }] };
+        var incoming = new ConfigContent { Profiles = [new Profile { Id = "i1", Name = "devbox", Destination = "new-dev", AutoReconnect = true }, new Profile { Id = "i2", Name = "frisch", Destination = "fresh" }, new Profile { Id = "i3", Name = "keep", Destination = "other" }] };
+        var plan = ConfigImporter.BuildPlan(current, incoming, [], ImportMode.Merge);
+        Check(plan.Profiles.Count(p => p.Conflict) == 2 && !plan.Profiles.Single(p => p.Incoming.Name == "frisch").Conflict && plan.Profiles[0].Existing!.Id == "c1", "Plan: conflicts are found by name, ignoring case");
+        var skip = ConfigImporter.Apply(current, incoming, plan, new Dictionary<string, ConflictChoice>(), true, true, true, true);
+        Check(skip.Settings.Profiles.Count == 3 && skip.Settings.Profiles.Single(p => p.Name == "Devbox").Destination == "old-dev" && skip.Skipped.SequenceEqual(["devbox", "keep"]) && skip.Added.Single().Name == "frisch", "Default must skip conflicts");
+        var replace = ConfigImporter.Apply(current, incoming, plan, new Dictionary<string, ConflictChoice> { ["i1"] = ConflictChoice.Replace, ["i3"] = ConflictChoice.Skip }, true, true, true, true);
+        var replaced = replace.Settings.Profiles.Single(p => p.Id == "c1");
+        Check(replaced.Destination == "new-dev" && replaced.AutoReconnect && replaced.Name == "devbox" && replace.Settings.Profiles.Count == 3, "Replace keeps the Id of the existing profile");
+        var copy = ConfigImporter.Apply(current, incoming, plan, new Dictionary<string, ConflictChoice> { ["i1"] = ConflictChoice.Copy, ["i3"] = ConflictChoice.Copy }, true, true, true, true);
+        Check(copy.Settings.Profiles.Count == 5 && copy.Settings.Profiles.Any(p => p.Name == "devbox (Kopie)" && p.Destination == "new-dev") && copy.Settings.Profiles.Any(p => p.Name == "keep (Kopie)") && copy.Settings.Profiles.Select(p => p.Id).Distinct().Count() == 5, "Copies need new Ids and unique names");
+        var again = ConfigImporter.Apply(copy.Settings, incoming, ConfigImporter.BuildPlan(copy.Settings, incoming, [], ImportMode.Merge), new Dictionary<string, ConflictChoice> { ["i1"] = ConflictChoice.Copy }, true, true, true, true);
+        Check(again.Settings.Profiles.Any(p => p.Name == "devbox (Kopie) 2"), "A second copy gets a numbered name");
+        Check(ConfigImporter.Apply(current, incoming, plan, new Dictionary<string, ConflictChoice>(), false, true, true, true).Settings.Profiles.Count == 2, "Profiles unchecked must not be imported");
+    });
+    Test("Config import: replace-all swaps the lists, merge keeps what is there, settings keep machine-bound values", () =>
+    {
+        var current = ExportFixture() with { Profiles = [new Profile { Id = "c1", Name = "devbox", Destination = "old" }, new Profile { Id = "c2", Name = "weg", Destination = "weg" }] };
+        var incoming = new ConfigContent {
+            Profiles = [new Profile { Id = "i1", Name = "devbox", Destination = "new" }, new Profile { Id = "i2", Name = "neu", Destination = "neu" }],
+            Settings = new ExportedSettings { FontSize = 99, ClipHistoryLimit = 5000, AcceptOsc52 = true, CheckForUpdates = true, Shortcuts = new() { Paste = "Ctrl+Alt+V" }, Dictation = new() { Shortcut = "F9", Language = "en", SilenceSeconds = 1, LevelThreshold = 0.02, InitialPrompt = "x" } },
+            PinnedClips = [new("neu-angeheftet", "x", DateTimeOffset.Now, true), new("geheimes-passwort-hinweis", "x", DateTimeOffset.Now, true)] };
+        var plan = ConfigImporter.BuildPlan(current, incoming, [], ImportMode.ReplaceAll);
+        var result = ConfigImporter.Apply(current, incoming, plan, new Dictionary<string, ConflictChoice>(), true, true, true, true).Settings;
+        Check(result.Profiles.Select(p => p.Name).SequenceEqual(["devbox", "neu"]) && result.Profiles[0].Id == "c1" && result.Profiles[0].Destination == "new", "Replace-all profiles / ids");
+        Check(result.PinnedClips.Select(c => c.Text).SequenceEqual(["neu-angeheftet", "geheimes-passwort-hinweis"]), "Replace-all pinned entries");
+        Check(result.FontSize == 28 && result.ClipHistoryLimit == 1000 && result.Shortcuts.Paste == "Ctrl+Alt+V" && result.Dictation is { Shortcut: "F9", Language: "en" }, "Settings from the file (clamped)");
+        Check(result.Dictation.Model == "small" && result.Dictation.Microphone == "Headset" && result.StartWithWindows && result.Update.SkippedVersion == "0.2.9", "Model, microphone, Windows start and skipped version stay local");
+        var mergePlan = ConfigImporter.BuildPlan(current, incoming, [], ImportMode.Merge);
+        var merged = ConfigImporter.Apply(current, incoming, mergePlan, new Dictionary<string, ConflictChoice>(), true, false, true, false).Settings;
+        Check(merged.Profiles.Select(p => p.Name).OrderBy(n => n).SequenceEqual(["devbox", "neu", "weg"]) && merged.FontSize == 17 && merged.PinnedClips.Count(c => c.Text == "geheimes-passwort-hinweis") == 1 && merged.PinnedClips.Any(c => c.Text == "neu-angeheftet") && merged.PinnedClips.Count(c => c.Pinned) == 2, "Merge keeps current data and adds new pinned entries once");
+        var noParts = ConfigImporter.Apply(current, new ConfigContent(), ConfigImporter.BuildPlan(current, new ConfigContent(), [], ImportMode.ReplaceAll), new Dictionary<string, ConflictChoice>(), true, true, true, true).Settings;
+        Check(noParts.Profiles.SequenceEqual(current.Profiles) && noParts.PinnedClips.SequenceEqual(current.PinnedClips) && noParts.FontSize == current.FontSize
+            && noParts.Dictation == current.Dictation && noParts.Shortcuts == current.Shortcuts && noParts.Update == current.Update && noParts.StartWithWindows == current.StartWithWindows,
+            "Replace-all of a file without those parts must change nothing");
+    });
+    Test("Config import: existing SSH hosts are shown as conflicts and are never part of what gets written", () =>
+    {
+        var incoming = new ConfigContent { SshHosts = [new SshHostBlock(["devbox", "devbox-alt"], "Host devbox devbox-alt\n  HostName a"), new SshHostBlock(["neu"], "Host neu\n  HostName b"), new SshHostBlock(["*"], "Host *\n  User x")] };
+        var plan = ConfigImporter.BuildPlan(new AppSettings(), incoming, new HashSet<string>(["DevBox"], StringComparer.OrdinalIgnoreCase), ImportMode.Merge);
+        Check(plan.Hosts[0].Conflict && plan.Hosts[0].ExistingAliases.SequenceEqual(["devbox"]) && !plan.Hosts[1].Conflict && !plan.Hosts[2].Conflict, "Conflict detection (case-insensitive, wildcards ignored)");
+        var result = ConfigImporter.Apply(new AppSettings(), incoming, plan, new Dictionary<string, ConflictChoice> { ["x"] = ConflictChoice.Replace }, true, true, true, true);
+        Check(result.HostBlocksToAdd.Select(b => b.Aliases[0]).SequenceEqual(["neu", "*"]), "Blocks to write: " + string.Join(",", result.HostBlocksToAdd.Select(b => b.Aliases[0])));
+        Check(ConfigImporter.Apply(new AppSettings(), incoming, plan, new Dictionary<string, ConflictChoice>(), true, true, true, false).HostBlocksToAdd.Count == 0, "Without confirmation nothing is written");
+    });
+    Test("Config backup: settings and SSH config are copied before an import and never overwrite an older backup", () =>
+    {
+        string data = Path.Combine(root, "backup-data");
+        Directory.CreateDirectory(data);
+        Check(ConfigBackup.BackupSettings(data, DateTimeOffset.Now) is null, "No settings file, no backup");
+        File.WriteAllText(Path.Combine(data, "settings.json"), "{\"FontSize\":12}");
+        var now = DateTimeOffset.Parse("2026-10-25T12:00:00+00:00");
+        string first = ConfigBackup.BackupSettings(data, now)!, second = ConfigBackup.BackupSettings(data, now)!;
+        Check(first.EndsWith(@"backup\settings-20261025-120000.json") && second != first && File.ReadAllText(first) == "{\"FontSize\":12}" && File.Exists(second), "Backups: " + first + " / " + second);
+        string config = Path.Combine(root, "ssh-backup-config");
+        File.WriteAllText(config, "Host a");
+        string bak = ConfigBackup.BackupSshConfig(config, now)!;
+        Check(bak == config + ".bak-20261025-120000" && File.ReadAllText(bak) == "Host a" && ConfigBackup.BackupSshConfig(config, now) != bak && ConfigBackup.BackupSshConfig(Path.Combine(root, "nix"), now) is null, "SSH config backup");
+    });
+    Test("Config check: missing key files and unknown hosts are found from 'ssh -G' output", () =>
+    {
+        string home = @"C:\Users\x";
+        var profile = new Profile { Name = "devbox", Destination = "devbox" };
+        string good = "hostname dev.example.test\nuser me\nidentityfile ~/.ssh/dev_key\nidentityfile ~/.ssh/id_rsa\n";
+        Check(ConfigCheck.Evaluate(profile, good, p => p.EndsWith("dev_key"), home).Count == 0, "Existing key: no problem");
+        var missing = ConfigCheck.Evaluate(profile, good, _ => false, home);
+        Check(missing.Count == 1 && missing[0].Message.Contains("~/.ssh/dev_key") && missing[0].ProfileName == "devbox", "Explicit key missing: " + string.Join(";", missing.Select(m => m.Message)));
+        var noKeys = ConfigCheck.Evaluate(profile, "hostname dev.example.test\nidentityfile ~/.ssh/id_ed25519\nidentityfile ~/.ssh/id_rsa\n", _ => false, home);
+        Check(noKeys.Count == 1 && noKeys[0].Message.Contains("Agent"), "No default key: only a hint about the agent");
+        Check(ConfigCheck.Evaluate(profile, "hostname devbox\nidentityfile ~/.ssh/id_rsa\n", _ => true, home).Single().Message.Contains("nicht definiert"), "Alias without a Host block");
+        Check(ConfigCheck.Evaluate(new Profile { Name = "d", Destination = "me@h.example.test" }, "hostname h.example.test\nidentityfile ~/.ssh/id_rsa\n", _ => true, home).Count == 0, "Direct host is fine");
+        Check(ConfigCheck.ParseEffective("hostname a\nidentityfile x\nidentityfile y\n\nbroken\n")["identityfile"].SequenceEqual(["x", "y"]), "Parsing repeated keys");
+    });
+    Test("Config check: the real 'ssh -G' (no connection) feeds the check", () =>
+    {
+        string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
+        if (!File.Exists(ssh)) { Console.WriteLine("  (skipped: no Windows OpenSSH client)"); return; }
+        string config = Path.Combine(root, "ssh-g-config");
+        File.WriteAllText(config, "Host mitschluessel\n  HostName k.example.test\n  IdentityFile ~/.ssh/tmgr-test-missing-key\nHost ok\n  HostName o.example.test\n");
+        string G(string alias)
+        {
+            var info = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+            foreach (string a in new[] { "-F", config, "-G", alias }) info.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(info)!;
+            string text = p.StandardOutput.ReadToEnd(); p.WaitForExit(15000); return text;
+        }
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var withKey = ConfigCheck.Evaluate(new Profile { Name = "k", Destination = "mitschluessel" }, G("mitschluessel"), File.Exists, home);
+        Check(withKey.Any(p => p.Message.Contains("tmgr-test-missing-key")), "Missing explicit key from the real output: " + string.Join(";", withKey.Select(p => p.Message)));
+        var unknown = ConfigCheck.Evaluate(new Profile { Name = "u", Destination = "gibtsnirgends" }, G("gibtsnirgends"), _ => true, home);
+        Check(unknown.Any(p => p.Message.Contains("nicht definiert")), "Unknown alias from the real output: " + string.Join(";", unknown.Select(p => p.Message)));
+        Check(!ConfigCheck.Evaluate(new Profile { Name = "o", Destination = "ok" }, G("ok"), _ => true, home).Any(p => p.Message.Contains("nicht definiert")), "Defined alias");
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");

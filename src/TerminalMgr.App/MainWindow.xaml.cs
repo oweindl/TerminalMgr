@@ -709,6 +709,8 @@ public partial class MainWindow : Window
         ApplySettingsToUi();
         RenderClips(); SaveSettings();
         if (dialog.CheckForUpdatesNow) _ = CheckForUpdatesNowAsync();
+        if (dialog.ConfigAction == ConfigAction.Export) _ = ExportConfigAsync();
+        else if (dialog.ConfigAction == ConfigAction.Import) _ = ImportConfigAsync();
     }
 
     /// <summary>Texts that name a shortcut, and the "start with Windows" entry, follow the settings.</summary>
