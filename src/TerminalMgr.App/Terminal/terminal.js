@@ -5,6 +5,8 @@
   let active = null;
   let fontSize = 14;
   const send = message => window.chrome.webview.postMessage(message);
+  // Terminals pad lines with spaces up to the window width; copied text must not carry them.
+  const trimTrailingSpaces = text => text.replace(/\r\n?/g, '\n').split('\n').map(l => l.replace(/ +$/, '')).join('\n');
   function fitActive() {
     const s = sessions.get(active);
     if (!s || container.clientWidth < 10 || container.clientHeight < 10) return;
@@ -41,7 +43,11 @@
         return false;
       }
       if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
-        if (e.type === 'keydown' && term.hasSelection()) send({ type:'copy',id,text:term.getSelection() });
+        if (e.type === 'keydown' && term.hasSelection()) {
+          const text = trimTrailingSpaces(term.getSelection());
+          term.clearSelection();
+          if (text) send({ type:'copy',id,text });
+        }
         return false;
       }
       if (e.ctrlKey && e.shiftKey && e.code === 'KeyV') {
@@ -50,6 +56,20 @@
       }
       return true; // Includes the tmux prefix Ctrl+B and all subsequent keys.
     });
+    // PuTTY-style mouse: right click copies a selection (and clears it), otherwise pastes the active
+    // clipboard entry. The right button is never forwarded to the session, even with mouse tracking
+    // (tmux "mouse on", vim, htop). Shift + left drag still selects locally.
+    for (const type of ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'auxclick'])
+      element.addEventListener(type, e => { if (e.button === 2) e.stopPropagation(); }, true);
+    element.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (term.hasSelection()) {
+        const text = trimTrailingSpaces(term.getSelection());
+        term.clearSelection();
+        if (text) send({ type:'copy',id,text });
+      } else send({ type:'contextPaste',id });
+    }, true);
     element.addEventListener('dragover', e => e.preventDefault());
     element.addEventListener('drop', e => {
       e.preventDefault();
