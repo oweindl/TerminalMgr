@@ -46,6 +46,7 @@ Maus wie bei PuTTY:
 - Nachgestellte Leerzeichen je Zeile (Terminalbreite) werden beim Kopieren entfernt.
 - Der Rechtsklick im Terminal gehört immer der App und erreicht nie die Session. Bei aktivem Maus-Tracking (tmux `mouse on`, vim, htop) markiert **Umschalt + Ziehen** trotzdem lokal.
 - Ctrl+Shift+C kopiert die Markierung wie der Rechtsklick, Ctrl+Shift+V fügt die Windows-Zwischenablage ein.
+- **Markieren in Claude Code oder tmux:** Programme mit eigener Maus-Unterstützung (Claude Code, tmux mit `mouse on`) markieren selbst; xterm.js hat dann keine Markierung, ein Rechtsklick würde einfügen. Beim Loslassen kopieren sie aber in den tmux-Puffer, und tmux meldet das per OSC 52 an das Terminal. TerminalMgr übernimmt diese Schreibanfragen: Text landet oben in der Clipboard-Liste (Herkunft Sessionname, aktiv) und in der Windows-Zwischenablage, der nächste Rechtsklick fügt ihn ein. Lesen der Zwischenablage durch ein Programm ist nie möglich (Leseanfragen werden nicht beantwortet). Abschaltbar unter *Einstellungen* (Vorgabe an). Geprüft mit tmux 3.6 und der tmux-Vorgabe `set-clipboard external`; kommt bei Ihrer Konfiguration nichts an, in `~/.tmux.conf` `set -s set-clipboard on` eintragen. Zur Fehlersuche zeigt `TERMINALMGR_DEBUG=1` bei jedem Rechtsklick in der Statuszeile Markierung und Maus-Tracking-Modus.
 
 Clipboard-Liste (rechts, neueste oben):
 
