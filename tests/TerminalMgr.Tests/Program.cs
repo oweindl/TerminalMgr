@@ -97,6 +97,99 @@ try
         Check(rejected, "Corrupt data accepted");
     });
 
+    Test("Old settings file without new fields loads with defaults", () =>
+    {
+        var directory = Path.Combine(root, "old");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "settings.json"), "{\"Profiles\":[],\"PinnedClips\":[],\"FontSize\":15}");
+        var loaded = new SettingsStore(directory).Load();
+        Check(loaded.FontSize == 15 && loaded.ClipHistoryLimit == 100, "Defaults missing");
+    });
+    Test("User data and models stay outside the installation folder", () =>
+    {
+        string data = AppPaths.DataDirectory();
+        Check(!AppPaths.IsInside(data, AppContext.BaseDirectory), "Data inside install folder");
+        Check(AppPaths.IsInside(AppPaths.ModelsDirectory(), data) && AppPaths.ModelsDirectory().EndsWith("models"), "Models outside data folder");
+        Check(AppPaths.IsInside(Path.Combine(data, "settings.json"), data) && !AppPaths.IsInside(data + "-other", data), "IsInside is wrong");
+    });
+    Test("Clipboard list: newest first and new copy becomes active", () =>
+    {
+        var list = new ClipboardList();
+        list.Add("one", "dev"); list.Add("two", "Windows");
+        Check(list.Items.Select(i => i.Text).SequenceEqual(["two", "one"]) && list.Active!.Text == "two", "Order or active entry wrong");
+    });
+    Test("Clipboard list: duplicate moves up, keeps source and does not add a second entry", () =>
+    {
+        var list = new ClipboardList();
+        list.Add("one", "dev"); list.Add("two", "Windows"); list.Add("one", "Windows");
+        Check(list.Items.Count == 2 && list.Items[0].Text == "one" && list.Items[0].Source == "dev" && list.Active!.Text == "one", "Duplicate handling wrong");
+    });
+    Test("Clipboard list: older entry can be made active without reordering", () =>
+    {
+        var list = new ClipboardList();
+        list.Add("one", "dev"); list.Add("two", "dev"); list.Add("three", "dev");
+        Check(list.Activate(list.Items[2]) && list.Active!.Text == "one" && list.Items[0].Text == "three", "Activation reordered or failed");
+        list.Add("four", "dev");
+        Check(list.Active!.Text == "four", "New copy must become active again");
+    });
+    Test("Clipboard list: pinned entries survive limit and duplicates keep the pin", () =>
+    {
+        var list = new ClipboardList { MaxUnpinned = 2 };
+        list.Add("keep", "dev"); list.TogglePin(list.Items[0]);
+        list.Add("a", "dev"); list.Add("b", "dev"); list.Add("c", "dev");
+        Check(list.Items.Select(i => i.Text).SequenceEqual(["c", "b", "keep"]), "Limit trimmed pinned or kept too many: " + string.Join(",", list.Items.Select(i => i.Text)));
+        list.Add("keep", "Windows");
+        Check(list.Items[0].Text == "keep" && list.Items[0].Pinned && list.Items.Count == 3, "Pinned duplicate lost its pin");
+    });
+    Test("Clipboard list: remove of the active entry falls back to the newest; empty and huge texts are rejected", () =>
+    {
+        var list = new ClipboardList();
+        list.Add("one", "dev"); list.Add("two", "dev");
+        list.Remove(list.Active!);
+        Check(list.Active!.Text == "one", "No fallback");
+        Check(list.Add("", "dev") is null && list.Add(new string('x', ClipboardList.MaxTextLength + 1), "dev") is null, "Invalid text accepted");
+    });
+    Test("Clipboard list: only pinned entries are restored from settings", () =>
+    {
+        var list = new ClipboardList();
+        list.LoadPinned([new("p", "dev", DateTimeOffset.Now, true), new("loose", "dev", DateTimeOffset.Now, false)]);
+        Check(list.Items.Count == 1 && list.Items[0].Text == "p", "Unpinned restored");
+    });
+    Test("Copy text loses padding spaces per line and uses \\n", () =>
+    {
+        Check(ClipboardText.TrimTrailingSpaces("ls   \r\n  indent  \r\n\r\nend ") == "ls\n  indent\n\nend", "Trim wrong");
+    });
+    Test("Preview shows two lines, ellipsis and total size", () =>
+    {
+        var many = ClipboardText.Preview(string.Join('\n', Enumerable.Range(1, 42).Select(i => "line " + i)));
+        Check(many.Line1 == "line 1" && many.Line2 == "line 2 …" && many.LengthLabel == "42 Zeilen", "Multi-line preview wrong: " + many);
+        var two = ClipboardText.Preview("a\nb");
+        Check(two.Line2 == "b" && two.LengthLabel == "", "Two lines must not be marked");
+        var wide = ClipboardText.Preview(new string('x', 500));
+        Check(wide.Line1.EndsWith("…") && wide.Line1.Length < 130 && wide.Line2 is null && wide.LengthLabel == "500 Zeichen", "Long line preview wrong");
+        Check(ClipboardText.Preview("short") == new ClipPreview("short", null, ""), "Short text altered");
+    });
+    Test("Tooltip excerpt is bounded", () =>
+    {
+        var text = string.Join('\n', Enumerable.Range(1, 100).Select(i => "l" + i));
+        var excerpt = ClipboardText.Excerpt(text);
+        Check(excerpt.EndsWith("…") && excerpt.Split('\n').Length <= 21, "Excerpt not bounded");
+        Check(ClipboardText.Excerpt("x") == "x", "Short excerpt changed");
+    });
+    Test("Paste text keeps line breaks and tabs but drops control characters", () =>
+    {
+        Check(ClipboardText.StripControlCharacters("a\r\nb\tc\x1b[31m\x03\0d\u2028e") == "a\nb\tc[31mde", "Control characters survived");
+    });
+    Test("Clipboard capture ignores password-manager and own writes", () =>
+    {
+        Check(ClipboardCapturePolicy.ShouldCapture(true, false, null, false), "Plain text refused");
+        Check(ClipboardCapturePolicy.ShouldCapture(true, false, 1, false), "CanInclude=1 refused");
+        Check(!ClipboardCapturePolicy.ShouldCapture(true, true, null, false), "Exclude format captured");
+        Check(!ClipboardCapturePolicy.ShouldCapture(true, false, 0, false), "CanInclude=0 captured");
+        Check(!ClipboardCapturePolicy.ShouldCapture(true, false, null, true), "Own write captured");
+        Check(!ClipboardCapturePolicy.ShouldCapture(false, false, null, false), "Non-text captured");
+    });
+
     Test("tmux list parses stable IDs, names and counts; ignores banners", () =>
     {
         var rows = TmuxSessionParser.Parse("Welcome\n$1\twork ; echo nope\t3\t1\n$0\tmain\t2\t0\ninvalid\trow\n");

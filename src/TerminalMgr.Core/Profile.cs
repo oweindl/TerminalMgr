@@ -34,4 +34,5 @@ public sealed record AppSettings
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     public int FontSize { get; init; } = 14;
+    public int ClipHistoryLimit { get; init; } = 100;
 }
