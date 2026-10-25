@@ -42,7 +42,9 @@ public static class ClipboardNative
                 {
                     bool excluded = exclude != 0 && IsClipboardFormatAvailable(exclude);
                     int? include = canInclude != 0 && IsClipboardFormatAvailable(canInclude) ? ReadDword(GetClipboardData(canInclude)) : null;
-                    string? text = IsClipboardFormatAvailable(CfUnicodeText) ? ReadText(GetClipboardData(CfUnicodeText)) : null;
+                    // Content marked by a password manager is not even read, only reported as excluded.
+                    bool hidden = excluded || include == 0;
+                    string? text = !hidden && IsClipboardFormatAvailable(CfUnicodeText) ? ReadText(GetClipboardData(CfUnicodeText)) : null;
                     return new(text, excluded, include);
                 }
                 finally { CloseClipboard(); }

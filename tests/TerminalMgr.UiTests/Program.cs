@@ -75,7 +75,12 @@ internal static class Program
         var data = new DataObject();
         data.SetText(text);
         if (marker is not null) data.SetData(marker, new MemoryStream(BitConverter.GetBytes(markerValue)));
-        Clipboard.SetDataObject(data, true);
+        // Other programs (clipboard monitors, including an installed TerminalMgr) may hold the clipboard for a moment.
+        for (int attempt = 1; ; attempt++)
+        {
+            try { Clipboard.SetDataObject(data, true); return; }
+            catch (System.Runtime.InteropServices.COMException) when (attempt < 20) { Thread.Sleep(100); }
+        }
     }
 
     // Uses the real Windows clipboard through a message-only window; the user's text is restored afterwards.
