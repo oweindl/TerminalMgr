@@ -57,7 +57,7 @@ public partial class MainWindow
         if (Selected is not { } target) { StatusText.Text = "Zum Diktieren zuerst eine Session auswählen."; return; }
         _dictationOpen = true;
         _dictationTargetId = target.Profile.Id; // later server switches do not change the target
-        DictationTitle.Text = "Diktat → " + target.Name;
+        DictationTitle.Text = "Diktat → " + target.Name + " · " + SpeechEngineIds.Label(DictationSettings.Engine);
         DictationBox.Text = "";
         DictationPartial.Visibility = Visibility.Collapsed;
         DictationStatus.Text = "Bereit";
