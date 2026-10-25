@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- .NET Framework 4.8 is part of Windows 10/11: the updater starts without a bundled runtime and is tiny. It replaces the
+       installation folder of the self-contained app, so it must not live in (or depend on) that folder while it runs. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>TerminalMgr.Updater</AssemblyName>
+    <RootNamespace>TerminalMgr.Updater</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../TerminalMgr.Core/UpdateSwap.cs" Link="UpdateSwap.cs" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+</Project>
