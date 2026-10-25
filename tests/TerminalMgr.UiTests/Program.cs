@@ -22,6 +22,28 @@ internal static class Program
         timer.Stop();
     }
 
+    private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
+
+    private static void TestTmuxMenu()
+    {
+        var sessions = TmuxWindowParser.Group(TmuxWindowParser.Parse(
+            "$0\t@1\t0\t0\tmy_work\tshell\tbash\n$0\t@2\t1\t1\tmy_work\teditor\tvim\n$1\t@9\t0\t1\tmain\tbash\tbash\n"));
+        TmuxWindowRecord? chosen = null;
+        var flat = TmuxMenu.Build(sessions, s => s.Name == "main", w => chosen = w).Cast<MenuItem>().ToList();
+        Check(flat.Count == 5, "Flat menu needs 2 headers + 3 windows, got " + flat.Count);
+        Check(!flat[0].IsEnabled && (string)flat[0].Header == "main · 1 Fenster · verbunden", "Header of connected session: " + flat[0].Header);
+        Check(!flat[2].IsEnabled && (string)flat[2].Header == "my__work · 2 Fenster", "Header must escape underscores: " + flat[2].Header);
+        Check(((string)flat[1].Header).StartsWith("● ") && ((string)flat[4].Header).StartsWith("● ") && !((string)flat[3].Header).StartsWith("●"), "Active window marker wrong");
+        Check((string)flat[4].Header == "● 1: editor (vim)", "Label with running program: " + flat[4].Header);
+        flat[4].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(chosen is { WindowId: "@2", SessionId: "$0" }, "Click did not choose the window by its IDs");
+
+        var many = TmuxWindowParser.Group(Enumerable.Range(1, 30).Select(i => new TmuxWindowRecord("$0", "big", "@" + i, i, "w" + i, "bash", i == 3)));
+        var nested = TmuxMenu.Build(many, _ => false, _ => { }).Cast<MenuItem>().ToList();
+        Check(nested.Count == 1 && nested[0].Items.Count == 30 && nested[0].IsEnabled, "Many windows must be one submenu per session");
+        Console.WriteLine("PASS tmux context menu: headers, active marker, escaping, click by IDs, submenus for many windows");
+    }
+
     private static void SetClipboard(string text, string? marker = null, int markerValue = 1)
     {
         var data = new DataObject();
@@ -97,6 +119,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestTmuxMenu();
             TestClipboardMonitoring();
             // Do not show or run the application: this test must never connect to SSH.
             return 0;

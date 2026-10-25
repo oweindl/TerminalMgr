@@ -24,6 +24,10 @@ public partial class MainWindow : Window
     private uint _ownClipboardSequence;
     private bool _renderingClips;
     private Point _clipPressPoint;
+    private readonly TmuxSessionQuery _tmuxQuery = new();
+    // What the app knows about the tmux session each connection hangs on (by ID after a pick, by name from the profile).
+    private readonly Dictionary<string, (string? Id, string? Name)> _tmuxAttached = [];
+    private readonly Dictionary<string, string> _tmuxLabel = [];
     private readonly Dictionary<string, PtySession> _sessions = [];
     private readonly HashSet<string> _connecting = [];
     private readonly HashSet<string> _terminals = [];
@@ -161,7 +165,7 @@ public partial class MainWindow : Window
         if (_ready && !_closed) TerminalView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message));
     }
 
-    private async Task ConnectAsync(ProfileItem item, string? tmuxSessionId = null)
+    private async Task ConnectAsync(ProfileItem item, string? tmuxSessionId = null, string? tmuxWindowId = null)
     {
         string id = item.Profile.Id;
         if (!_ready) { StatusText.Text = "Das Terminal wird noch vorbereitet."; return; }
@@ -190,13 +194,20 @@ public partial class MainWindow : Window
                 if (_sessions.TryGetValue(id, out var current) && ReferenceEquals(current, owned))
                 {
                     _sessions.Remove(id);
+                    ForgetTmux(id);
                     item.Status = "Beendet · Exit " + code;
                     Post(new { type = "output", id, data = "\r\n\x1b[90m[SSH beendet, Exit " + code + "]\x1b[0m\r\n" });
                     await owned.DisposeAsync();
                 }
             });
             _sessions[id] = pty;
-            pty.Start(ssh, tmuxSessionId is null ? SshCommand.Arguments(item.Profile) : SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId), size.Cols, size.Rows);
+            var arguments = tmuxSessionId is null ? SshCommand.Arguments(item.Profile)
+                : tmuxWindowId is null ? SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId)
+                : SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId, tmuxWindowId);
+            ForgetTmux(id);
+            if (tmuxSessionId is not null) _tmuxAttached[id] = (tmuxSessionId, null);
+            else if (item.Profile.Mode == StartMode.Tmux) _tmuxAttached[id] = (null, item.Profile.TmuxSession);
+            pty.Start(ssh, arguments, size.Cols, size.Rows);
             item.Status = item.Profile.AutoConnect ? "● SSH läuft · Autostart" : "● SSH läuft";
             StatusText.Text = "SSH läuft. Anmeldung und Host-Key-Abfragen erscheinen im Terminal.";
             Post(new { type = "focus", id });
@@ -216,6 +227,7 @@ public partial class MainWindow : Window
     {
         if (_sessions.Remove(item.Profile.Id, out var session))
         {
+            ForgetTmux(item.Profile.Id);
             await session.DisposeAsync();
             item.Status = item.Profile.AutoConnect ? "Autostart · getrennt" : "Getrennt";
             Post(new { type = "output", id = item.Profile.Id, data = "\r\n\x1b[90m[Verbindung getrennt]\x1b[0m\r\n" });
@@ -248,9 +260,16 @@ public partial class MainWindow : Window
     private void ProfileSelected(object sender, SelectionChangedEventArgs e)
     {
         if (Selected is not { } item) return;
-        SessionTitle.Text = item.Name + " · " + item.Profile.Destination;
+        SessionTitle.Text = TitleFor(item);
         Post(new { type = "select", id = item.Profile.Id });
         UpdateDimensions(item.Profile.Id);
+    }
+    private string TitleFor(ProfileItem item) => _tmuxLabel.TryGetValue(item.Profile.Id, out var label)
+        ? item.Name + " · " + label : item.Name + " · " + item.Profile.Destination;
+    private void ForgetTmux(string id)
+    {
+        _tmuxAttached.Remove(id);
+        if (_tmuxLabel.Remove(id) && Selected?.Profile.Id == id) SessionTitle.Text = TitleFor(Selected);
     }
     private void UpdateDimensions(string id)
     {
@@ -275,11 +294,88 @@ public partial class MainWindow : Window
         Add("tmux-Session auswählen …", ChooseTmuxSession);
         Add("tmux-Fensterwahl öffnen (Ctrl+B w)", OpenTmuxWindowPicker);
         menu.Items.Add(new Separator());
+        // The menu opens at once; the window list is inserted here when the separate SSH query answers.
+        var placeholder = new MenuItem { Header = "Fenster werden geladen …", IsEnabled = false };
+        menu.Items.Add(placeholder);
+        menu.Items.Add(new Separator());
         Add("Verbinden", ContextConnect);
         Add("Trennen", ContextDisconnect);
         Add("Profil bearbeiten …", ContextEdit);
+        var closed = new CancellationTokenSource();
+        menu.Closed += (_, _) => closed.Cancel();
         menu.IsOpen = true;
         e.Handled = true;
+        _ = LoadTmuxWindowsIntoMenuAsync(menu, placeholder, item, closed.Token);
+    }
+
+    private async Task LoadTmuxWindowsIntoMenuAsync(ContextMenu menu, MenuItem placeholder, ProfileItem item, CancellationToken cancel)
+    {
+        try
+        {
+            var windowsTask = _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(10), cancel);
+            var attachedTask = AttachedTmuxAsync(item, cancel);
+            var sessions = TmuxWindowParser.Group(await windowsTask);
+            var (attachedId, attachedName) = await attachedTask;
+            int at = menu.Items.IndexOf(placeholder);
+            if (at < 0 || !menu.IsOpen) return;
+            menu.Items.RemoveAt(at);
+            if (sessions.Count == 0)
+            {
+                menu.Items.Insert(at, new MenuItem { Header = "Keine tmux-Sessions auf dem Server", IsEnabled = false });
+                return;
+            }
+            var entries = TmuxMenu.Build(sessions,
+                s => (attachedId is not null && s.Id == attachedId) || (attachedName is not null && s.Name == attachedName),
+                window => _ = SwitchToTmuxWindowAsync(item, window));
+            foreach (var entry in entries) menu.Items.Insert(at++, entry);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (menu.IsOpen)
+            {
+                string first = ex.Message.Split('\n')[0].Trim();
+                placeholder.Header = TmuxMenu.Escape("tmux-Fenster nicht verfügbar: " + (first.Length > 70 ? first[..70] + "…" : first));
+            }
+        }
+    }
+
+    /// <summary>The tmux session this connection hangs on, if known: tracked ID/name, else the RemoteCommand of the SSH config.</summary>
+    private async Task<(string? Id, string? Name)> AttachedTmuxAsync(ProfileItem item, CancellationToken cancel)
+    {
+        string id = item.Profile.Id;
+        if (!_sessions.ContainsKey(id)) return (null, null);
+        if (_tmuxAttached.TryGetValue(id, out var known)) return known;
+        string? command = item.Profile.Mode switch {
+            StartMode.SshConfig => await _tmuxQuery.RemoteCommandAsync(item.Profile, cancel),
+            StartMode.Command => item.Profile.Command,
+            _ => null
+        };
+        return (null, TmuxWindowParser.SessionNameFromCommand(command));
+    }
+
+    private async Task SwitchToTmuxWindowAsync(ProfileItem item, TmuxWindowRecord window)
+    {
+        string id = item.Profile.Id;
+        try
+        {
+            ProfilesList.SelectedItem = item;
+            if (_sessions.TryGetValue(id, out var pty))
+            {
+                await TmuxClient.SwitchToWindowAsync(pty, window.SessionId, window.WindowId, _shutdown.Token);
+                _tmuxAttached[id] = (window.SessionId, null);
+            }
+            else
+            {
+                await ConnectAsync(item, window.SessionId, window.WindowId);
+                if (!_sessions.ContainsKey(id)) return;
+            }
+            _tmuxLabel[id] = $"tmux: {window.SessionName} / {window.Name}";
+            SessionTitle.Text = TitleFor(item);
+            Post(new { type = "focus", id });
+        }
+        catch (OperationCanceledException) when (_closing) { }
+        catch (Exception ex) { ShowError("Wechsel in das tmux-Fenster fehlgeschlagen.", ex); }
     }
     private async void ChooseTmuxSession(object sender, RoutedEventArgs e)
     {
@@ -289,7 +385,9 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() != true || dialog.SelectedSession is not { } session) return;
         await DisconnectAsync(item);
         await ConnectAsync(item, session.Id);
-        SessionTitle.Text = item.Name + " · tmux: " + session.Name;
+        if (!_sessions.ContainsKey(item.Profile.Id)) return;
+        _tmuxLabel[item.Profile.Id] = "tmux: " + session.Name;
+        SessionTitle.Text = TitleFor(item);
     }
     private async void OpenTmuxWindowPicker(object sender, RoutedEventArgs e)
     {
@@ -348,7 +446,7 @@ public partial class MainWindow : Window
         else if (dialog.Result is { } profile)
         {
             item.Profile = profile; item.Refresh();
-            SessionTitle.Text = item.Name + " · " + profile.Destination;
+            SessionTitle.Text = TitleFor(item);
             StatusText.Text = "Profil gespeichert. Änderungen gelten ab der nächsten Verbindung.";
         }
         SaveSettings();

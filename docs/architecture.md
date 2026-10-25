@@ -20,6 +20,12 @@ STARTF_USESTDHANDLES mit leeren Handles verhindert vererbte umgeleitete Standard
 
 Eine separate SSH-Abfrage führt tmux list-sessions aus. RemoteCommand wird überschrieben, PTY deaktiviert und BatchMode verhindert unsichtbare Passwortdialoge. Auswahlziele sind validierte stabile Session-IDs ($0, $1, …), keine Anzeigenamen. Erst nach Auswahl wird die vorherige Verbindung getrennt.
 
+## tmux-Fenstermenü
+
+Eine zweite nicht interaktive Abfrage führt `tmux list-windows -a -F` aus (Session-ID, Fenster-ID, Index, aktiv, Sessionname, Fenstername, laufendes Programm). Feste Felder stehen vorn, Freitextfelder hinten; Tabs im Fensternamen verschieben deshalb keine IDs. Der Parser liegt in `TmuxWindowParser` (Core), das Menü baut `TmuxMenu`.
+
+Wechsel bei verbundenem Server: zwei Schritte mit 150 ms Pause. Zuerst Ctrl+B und `:`, dann `switch-client -t '$id:@id'` und Enter. tmux öffnet den Prompt erst nach der Verarbeitung des `:`; in einem Schreibvorgang gesendete Folgezeichen landeten im Programm des Fensters (am echten tmux 3.6 auf linuxdev beobachtet). Bei nicht verbundenem Server wird mit `tmux attach-session -t '$id:@id'` verbunden. Ob eine Verbindung an einer Session hängt, ergibt sich aus der zuletzt gewählten ID, dem tmux-Namen des Profils oder dem RemoteCommand aus `ssh -G`.
+
 ## WebView-Grenze
 
 Alle Terminalressourcen liegen lokal. Navigation ist auf die interne Seite begrenzt; neue Fenster, Downloads und Berechtigungen werden abgewiesen. Nachrichten werden nur von der internen Seite angenommen. SSH-Ausgabe wird als Terminaltext übergeben, nie als HTML. OSC52 ist deaktiviert.
