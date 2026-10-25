@@ -73,6 +73,8 @@ public sealed record AppSettings
     public ShortcutOptions Shortcuts { get; init; } = new();
     /// <summary>Start TerminalMgr when the user signs in to Windows (off by default).</summary>
     public bool StartWithWindows { get; init; }
+    /// <summary>Take clipboard writes that programs request with OSC 52 (tmux forwards copies this way). On by default.</summary>
+    public bool AcceptOsc52 { get; init; } = true;
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     public int FontSize { get; init; } = 14;
