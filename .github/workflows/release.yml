@@ -1,0 +1,63 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version from the tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Tag '$tag' ist keine Version der Form vX.Y.Z." }
+          $version = $Matches[1]
+          $declared = @(([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version) | Where-Object { $_ } | Select-Object -First 1
+          if ($declared -ne $version) { throw "Tag $tag passt nicht zur Version $declared in Directory.Build.props." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run bundle
+        working-directory: web
+      - run: dotnet build TerminalMgr.sln -c Release
+      - run: dotnet run --project tests/TerminalMgr.Tests -c Release --no-build
+      - run: dotnet run --project tests/TerminalMgr.UiTests -c Release --no-build
+      - run: npm test
+        working-directory: web
+      - name: Package
+        shell: pwsh
+        run: |
+          dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish ist fehlgeschlagen." }
+          Compress-Archive -Path artifacts/TerminalMgr-win-x64 -DestinationPath "artifacts/TerminalMgr-win-x64-${{ steps.version.outputs.version }}.zip" -CompressionLevel Optimal
+      - name: Release notes from the commits
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $previous = $null
+          try { $previous = git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>$null } catch { }
+          $range = if ($previous -and $LASTEXITCODE -eq 0) { "$previous..$tag" } else { $tag }
+          $commits = @(git log $range --no-merges --pretty=format:'- %s')
+          $notes = @("## TerminalMgr ${{ steps.version.outputs.version }}", '', 'Änderungen:', '') + $commits + @('', 'Entpacken und TerminalMgr.App.exe starten. Eine .NET-Installation ist nicht nötig; benötigt werden Windows OpenSSH und die Microsoft Edge WebView2 Runtime.')
+          $notes | Set-Content notes.md -Encoding utf8
+          $global:LASTEXITCODE = 0
+      - name: Create the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create '${{ github.ref_name }}' "artifacts/TerminalMgr-win-x64-${{ steps.version.outputs.version }}.zip" --title "TerminalMgr ${{ steps.version.outputs.version }}" --notes-file notes.md --verify-tag
