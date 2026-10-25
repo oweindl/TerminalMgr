@@ -66,6 +66,7 @@ public partial class MainWindow : Window
             _clipList.MaxUnpinned = Math.Clamp(settings.ClipHistoryLimit, 1, 1000);
             _clipList.LoadPinned(settings.PinnedClips);
             ApplySettingsToUi();
+            BeginStartupUpdateCheck();
             if (_profiles.Count == 0)
             {
                 var config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
@@ -125,6 +126,7 @@ public partial class MainWindow : Window
                     PostShortcuts();
                     PostTerminalSettings();
                     if (_profiles.Count > 0) ProfilesList.SelectedIndex = 0;
+                    await HandleStartupUpdateAsync();   // before the automatic connections: an update must not tear down fresh sessions
                     await ConnectAutomaticAsync();
                     break;
                 case "created":
@@ -675,6 +677,7 @@ public partial class MainWindow : Window
         PostTerminalSettings();
         ApplySettingsToUi();
         RenderClips(); SaveSettings();
+        if (dialog.CheckForUpdatesNow) _ = CheckForUpdatesNowAsync();
     }
 
     /// <summary>Texts that name a shortcut, and the "start with Windows" entry, follow the settings.</summary>

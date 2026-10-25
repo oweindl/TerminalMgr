@@ -8,6 +8,10 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../TerminalMgr.Windows/TerminalMgr.Windows.csproj" />
+    <!-- The updater is a separate small .NET Framework program: only built before this project, never referenced as a library. -->
+    <ProjectReference Include="../TerminalMgr.Updater/TerminalMgr.Updater.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <Content Include="../TerminalMgr.Updater/bin/$(Configuration)/net48/TerminalMgr.Updater.exe" Link="TerminalMgr.Updater.exe" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../TerminalMgr.Updater/bin/$(Configuration)/net48/TerminalMgr.Updater.exe.config" Link="TerminalMgr.Updater.exe.config" CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
     <Resource Include="Assets/TerminalMgr.ico" />
     <Resource Include="Assets/TerminalMgr.png" />
