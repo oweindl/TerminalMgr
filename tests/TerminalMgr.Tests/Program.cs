@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using TerminalMgr.Core;
 using TerminalMgr.Windows;
 
@@ -210,6 +211,72 @@ try
         var a = SshCommand.TmuxListArguments(new() { Name = "dev", Destination = "dev" });
         Check(a.Contains("-T") && a.Contains("BatchMode=yes") && a.Contains("RemoteCommand=none"), "Query can run interactive config command");
     });
+    Test("tmux window list parses IDs, index, active flag, session, name and command", () =>
+    {
+        var rows = TmuxWindowParser.Parse("$0\t@8\t0\t0\tclaude\tclaude\tclaude\n$0\t@10\t8\t1\tclaude\teditor\tvim\r\n$1\t@9\t0\t1\tmain\tbash\tbash\n");
+        Check(rows.Count == 3, "Count " + rows.Count);
+        Check(rows[1] == new TmuxWindowRecord("$0", "claude", "@10", 8, "editor", "vim", true), "Row 2 wrong: " + rows[1]);
+        Check(!rows[0].Active && rows[2].Active && rows[2].SessionName == "main", "Active flag or session wrong");
+    });
+    Test("tmux window list survives tabs, quotes, semicolons and Unicode in names", () =>
+    {
+        var rows = TmuxWindowParser.Parse("$3\t@4\t2\t0\tmy session\ta\tb\tc ; $(rm -x) 'q' \"d\" äöü 日本\tvim\n");
+        Check(rows.Count == 1 && rows[0].SessionId == "$3" && rows[0].WindowId == "@4" && rows[0].Index == 2, "IDs shifted by tabs");
+        Check(rows[0].SessionName == "my session" && rows[0].Name == "a\tb\tc ; $(rm -x) 'q' \"d\" äöü 日本" && rows[0].Command == "vim", "Name or command wrong: " + rows[0]);
+    });
+    Test("tmux window list: no sessions, banners and malformed rows give nothing", () =>
+    {
+        Check(TmuxWindowParser.Parse("").Count == 0 && TmuxWindowParser.Parse("no server running on /tmp/tmux-1000/default\n").Count == 0, "Empty output");
+        string bad = "Welcome\n$x\t@1\t0\t1\ts\tn\tc\n$1\t1\t0\t1\ts\tn\tc\n$1\t@1\t-1\t1\ts\tn\tc\n$1\t@1\t0\t2\ts\tn\tc\n$1\t@1\t0\t1\ts\tn\n";
+        Check(TmuxWindowParser.Parse(bad).Count == 0, "Malformed rows accepted");
+    });
+    Test("tmux windows are grouped per session, sorted, labelled and switched to submenus when many", () =>
+    {
+        var rows = TmuxWindowParser.Parse("$1\t@9\t0\t1\tmain\tbash\tbash\n$0\t@2\t2\t0\tClaude\tdocs\tvim\n$0\t@1\t1\t1\tClaude\tdocs\tdocs\n");
+        var groups = TmuxWindowParser.Group(rows);
+        Check(groups.Select(g => g.Name).SequenceEqual(["Claude", "main"]) && groups[0].Windows.Select(w => w.Index).SequenceEqual([1, 2]), "Grouping wrong");
+        Check(groups[0].Windows[0].Label == "1: docs" && groups[0].Windows[1].Label == "2: docs (vim)", "Labels wrong");
+        Check(!TmuxWindowParser.UseSubmenus(groups), "Small list must stay flat");
+        var many = Enumerable.Range(1, 24).Select(i => new TmuxWindowRecord("$0", "s", "@" + i, i, "w" + i, "bash", false)).ToList();
+        Check(!TmuxWindowParser.UseSubmenus(TmuxWindowParser.Group(many)), "25 entries (24 windows + header) must stay flat");
+        many.Add(new("$0", "s", "@25", 25, "w25", "bash", false));
+        Check(TmuxWindowParser.UseSubmenus(TmuxWindowParser.Group(many)), "26 entries must use submenus");
+    });
+    Test("tmux window switch is sent in two steps with stable IDs only", () =>
+    {
+        var steps = TmuxWindowParser.SwitchSteps("$1", "@2");
+        Check(steps.Count == 2 && steps[0] == "\x02:" && steps[1] == "switch-client -t '$1:@2'\r", "Steps: " + string.Join("|", steps));
+        Check(TmuxWindowParser.StepDelay >= TimeSpan.FromMilliseconds(100), "Delay too short for tmux to open the prompt");
+        foreach (var (s, w) in new[] { ("$1; echo x", "@2"), ("main", "@2"), ("$1", "@a"), ("$1", "2"), ("$1", "@2'; x") })
+        {
+            bool rejected = false;
+            try { TmuxWindowParser.SwitchSteps(s, w); } catch (ArgumentException) { rejected = true; }
+            Check(rejected, "Accepted " + s + " / " + w);
+        }
+    });
+    Test("tmux window query and direct attach arguments are non-interactive / safe", () =>
+    {
+        var profile = new Profile { Name = "dev", Destination = "dev" };
+        var q = SshCommand.TmuxWindowsArguments(profile);
+        Check(q.Contains("-T") && q.Contains("BatchMode=yes") && q.Contains("RemoteCommand=none") && q.Contains("ConnectTimeout=8"), "Query may prompt");
+        Check(q.Last().StartsWith("tmux list-windows -a -F '") && q.Last().Contains("#{window_id}"), "Wrong command: " + q.Last());
+        var a = SshCommand.TmuxAttachArguments(profile, "$1", "@2");
+        Check(a.Last() == "tmux attach-session -t '$1:@2'" && a.Contains("-tt") && a.Contains("RemoteCommand=none"), "Attach: " + a.Last());
+        bool rejected = false;
+        try { SshCommand.TmuxAttachArguments(profile, "$1", "@2; x"); } catch (ArgumentException) { rejected = true; }
+        Check(rejected, "Unsafe window ID accepted");
+        Check(SshCommand.EffectiveConfigArguments(new() { Name = "d", Destination = "dev", ConfigPath = "C:\\c" }).SequenceEqual(["-F", "C:\\c", "-G", "dev"]), "ssh -G arguments");
+    });
+    Test("Session name is found in typical tmux RemoteCommands", () =>
+    {
+        Check(TmuxWindowParser.SessionNameFromCommand("tmux new -A -s main") == "main", "new -A -s");
+        Check(TmuxWindowParser.SessionNameFromCommand("tmux new-session -A -s 'work'") == "work", "new-session quoted");
+        Check(TmuxWindowParser.SessionNameFromCommand("tmux attach -t main") == "main", "attach -t");
+        Check(TmuxWindowParser.SessionNameFromCommand("tmux new -As dev") == "dev", "combined flags");
+        Check(TmuxWindowParser.SessionNameFromCommand("bash -lc 'tmux new -A -s x'") == "x", "inside shell");
+        Check(TmuxWindowParser.SessionNameFromCommand("tmux new -A") is null && TmuxWindowParser.SessionNameFromCommand("echo hi") is null
+            && TmuxWindowParser.SessionNameFromCommand(null) is null && TmuxWindowParser.SessionNameFromCommand("  ") is null, "No name expected");
+    });
     try
     {
         var output = new StringBuilder();
@@ -274,9 +341,81 @@ if (args.Contains("--ssh-smoke"))
         var sessions = await new TmuxSessionQuery().ListAsync(new() { Name = "linuxdev", Destination = "linuxdev" });
         Check(sessions.Count > 0, "Expected existing tmux sessions on linuxdev");
         passed++; Console.WriteLine("PASS Real SSH tmux session discovery: " + sessions.Count + " sessions");
+        passed += await RealTmuxWindowScenario();
     }
     catch (Exception ex) { failures.Add("SSH smoke: " + ex.Message); Console.WriteLine("FAIL " + ex.Message); }
     finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
 }
 Console.WriteLine($"{passed} passed, {failures.Count} failed");
 Environment.ExitCode = failures.Count == 0 ? 0 : 1;
+
+// Real tmux on linuxdev with throw-away sessions (tmgr-ta / tmgr-tb); the user's own sessions are never touched.
+async Task<int> RealTmuxWindowScenario()
+{
+    int checks = 0;
+    var profile = new Profile { Name = "linuxdev", Destination = "linuxdev" };
+    string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
+    async Task<string> Remote(string command)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "linuxdev", command }) start.ArgumentList.Add(a);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        return await stdout + await stderr;
+    }
+    async Task<string> ClientsOf(string session) => (await Remote($"tmux list-clients -F '#{{client_session}} #{{window_id}}' | grep '^{session} '")).Trim();
+    Func<Task<string>>? diagnose = null;
+    async Task Eventually(Func<Task<bool>> condition, string message)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline) { if (await condition()) return; await Task.Delay(250); }
+        throw new Exception("Timeout: " + message + (diagnose is null ? "" : "; " + await diagnose()));
+    }
+    PtySession? client = null;
+    try
+    {
+        await Remote("tmux kill-session -t tmgr-ta 2>/dev/null; tmux kill-session -t tmgr-tb 2>/dev/null; true");
+        await Remote("tmux new-session -d -s tmgr-ta -n one && tmux new-window -t tmgr-ta -n two 'cat' && tmux new-session -d -s tmgr-tb -n alpha && tmux new-window -t tmgr-tb -n beta");
+        var windows = await new TmuxSessionQuery().ListWindowsAsync(profile);
+        var ta = windows.Where(w => w.SessionName == "tmgr-ta").ToList();
+        var tb = windows.Where(w => w.SessionName == "tmgr-tb").ToList();
+        Check(ta.Count == 2 && tb.Count == 2, "Test sessions not listed: " + string.Join(";", windows.Select(w => w.SessionName + "/" + w.Name)));
+        Check(ta.Single(w => w.Name == "two").Command == "cat" && ta.Single(w => w.Active).Name == "two", "Command or active flag wrong");
+        Check(windows.Any(w => w.SessionName == "main"), "Existing session main not listed");
+        string taId = ta[0].SessionId, tbId = tb[0].SessionId;
+        string one = ta.Single(w => w.Name == "one").WindowId, beta = tb.Single(w => w.Name == "beta").WindowId, alpha = tb.Single(w => w.Name == "alpha").WindowId;
+        checks++; Console.WriteLine("PASS Real tmux: window list with IDs, commands and active flag (server not connected in the app)");
+
+        // Not connected: attach straight to window 'one' of session ta.
+        client = new PtySession();
+        var screen = new StringBuilder();
+        client.Output += s => { lock (screen) screen.Append(s); };
+        string Screen() { lock (screen) return System.Text.RegularExpressions.Regex.Replace(screen.ToString(), "\x1b\\[[0-9;?]*[A-Za-z]", "").Replace("\r", "").Replace("\x1b", "").TrimEnd(); }
+        client.Start(ssh, SshCommand.TmuxAttachArguments(profile, taId, one), 120, 30);
+        await Eventually(async () => (await ClientsOf("tmgr-ta")) == "tmgr-ta " + one, "attach did not land in window 'one'");
+        checks++; Console.WriteLine("PASS Real tmux: connecting attaches directly to the chosen session and window");
+
+        // Connected: switch the own client to a window of another session through prefix + command prompt.
+        await TmuxClient.SwitchToWindowAsync(client, tbId, beta);
+        diagnose = async () => "clients: " + await Remote("tmux list-clients -F '#{client_session} #{window_id} #{client_prefix} #{client_key_table}'") + " screen tail: " + System.Text.Json.JsonSerializer.Serialize(Screen()[^Math.Min(Screen().Length, 400)..]) + " raw length " + screen.Length;
+        await Eventually(async () => (await ClientsOf("tmgr-tb")) == "tmgr-tb " + beta, "switch-client did not reach session tb / window beta");
+        Check((await Remote("tmux has-session -t tmgr-ta && echo alive")).Contains("alive"), "Previous session was closed");
+        checks++; Console.WriteLine("PASS Real tmux: switching to a window of another session works and the old session keeps running");
+
+        await TmuxClient.SwitchToWindowAsync(client, taId, ta.Single(w => w.Name == "two").WindowId);
+        await Eventually(async () => (await ClientsOf("tmgr-ta")).StartsWith("tmgr-ta " + ta.Single(w => w.Name == "two").WindowId), "switch back into program window failed");
+        await TmuxClient.SwitchToWindowAsync(client, tbId, alpha);
+        await Eventually(async () => (await ClientsOf("tmgr-tb")) == "tmgr-tb " + alpha, "switch away from the cat window failed");
+        string pane = await Remote($"tmux capture-pane -p -t '{taId}:{ta.Single(w => w.Name == "two").WindowId}'");
+        Check(!pane.Contains("switch-client") && !pane.Contains(":switch"), "Keystrokes leaked into the running program: " + pane);
+        checks++; Console.WriteLine("PASS Real tmux: no characters reach the program running in the window");
+    }
+    finally
+    {
+        if (client is not null) await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await Remote("tmux kill-session -t tmgr-ta 2>/dev/null; tmux kill-session -t tmgr-tb 2>/dev/null; true");
+    }
+    return checks;
+}
