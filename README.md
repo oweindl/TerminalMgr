@@ -129,15 +129,9 @@ Schalter: `-Force` (nicht nachfragen, eine nicht reagierende App beenden), `-Ski
 
 ### Version und Release
 
-Die Versionsnummer steht nur in `Directory.Build.props` (`Version`, `FileVersion`, `InformationalVersion`) und erscheint in der Titelzeile und unter *Einstellungen*. Ein Release entsteht so:
+In `Directory.Build.props` steht nur Major.Minor (`MajorMinor`, jetzt 0.2). Die Version eines Releases ist Major.Minor plus die Laufnummer des Workflows als Patch, z. B. 0.2.14; lokale Builds heißen 0.2.0. Die Version steht in der EXE (`FileVersion`, `InformationalVersion` mit Commit) und erscheint in der Titelzeile und unter *Einstellungen*. Major.Minor erhöht man von Hand in `Directory.Build.props`.
 
-~~~powershell
-# Version in Directory.Build.props erhöhen, committen, dann:
-git tag v0.2.0
-git push origin v0.2.0
-~~~
-
-Der Workflow `.github/workflows/release.yml` läuft bei Tags `v*`, prüft, dass der Tag zur Version passt, baut und testet wie `build.yml`, packt `TerminalMgr-win-x64-<version>.zip` und hängt es an ein GitHub Release mit Notizen aus den Commits. Builds gehören nur in Releases, nie ins Repository.
+Jeder Push nach `main` erzeugt nach grünen Tests (Build, Konsolen-, WPF-, Browsertests, gitleaks) automatisch ein Release: der Workflow `.github/workflows/build.yml` setzt den Tag `vX.Y.N` selbst, packt `TerminalMgr-win-x64-<version>.zip` und `TerminalMgr-win-x64-<version>.zip.sha256` und schreibt Release-Notes aus den Commit-Nachrichten seit dem letzten Release. Feature-Branches und Pull Requests bauen und testen nur. Der Tag löst keinen zweiten Lauf aus. Builds gehören nur in Releases, nie ins Repository.
 
 ## Struktur
 
