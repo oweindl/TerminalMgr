@@ -11,48 +11,119 @@ public interface ITranscriber
     Task<string> TranscribeAsync(short[] samples, DictationOptions options, CancellationToken cancellationToken);
 }
 
-/// <summary>Local, offline speech recognition with whisper.cpp through Whisper.net. GPU (Vulkan) when available, else CPU.</summary>
-public sealed class WhisperTranscriber(string? modelsDirectory = null) : ITranscriber, IDisposable
+public interface IWordTranscriber
+{
+    /// <summary>Recognized words with their times relative to the start of <paramref name="samples"/>. Called off the UI thread.</summary>
+    Task<IReadOnlyList<TimedWord>> TranscribeWordsAsync(short[] samples, DictationOptions options, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Local, offline speech recognition with whisper.cpp through Whisper.net. GPU (Vulkan) when available, else CPU.
+/// One instance serves one model: the final text uses <see cref="DictationOptions.Model"/>, an <paramref name="interim"/> instance
+/// the small <see cref="DictationOptions.InterimModel"/> for the provisional text.
+/// </summary>
+public sealed class WhisperTranscriber(string? modelsDirectory = null, bool interim = false) : ITranscriber, IWordTranscriber, IDisposable
 {
     private const int MinimumSamples = AudioDevices.SampleRate * 12 / 10; // whisper.cpp rejects input shorter than 1 s
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private const int ContextPerSecond = 50;  // one encoder position per 20 ms of audio; 1500 positions cover the usual 30 s
+    // One recognition at a time in the whole process: two whisper.cpp contexts running at once on the same GPU (the small model for the
+    // provisional text and the large one for the final text) hung and crashed the Vulkan backend.
+    private static readonly SemaphoreSlim NativeGate = new(1, 1);
     private WhisperFactory? _factory;
     private string? _loadedPath;
 
     /// <summary>Which native runtime was loaded ("Vulkan", "Cpu", ...); empty before the first transcription.</summary>
     public string Backend => RuntimeOptions.LoadedLibrary?.ToString() ?? "";
 
+    private string ModelPath(DictationOptions options) =>
+        WhisperModels.PathOf(WhisperModels.Get(interim ? options.InterimModel : options.Model), modelsDirectory);
+
+    /// <summary>Loads the model and runs one short recognition, so that the first real request does not pay for loading and shader compilation.</summary>
+    public async Task PrepareAsync(DictationOptions options, CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(ModelPath(options))) return;
+        await TranscribeWordsAsync(new short[MinimumSamples], options, cancellationToken);
+    }
+
     public async Task<string> TranscribeAsync(short[] samples, DictationOptions options, CancellationToken cancellationToken)
     {
-        var model = WhisperModels.Get(options.Model);
-        string path = WhisperModels.PathOf(model, modelsDirectory);
-        if (!File.Exists(path)) throw new FileNotFoundException("Das Spracherkennungsmodell fehlt: " + model.Name, path);
-        var audio = new float[Math.Max(samples.Length, MinimumSamples)];
-        for (int i = 0; i < samples.Length; i++) audio[i] = samples[i] / 32768f;
-
-        await _gate.WaitAsync(cancellationToken);
+        string path = ModelPath(options);
+        if (!File.Exists(path)) throw new FileNotFoundException("Das Spracherkennungsmodell fehlt: " + Path.GetFileName(path), path);
+        var audio = ToFloats(samples);
+        await NativeGate.WaitAsync(cancellationToken);
         try
         {
-            if (_factory is null || _loadedPath != path)
-            {
-                _factory?.Dispose();
-                _factory = WhisperFactory.FromPath(path);
-                _loadedPath = path;
-            }
-            var builder = _factory.CreateBuilder().WithLanguage(options.Language).WithThreads(Math.Clamp(Environment.ProcessorCount / 2, 2, 8));
+            var builder = Factory(path).CreateBuilder().WithLanguage(options.Language).WithThreads(Math.Clamp(Environment.ProcessorCount / 2, 2, 8));
             if (!string.IsNullOrWhiteSpace(options.InitialPrompt)) builder = builder.WithPrompt(options.InitialPrompt);
             await using var processor = builder.Build();
             var text = new StringBuilder();
-            await foreach (var segment in processor.ProcessAsync(audio, cancellationToken)) text.Append(segment.Text).Append(' ');
+            await foreach (var segment in processor.ProcessAsync(audio, CancellationToken.None)) { cancellationToken.ThrowIfCancellationRequested(); text.Append(segment.Text).Append(' '); }
             return DictationText.Clean(text.ToString());
         }
-        finally { _gate.Release(); }
+        finally { NativeGate.Release(); }
+    }
+
+    /// <summary>
+    /// One word per segment (maximum segment length 1, split on words, token timestamps) and a reduced audio context: the encoder only
+    /// looks at as many positions as the window is long instead of the usual 30 s, which is what makes a cycle fast.
+    /// </summary>
+    public async Task<IReadOnlyList<TimedWord>> TranscribeWordsAsync(short[] samples, DictationOptions options, CancellationToken cancellationToken)
+    {
+        string path = ModelPath(options);
+        if (!File.Exists(path)) throw new FileNotFoundException("Das Spracherkennungsmodell fehlt: " + Path.GetFileName(path), path);
+        var audio = ToFloats(samples);
+        int context = AudioContextFor(audio.Length);
+        await NativeGate.WaitAsync(cancellationToken);
+        try
+        {
+            var builder = Factory(path).CreateBuilder().WithLanguage(options.Language).WithThreads(Math.Clamp(Environment.ProcessorCount / 2, 2, 8))
+                .WithTokenTimestamps().WithMaxSegmentLength(1).SplitOnWord().WithAudioContextSize(context).WithNoContext()
+                .WithTemperature(0f).WithTemperatureInc(0f); // no repeated decoding at higher temperatures: a provisional text has to be quick
+            if (!string.IsNullOrWhiteSpace(options.InitialPrompt)) builder = builder.WithPrompt(options.InitialPrompt);
+            await using var processor = builder.Build();
+            var words = new List<TimedWord>();
+            await foreach (var segment in processor.ProcessAsync(audio, CancellationToken.None))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string text = DictationText.Clean(segment.Text);
+                if (text.Length > 0) words.Add(new(text, segment.Start, segment.End));
+            }
+            return words;
+        }
+        finally { NativeGate.Release(); }
+    }
+
+    // A cancelable token is not handed to Whisper.net: its native abort callback crashed the process (access violation inside whisper_full)
+    // when a dictation round ran with a real token. Cancellation is honored between segments instead; a running recognition
+    // finishes (well under a second for the small model) and its result is dropped.
+    /// <summary>One encoder position per 20 ms plus some slack, rounded up to a multiple of 64 and never below 256 (odd small sizes made the GPU backend hang).</summary>
+    public static int AudioContextFor(int sampleCount)
+    {
+        int positions = (int)Math.Ceiling(sampleCount / (double)AudioDevices.SampleRate * ContextPerSecond) + 64;
+        return Math.Min(1500, Math.Max(256, (positions + 63) / 64 * 64));
+    }
+
+    private WhisperFactory Factory(string path)
+    {
+        if (_factory is null || _loadedPath != path)
+        {
+            _factory?.Dispose();
+            _factory = WhisperFactory.FromPath(path);
+            _loadedPath = path;
+        }
+        return _factory;
+    }
+
+    private static float[] ToFloats(short[] samples)
+    {
+        var audio = new float[Math.Max(samples.Length, MinimumSamples)];
+        for (int i = 0; i < samples.Length; i++) audio[i] = samples[i] / 32768f;
+        return audio;
     }
 
     public void Dispose()
     {
         _factory?.Dispose();
-        _gate.Dispose();
     }
 }
 

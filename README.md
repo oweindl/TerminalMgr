@@ -61,15 +61,17 @@ Einstellungen und angeheftete Texte liegen in %LOCALAPPDATA%\TerminalMgr\setting
 
 ### Diktat
 
-Gesprochener Text landet in einem Diktatfenster über dem Terminal, ist dort korrigierbar und geht dann in die Session. Gedacht für Prompts an Claude Code und andere Programme in tmux.
+Gesprochener Text landet in einem Diktatfenster in der rechten Spalte unter der Clipboard-Liste (höchstens ein Drittel der Fensterhöhe, der Text scrollt mit; eine ausgeblendete Clipboard-Spalte kommt dafür zurück), ist dort korrigierbar und geht dann in die Session. Gedacht für Prompts an Claude Code und andere Programme in tmux.
 
 - **Ctrl+Y** (oder Button „Diktat“ rechts unten über der Statusleiste) öffnet das Fenster und startet die Aufnahme. Ctrl+Y wird von der App abgefangen und erreicht die Session nie. Die Belegung ist unter *Einstellungen* änderbar; in bash/readline ist Ctrl+Y „yank“, das mit der Standardbelegung nicht erreichbar ist.
 - Zielsession ist die beim Öffnen aktive; ihr Name steht im Titel. Ein späterer Serverwechsel ändert das Ziel nicht.
-- Beim Sprechen erscheint ein grauer, kursiver Zwischenstand. Nach 1,5 s Stille (einstellbar) endet die Aufnahme; der endgültige Text ersetzt den Zwischenstand. Ohne Sprache endet sie nach 5 s und es wird nichts transkribiert. Erneut Ctrl+Y setzt fort, neuer Text kommt an die Cursorposition. Läuft die Aufnahme, beendet Ctrl+Y sie sofort.
+- Beim Sprechen erscheint nach etwa einer Sekunde ein Zwischenstand: bestätigte Wörter in normaler Schrift (sie ändern sich nicht mehr), der noch unsichere Rest grau und kursiv. Nach 1,5 s Stille (einstellbar) endet die Aufnahme; der endgültige Text ersetzt den Zwischenstand. Ohne Sprache endet sie nach 5 s und es wird nichts transkribiert. Erneut Ctrl+Y setzt fort, neuer Text kommt an die Cursorposition. Läuft die Aufnahme, beendet Ctrl+Y sie sofort.
 - **Enter** fügt den Text ein (ohne Enter), **Ctrl+Enter** fügt ein und führt aus, **Shift+Enter** ist ein Zeilenumbruch, **Esc** bricht zuerst die Aufnahme ab und verwirft danach das Diktat. Eingefügt wird per Bracketed Paste; Steuerzeichen außer Zeilenumbruch und Tab werden entfernt, „Ausführen“ sendet danach genau ein Enter.
 - Die Erkennung läuft lokal und offline mit whisper.cpp über Whisper.net (Grafikkarte per Vulkan, sonst CPU). Audio bleibt im Speicher und wird nicht gespeichert.
 - Das Modell (Vorgabe `large-v3-turbo-q5_0`, ca. 0,6 GB; leichter: `small-q5_1`) liegt unter `%LOCALAPPDATA%\TerminalMgr\models`, nicht im Installationsordner. Der Download startet erst nach Rückfrage beim ersten Diktat, mit Fortschrittsanzeige und Abbruch.
-- Einstellungen: Tastenkürzel, Mikrofon, Modell, Sprache (Deutsch, Englisch, automatisch), Fachbegriffe für die Erkennung (Initial-Prompt), Stilledauer und Pegelschwelle.
+- Zwischenstand: Das schnelle Modell `small-q5_1` (ca. 0,2 GB, nach Rückfrage geladen) erkennt auf der Grafikkarte nur die letzten bis zu 7 s Audio etwa alle 0,7 s; zwei übereinstimmende Ergebnisse bestätigen ein Wort. Der Endtext kommt vom eingestellten Modell.
+- Drei Engines hinter einer Schnittstelle (Einstellungen › Diktat › Spracherkennung): Whisper (lokal, Vorgabe), Web Speech API in WebView2 und die Windows-Spracherkennung. Die beiden letzten laufen auf diesem System nicht (WebView2 hat keinen Spracherkennungsdienst; Windows verlangt „Onlinespracherkennung“, dann geht das Audio in die Cloud). Prüfung, Messungen und Messmodus: [docs/dictation-engines.md](docs/dictation-engines.md).
+- Einstellungen: Tastenkürzel, Spracherkennung (Engine), Mikrofon, Modell, Modell für den Zwischenstand, Sprache (Deutsch, Englisch, automatisch), Fachbegriffe für die Erkennung (Initial-Prompt), Stilledauer und Pegelschwelle.
 
 ### Tastenkürzel, Wiederverbindung, Start mit Windows
 
