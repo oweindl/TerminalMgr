@@ -1251,6 +1251,7 @@ sealed class LocalServer : IDisposable
     public static async Task Slow(System.Net.HttpListenerContext c, byte[] data)
     {
         c.Response.ContentLength64 = data.Length;
+        await Task.Delay(2000); // even a tiny body must be late, whatever the speed of the machine
         for (int i = 0; i < data.Length; i += Math.Max(1, data.Length / 10))
         {
             await Task.Delay(300);
