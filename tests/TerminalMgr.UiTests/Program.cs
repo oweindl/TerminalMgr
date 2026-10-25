@@ -24,6 +24,19 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private static void TestShortcutKeys()
+    {
+        Check(ShortcutKeys.FromWpf(System.Windows.Input.Key.Y) == "Y" && ShortcutKeys.FromWpf(System.Windows.Input.Key.D7) == "7"
+            && ShortcutKeys.FromWpf(System.Windows.Input.Key.F5) == "F5" && ShortcutKeys.FromWpf(System.Windows.Input.Key.Return) == "Enter"
+            && ShortcutKeys.FromWpf(System.Windows.Input.Key.Escape) == "Esc" && ShortcutKeys.FromWpf(System.Windows.Input.Key.OemComma) == ","
+            && ShortcutKeys.FromWpf(System.Windows.Input.Key.LeftCtrl) is null, "WPF key names");
+        // Every name the WPF side produces must be accepted by the shared parser, and match what the web page sends.
+        foreach (var key in Enum.GetValues<System.Windows.Input.Key>())
+            if (ShortcutKeys.FromWpf(key) is { } name)
+                Check(Shortcut.TryParse("Ctrl+" + name, out var parsed) && parsed.Key == name, "Name not accepted by Shortcut: " + name);
+        Console.WriteLine("PASS Shortcut key names agree between WPF and the shared parser");
+    }
+
     private static void TestTmuxMenu()
     {
         var sessions = TmuxWindowParser.Group(TmuxWindowParser.Parse(
@@ -119,6 +132,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestShortcutKeys();
             TestTmuxMenu();
             TestClipboardMonitoring();
             // Do not show or run the application: this test must never connect to SSH.

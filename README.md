@@ -58,6 +58,18 @@ Einfügen nutzt Bracketed Paste. Die App sendet keinen zusätzlichen Enter-Taste
 
 Einstellungen und angeheftete Texte liegen in %LOCALAPPDATA%\TerminalMgr\settings.json, also außerhalb des Installationsordners und bleiben bei Updates erhalten. SSH-Schlüssel und Passwörter verwaltet OpenSSH. Angeheftete Texte werden als Klartext gespeichert.
 
+### Diktat
+
+Gesprochener Text landet in einem Diktatfenster über dem Terminal, ist dort korrigierbar und geht dann in die Session. Gedacht für Prompts an Claude Code und andere Programme in tmux.
+
+- **Ctrl+Y** (oder Button „Diktat“ rechts unten über der Statusleiste) öffnet das Fenster und startet die Aufnahme. Ctrl+Y wird von der App abgefangen und erreicht die Session nie. Die Belegung ist unter *Einstellungen* änderbar; in bash/readline ist Ctrl+Y „yank“, das mit der Standardbelegung nicht erreichbar ist.
+- Zielsession ist die beim Öffnen aktive; ihr Name steht im Titel. Ein späterer Serverwechsel ändert das Ziel nicht.
+- Beim Sprechen erscheint ein grauer, kursiver Zwischenstand. Nach 1,5 s Stille (einstellbar) endet die Aufnahme; der endgültige Text ersetzt den Zwischenstand. Ohne Sprache endet sie nach 5 s und es wird nichts transkribiert. Erneut Ctrl+Y setzt fort, neuer Text kommt an die Cursorposition. Läuft die Aufnahme, beendet Ctrl+Y sie sofort.
+- **Enter** fügt den Text ein (ohne Enter), **Ctrl+Enter** fügt ein und führt aus, **Shift+Enter** ist ein Zeilenumbruch, **Esc** bricht zuerst die Aufnahme ab und verwirft danach das Diktat. Eingefügt wird per Bracketed Paste; Steuerzeichen außer Zeilenumbruch und Tab werden entfernt, „Ausführen“ sendet danach genau ein Enter.
+- Die Erkennung läuft lokal und offline mit whisper.cpp über Whisper.net (Grafikkarte per Vulkan, sonst CPU). Audio bleibt im Speicher und wird nicht gespeichert.
+- Das Modell (Vorgabe `large-v3-turbo-q5_0`, ca. 0,6 GB; leichter: `small-q5_1`) liegt unter `%LOCALAPPDATA%\TerminalMgr\models`, nicht im Installationsordner. Der Download startet erst nach Rückfrage beim ersten Diktat, mit Fortschrittsanzeige und Abbruch.
+- Einstellungen: Tastenkürzel, Mikrofon, Modell, Sprache (Deutsch, Englisch, automatisch), Fachbegriffe für die Erkennung (Initial-Prompt), Stilledauer und Pegelschwelle.
+
 ## Entwickeln
 
 .NET 8 SDK, Node.js und Windows:
@@ -80,7 +92,14 @@ cd web
 npm test
 ~~~
 
-Browsertests verwenden den installierten Microsoft Edge. Die Konsolentests starten echte lokale ConPTY-Kindprozesse. Der optionale lokale Integrationstest mit -- --ssh-smoke nutzt den SSH-Alias linuxdev; er läuft nicht in CI.
+Browsertests verwenden den installierten Microsoft Edge. Die Konsolentests starten echte lokale ConPTY-Kindprozesse. Zwei optionale lokale Integrationstests laufen nicht in CI:
+
+~~~powershell
+# echte SSH-Prüfungen auf dem Alias linuxdev: Terminaltyp, Größe, tmux-Fensterliste, Anhängen und Wechseln (legt Test-Sessions tmgr-ta/tmgr-tb an und räumt sie auf)
+dotnet run --project tests/TerminalMgr.Tests -c Release -- --ssh-smoke
+# echtes whisper.cpp mit Windows-Sprachausgabe als Testaudio; lädt das Modell einmalig nach %TEMP% (tiny, small-q5_1, ...)
+dotnet run --project tests/TerminalMgr.Tests -c Release -- --whisper-smoke=small-q5_1
+~~~
 
 Eigenständiges Windows-x64-Paket:
 
