@@ -24,6 +24,22 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private static void TestUpdateDialog()
+    {
+        var release = new UpdateRelease(new Version(0, 2, 14), "v0.2.14", "- fix: a\n- feat: b", new Uri("https://github.com/x/y/a.zip"), new Uri("https://github.com/x/y/a.zip.sha256"), "a.zip", 1000);
+        foreach (bool canInstall in new[] { true, false })
+        {
+            var dialog = new UpdateDialog(release, new Version(0, 2, 0), canInstall, @"C:\Users\x\AppData\Local\Programs\TerminalMgr", (_, _) => Task.FromResult("staged"));
+            var content = (FrameworkElement)dialog.Content;
+            content.Measure(new Size(512, double.PositiveInfinity));
+            Check(content.DesiredSize.Height > 150 && dialog.Title == "Update verfügbar" && dialog.Choice == UpdateChoice.Later, "Update dialog layout: " + content.DesiredSize);
+        }
+        var settings = new SettingsDialog(new AppSettings { Update = new() { SkippedVersion = "0.2.9" } });
+        settings.Measure(new Size(620, 900));
+        Check(!settings.CheckForUpdatesNow, "Settings must not request a check by themselves");
+        Console.WriteLine("PASS WPF update dialog (installable and development build) and settings with update section load");
+    }
+
     private static void TestVersionIsShown()
     {
         // Directory.Build.props is the single source: it must reach the assembly, the window title and the file version.
@@ -152,6 +168,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestUpdateDialog();
             TestVersionIsShown();
             TestShortcutKeys();
             TestTmuxMenu();
