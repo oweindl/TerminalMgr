@@ -97,6 +97,54 @@ test('Ctrl+Shift+C copies trimmed text and clears the selection', async ({page})
   expect(await messages(page, 'copy')).toHaveLength(1); // selection is gone
 });
 
+const inputs = page => page.evaluate(() => window.__messages.filter(m => m.type === 'input').map(m => m.data));
+
+test('Ctrl+Y is an app shortcut: reported to the host, never sent to the session', async ({page}) => {
+  await page.keyboard.press('Control+y');
+  await expect.poll(async () => (await messages(page, 'shortcut')).length).toBe(1);
+  expect((await messages(page, 'shortcut'))[0]).toMatchObject({action:'dictation', id:'one'});
+  expect(await inputs(page)).toEqual([]);
+  await page.keyboard.press('a');
+  await expect.poll(() => inputs(page)).toEqual(['a']); // normal typing still works
+});
+
+test('Shortcuts are configurable: the old key goes back to the session', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'shortcuts', shortcuts:{dictation:'Ctrl+Shift+D'}}));
+  await page.keyboard.press('Control+y');
+  await expect.poll(() => inputs(page)).toEqual(['\x19']); // readline "yank" works again
+  await page.keyboard.press('Control+Shift+D');
+  await expect.poll(async () => (await messages(page, 'shortcut')).length).toBe(1);
+  expect(await inputs(page)).toEqual(['\x19']);
+});
+
+test('Held shortcut key reports once; Ctrl+Alt+Y is not the Ctrl+Y shortcut', async ({page}) => {
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 4; i++) await page.keyboard.down('y');
+  await page.keyboard.up('y');
+  await page.keyboard.up('Control');
+  await expect.poll(async () => (await messages(page, 'shortcut')).length).toBe(1);
+  await page.keyboard.press('Control+Alt+y');
+  await page.waitForTimeout(100);
+  expect(await messages(page, 'shortcut')).toHaveLength(1);
+});
+
+test('Paste and run sends the text as one bracketed paste, then a single Enter', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'output',id:'one',data:'\x1b[?2004hREADY'}));
+  await expect(page.locator('.xterm-rows')).toContainText('READY');
+  await page.evaluate(() => window.__hostMessage({type:'paste',id:'one',text:'zeile eins\nzeile zwei',enter:true}));
+  await expect.poll(async () => (await inputs(page)).join('')).toBe('\x1b[200~zeile eins\rzeile zwei\x1b[201~\r');
+  const all = await inputs(page);
+  expect(all.at(-1)).toBe('\r');
+  expect(all.filter(d => d === '\r')).toHaveLength(1); // the line break inside the paste is not a separate Enter
+});
+
+test('Paste without run does not press Enter', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'paste',id:'one',text:'nur text'}));
+  await expect.poll(async () => (await inputs(page)).join('')).toBe('nur text');
+  await page.waitForTimeout(100);
+  expect((await inputs(page)).join('')).toBe('nur text');
+});
+
 test('Remote output remains terminal text and cannot create page HTML', async ({page}) => {
   await page.evaluate(() => window.__hostMessage({type:'output',id:'one',data:'<img src=x onerror=alert(1)>'}));
   await expect(page.locator('.xterm-rows')).toContainText('<img');
