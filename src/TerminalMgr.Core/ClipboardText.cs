@@ -3,7 +3,11 @@ using System.Text;
 namespace TerminalMgr.Core;
 
 /// <summary>What the clipboard list shows for one entry: at most two lines plus a size hint.</summary>
-public sealed record ClipPreview(string Line1, string? Line2, string LengthLabel);
+public sealed record ClipPreview(string Line1, string? Line2, string LengthLabel)
+{
+    /// <summary>The list shows less than the whole text ("…" and a size hint): only then a hover popup or expanding makes sense.</summary>
+    public bool Truncated => LengthLabel.Length > 0;
+}
 
 public static class ClipboardText
 {
