@@ -1,5 +1,17 @@
 name: Windows build
-on: [push, pull_request]
+# Every push and pull request is built and tested. Only a push to main also creates a GitHub release.
+# Feature branches and pull requests never release. The release tag is created by the workflow itself;
+# tags are ignored here, so pushing the tag does not start a second run.
+on:
+  push:
+    branches: ['**']
+    tags-ignore: ['**']
+  pull_request:
+permissions:
+  contents: write   # only the release step writes (tag and release)
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   build:
     runs-on: windows-latest
@@ -35,8 +47,44 @@ jobs:
       - run: dotnet run --project tests/TerminalMgr.UiTests -c Release --no-build
       - run: npm test
         working-directory: web
-      - run: dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
+      - name: Publish (branches and pull requests, only to prove that it works)
+        if: github.ref != 'refs/heads/main' || github.event_name != 'push'
+        run: dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
+      - name: Release (push to main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Version: Major.Minor from Directory.Build.props, patch = run number of this workflow (for example 0.2.14).
+          $majorMinor = @(([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.MajorMinor) | Where-Object { $_ } | Select-Object -First 1
+          if ($majorMinor -notmatch '^\d+\.\d+$') { throw "MajorMinor in Directory.Build.props ist ungültig: '$majorMinor'" }
+          $version = "$majorMinor.${{ github.run_number }}"
+          $tag = "v$version"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag existiert schon (erneuter Lauf); nichts zu tun."; $global:LASTEXITCODE = 0; return }
+          $global:LASTEXITCODE = 0
+
+          $out = 'artifacts/TerminalMgr-win-x64'
+          dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true "-p:Version=$version" -o $out
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish ist fehlgeschlagen.' }
+          $zip = "artifacts/TerminalMgr-win-x64-$version.zip"
+          Compress-Archive -Path $out -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+
+          # Notes: the commit subjects since the previous release.
+          $previous = (gh release list --limit 1 --json tagName --jq '.[0].tagName') 2>$null
+          $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
+          $commits = @(git log $range --no-merges --pretty=format:'- %s')
+          $notes = @("## TerminalMgr $version", '', 'Änderungen:', '') + $commits + @('', "Entpacken und TerminalMgr.App.exe starten. Eine .NET-Installation ist nicht nötig; benötigt werden Windows OpenSSH und die Microsoft Edge WebView2 Runtime. Die Prüfsumme steht in der Datei .sha256.")
+          $notes | Set-Content notes.md -Encoding utf8
+          $global:LASTEXITCODE = 0
+
+          gh release create $tag $zip "$zip.sha256" --title "TerminalMgr $version" --notes-file notes.md --target ${{ github.sha }}
+          if ($LASTEXITCODE -ne 0) { throw 'Das Release konnte nicht angelegt werden.' }
       - uses: actions/upload-artifact@v4
+        if: github.ref != 'refs/heads/main' || github.event_name != 'push'
         with:
           name: TerminalMgr-win-x64
           path: artifacts/TerminalMgr-win-x64/

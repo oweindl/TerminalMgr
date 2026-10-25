@@ -1,7 +1,9 @@
 <Project>
-  <!-- The one place that holds the version. The release workflow checks that the tag vX.Y.Z matches it. -->
+  <!-- The one place that holds the version: Major.Minor. The patch number is the run number of the build workflow, which passes
+       -p:Version=Major.Minor.N for a release; local builds are Major.Minor.0. -->
   <PropertyGroup>
-    <Version>0.2.1</Version>
+    <MajorMinor>0.2</MajorMinor>
+    <Version Condition="'$(Version)' == ''">$(MajorMinor).0</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>

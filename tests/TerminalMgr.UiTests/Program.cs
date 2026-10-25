@@ -28,7 +28,9 @@ internal static class Program
     {
         // Directory.Build.props is the single source: it must reach the assembly, the window title and the file version.
         string props = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Directory.Build.props"));
-        string declared = System.Text.RegularExpressions.Regex.Match(props, "<Version>([^<]+)</Version>").Groups[1].Value;
+        // Without an override a build is Major.Minor.0; the release workflow only replaces the patch number.
+        string majorMinor = System.Text.RegularExpressions.Regex.Match(props, "<MajorMinor>([^<]+)</MajorMinor>").Groups[1].Value;
+        string declared = majorMinor.Length > 0 ? majorMinor + ".0" : "";
         Check(declared.Length > 0 && AppInfo.Version == declared, $"AppInfo.Version '{AppInfo.Version}' differs from Directory.Build.props '{declared}'");
         var main = new MainWindow();
         Check(main.Title == "TerminalMgr " + declared, "Window title: " + main.Title);
