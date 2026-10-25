@@ -1,0 +1,10 @@
+title = "TerminalMgr"
+
+[extend]
+useDefault = true
+
+# Gebündeltes, minifiziertes xterm.js (Drittanbieter, wird von web/bundle.mjs aus npm kopiert): ein Tastaturtabellen-Name
+# (FourKeyMap) löst die Regel generic-api-key aus. Es steht kein Geheimnis darin.
+[allowlist]
+description = "Gebündelte Drittanbieter-Bibliothek"
+paths = ['''Terminal/vendor/''']

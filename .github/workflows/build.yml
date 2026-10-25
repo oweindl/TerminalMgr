@@ -5,6 +5,19 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan of the whole history (gitleaks)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'gitleaks'
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern '*windows_x64.zip' --dir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'gitleaks konnte nicht geladen werden.' }
+          Expand-Archive (Join-Path $dir '*.zip') -DestinationPath $dir -Force
+          & (Join-Path $dir 'gitleaks.exe') git --log-opts='--all' --redact --no-banner --exit-code 1 .
+          if ($LASTEXITCODE -ne 0) { throw 'gitleaks hat ein mögliches Geheimnis gefunden.' }
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'

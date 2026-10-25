@@ -7,3 +7,14 @@ artifacts/
 *.log
 .tools/
 *.stackdump
+
+# Eigene Daten und Geheimnisse gehören nie ins Repository
+settings.json
+*.tmconfig
+ssh_config
+*.ssh_config
+config.bak-*
+*.pem
+*.ppk
+id_*
+!id_*.md
