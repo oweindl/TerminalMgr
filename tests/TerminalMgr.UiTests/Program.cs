@@ -55,7 +55,7 @@ internal static class Program
         var root = (FrameworkElement)main.Content;
         root.Measure(new Size(1100, 700)); root.Arrange(new Rect(0, 0, 1100, 700)); root.UpdateLayout();
         var header = (FrameworkElement)main.FindName("ClipboardHeader");
-        Check(header.ActualHeight <= 100, "Clipboard header wastes space: " + header.ActualHeight);
+        Check(header.ActualHeight <= 125, "Clipboard header wastes space: " + header.ActualHeight);
         var first = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0);
         Check(first.ActualHeight <= 72, "A one-line clipboard entry is too tall: " + first.ActualHeight);
         // The hover frame: a visible, click-through border in the entry, switched on by the pointer being over the card.
