@@ -109,6 +109,8 @@ public sealed record AppSettings
     public bool StartWithWindows { get; init; }
     /// <summary>Take clipboard writes that programs request with OSC 52 (tmux forwards copies this way). On by default.</summary>
     public bool AcceptOsc52 { get; init; } = true;
+    /// <summary>Copy a mouse selection as soon as it is made, in a plain shell and in tmux or Claude Code alike. Off: it is copied with a right click.</summary>
+    public bool CopyOnSelect { get; init; }
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     /// <summary>Saved tmux windows with their own shortcut (see <see cref="Favorite"/>).</summary>

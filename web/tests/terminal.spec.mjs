@@ -233,6 +233,59 @@ test('Right click copies the selection even if output arrives between pressing a
   expect(await inputs(page)).not.toContain('\x1b[<2;'); // the right button never reaches the program
 });
 
+async function tmuxSelect(page) {
+  // A drag with the left button while the program tracks the mouse: tmux reports the copy through OSC 52 after the release.
+  await output(page, '\x1b[?1002h\x1b[?1006hmarkierter Satz\r\n');
+  const box = await page.locator('.xterm-rows > div').first().boundingBox();
+  await page.mouse.move(box.x + 2, box.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 120, box.y + 5, {steps:4});
+  await page.mouse.up();
+  await output(page, `\x1b]52;c;${b64('markierter Satz')}\x07`);
+  return box;
+}
+
+test('tmux mouse selection waits for a right click unless copy on select is on', async ({page}) => {
+  const box = await tmuxSelect(page);
+  await page.waitForTimeout(150);
+  expect((await messages(page, 'osc52')).filter(m => m.data.endsWith(b64('markierter Satz')))).toHaveLength(0);
+  await page.mouse.move(box.x + 60, box.y + 5);
+  await page.mouse.click(box.x + 60, box.y + 5, {button:'right'});
+  await expect.poll(async () => (await messages(page, 'osc52')).filter(m => m.data.endsWith(b64('markierter Satz'))).length).toBe(1);
+  expect(await messages(page, 'contextPaste')).toHaveLength(0);
+  await page.mouse.click(box.x + 60, box.y + 5, {button:'right'});      // nothing pending any more: this one pastes
+  await expect.poll(async () => (await messages(page, 'contextPaste')).length).toBe(1);
+});
+
+test('tmux mouse selection is copied at once with copy on select', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:true, copyOnSelect:true, debug:false}));
+  await tmuxSelect(page);
+  await expect.poll(async () => (await messages(page, 'osc52')).filter(m => m.data.endsWith(b64('markierter Satz'))).length).toBe(1);
+});
+
+test('A copy without the mouse (tmux copy mode, scripts) is never held back', async ({page}) => {
+  await output(page, `\x1b]52;c;${b64('per Tastatur')}\x07`);
+  await expect.poll(async () => (await messages(page, 'osc52')).some(m => m.data.endsWith(b64('per Tastatur')))).toBe(true);
+});
+
+test('Plain shell selection: copied on mouse up with copy on select, otherwise on right click', async ({page}) => {
+  await output(page, 'Hallo Welt aus der Shell\r\n');
+  const box = await page.locator('.xterm-rows > div').first().boundingBox();
+  const drag = async () => {
+    await page.mouse.move(box.x + 1, box.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 100, box.y + 5, {steps:4});
+    await page.mouse.up();
+  };
+  await drag();
+  await page.waitForTimeout(150);
+  expect(await messages(page, 'copy')).toHaveLength(0);
+  await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:true, copyOnSelect:true, debug:false}));
+  await drag();
+  await expect.poll(async () => (await messages(page, 'copy')).length).toBe(1);
+  expect((await messages(page, 'copy'))[0].text).toMatch(/Hallo/);
+});
+
 test('Debug mode reports selection and mouse tracking mode of a right click', async ({page}) => {
   await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:true, debug:true}));
   await output(page, '\x1b[?1002h\x1b[?1006hzeile\r\n');

@@ -16,7 +16,7 @@ public sealed class SettingsDialog : Window
     private const string DefaultMicrophone = "Windows-Standard";
     private readonly AppSettings _original;
     private readonly StackPanel _panel = new() { Margin = new Thickness(24) };
-    private readonly CheckBox _startWithWindows, _acceptOsc52, _checkUpdates;
+    private readonly CheckBox _startWithWindows, _acceptOsc52, _copyOnSelect, _checkUpdates;
     private string? _skippedVersion;
     /// <summary>The user pressed "Jetzt nach Updates suchen": the settings are saved and the caller runs the check.</summary>
     public bool CheckForUpdatesNow { get; private set; }
@@ -96,6 +96,9 @@ public sealed class SettingsDialog : Window
         _acceptOsc52 = new CheckBox { Content = "Kopieren aus Programmen übernehmen (OSC 52, z. B. Markieren in Claude Code oder tmux)", IsChecked = settings.AcceptOsc52,
             ToolTip = "Programme in der Session können so Text in die Zwischenablage legen. Lesen der Zwischenablage ist nie möglich." };
         _panel.Children.Add(_acceptOsc52);
+        _copyOnSelect = new CheckBox { Content = "Markierung sofort kopieren (überall gleich: Shell, tmux, Claude Code)", IsChecked = settings.CopyOnSelect,
+            ToolTip = "Aus: Eine Markierung wird mit Rechtsklick (oder der Kopieren-Taste) in die Zwischenablage übernommen. Rechtsklick ohne Markierung fügt ein." };
+        _panel.Children.Add(_copyOnSelect);
 
         Heading("Diktat");
         _engine = Combo("Spracherkennung (Engine)", SpeechEngineIds.All.Select(SpeechEngineIds.Label), SpeechEngineIds.Label(dictation.Engine));
@@ -200,6 +203,7 @@ public sealed class SettingsDialog : Window
             ClipHistoryLimit = limit,
             StartWithWindows = _startWithWindows.IsChecked == true,
             AcceptOsc52 = _acceptOsc52.IsChecked == true,
+            CopyOnSelect = _copyOnSelect.IsChecked == true,
             Update = new UpdateOptions { CheckOnStart = _checkUpdates.IsChecked == true, SkippedVersion = _skippedVersion },
             Shortcuts = new ShortcutOptions {
                 Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
