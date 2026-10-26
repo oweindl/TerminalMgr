@@ -98,6 +98,14 @@ Ein Overlay über dem Terminal, in HTML und CSS in der Terminalseite (ein WPF-El
 - Die Palette erscheint sofort mit der zuletzt bekannten Liste; die tmux-Fenster werden beim Öffnen frisch abgefragt (`list-windows -a`) und ersetzen die Liste, ohne dass Eingabe oder Auswahl verloren gehen.
 - **Ctrl+D** speichert das markierte Fenster als Favorit (Name und Kürzel in einem kleinen Dialog; Doppelbelegungen werden abgelehnt).
 
+### Oberfläche (Redesign „Commander“)
+
+Von links nach rechts: **Icon-Leiste** (Server, Clipboard, Diktat, unten Einstellungen), die **Serverliste** als Panel, das sich aus der Leiste auf- und zuklappt (Esc schließt es; es startet offen, wenn nichts automatisch verbindet), **Session-Tabs** (je verbundenem Server und für den gewählten ein Tab mit Statuspunkt: grün verbunden, Amber-Ring verbindet, ohne Punkt getrennt, dazu die Alt-Nummer; Rechtsklick öffnet das Server-Menü mit den tmux-Fenstern), das Terminal und rechts die Spalte mit **Clipboard** und darunter dem **Diktat**. Schriftgröße (A− / A+) und Fokusmodus liegen rechts im Tab-Streifen, die Palette steht als Hinweis daneben. Eine Statuszeile gibt es nicht mehr: Meldungen erscheinen kurz als Hinweis unten im Terminal, Maße und Hilfetexte in Tooltips.
+
+Farben und Schriften stehen an einer Stelle (`Theme.Dark` in `TerminalMgr.Core`): daraus entstehen die WPF-Pinsel (`ThemeDictionary`) und die CSS-Variablen der Terminalseite; ein Test hält die Vorgaben in `terminal.css` gleich und prüft den Kontrast aller Text-/Hintergrundpaare (mindestens 4,5:1). Die Schriften IBM Plex Sans und JetBrains Mono (SIL Open Font License, Lizenztexte im selben Ordner) liegen unter `Terminal/fonts` und werden nie aus dem Netz geladen.
+
+Vorher/Nachher (Demodaten, erzeugt mit `tools/Screenshot`): [vorher](docs/design/redesign-before.png) · [nachher](docs/design/redesign-after.png) · [mit Befehlspalette](docs/design/redesign-palette.png)
+
 ### Tastenkürzel, Wiederverbindung, Start mit Windows
 
 - **Tastenkürzel** (*Einstellungen*): Diktat (Vorgabe Ctrl+Y), Markierung kopieren (Ctrl+Shift+C), Zwischenablage einfügen (Ctrl+Shift+V) und der Modifikator für den Sessionwechsel mit 1 bis 9 (Vorgabe Alt; alternativ Ctrl+Alt, Alt+Shift, Ctrl+Shift). Die Kürzel gelten, bevor die Session die Taste sieht. Eine Kombination braucht Ctrl oder Alt (nur F1 bis F12 gehen allein). Ctrl+B bleibt für tmux reserviert, doppelte Belegungen werden beim Speichern abgelehnt. Ein Hinweis erscheint, wenn eine Kombination in bash/readline etwas bedeutet (Ctrl+Y ist „yank“).
