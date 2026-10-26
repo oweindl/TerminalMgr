@@ -142,6 +142,9 @@ internal static class Program
         Check(favoritesContent.DesiredSize.Height > 150 && favorites.Result is null, "Favorites dialog layout");
         var settingsWithFavorites = new SettingsDialog(new AppSettings { Profiles = [.. profiles], Favorites = [new Favorite { ProfileId = "p1", SessionName = "main", WindowName = "archyx" }] }, [new NavigationPosition("p1", "$0", "main", "@4", "archyx")]);
         ((FrameworkElement)settingsWithFavorites.Content).Measure(new Size(620, 3000));
+        var saveFavorite = new FavoriteSaveDialog(new Favorite { ProfileId = "p1", SessionName = "main", WindowName = "archyx", Name = "archyx" }, "devbox");
+        ((FrameworkElement)saveFavorite.Content).Measure(new Size(480, double.PositiveInfinity));
+        Check(((FrameworkElement)saveFavorite.Content).DesiredSize.Height > 150 && saveFavorite.Result is null, "Save-favorite dialog layout");
         Console.WriteLine("PASS WPF export, import (with conflicts) and password dialogs load");
     }
 
@@ -207,6 +210,67 @@ internal static class Program
         Page("{\"event\":\"end\"}");
         Check(results.Count == 1 && posted.Last().Contains("abort"), "Cancel aborts the page recognizer and reports nothing");
         Console.WriteLine("PASS Web Speech engine: commands, provisional/final text, stop, network error as unavailable, cancel");
+    }
+
+    // WebView2 only starts once the dispatcher is running, so the test body is queued and the loop is pumped until it is done.
+    private static void RunInsideDispatcherLoop(Action test)
+    {
+        Exception? error = null;
+        bool done = false;
+        Dispatcher.CurrentDispatcher.BeginInvoke(() => { try { test(); } catch (Exception ex) { error = ex; } done = true; });
+        Pump(() => done, 180000);
+        if (error is not null) throw new Exception(error.Message, error);
+        if (!done) throw new Exception("The WebView2 test did not finish");
+    }
+
+    // The palette in the real WebView2: it is part of the page, so it covers the terminal (a WPF element would sit behind it).
+    private static void TestPaletteInWebView()
+    {
+        // On the GitHub runner the embedded browser hung the whole UI test run (no interactive desktop); this check runs on a developer machine.
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") { Console.WriteLine("SKIP Command palette in the real WebView2: not run on the CI runner"); return; }
+        var view = new Microsoft.Web.WebView2.Wpf.WebView2 { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x0B, 0x10, 0x14) };
+        var window = new Window { Width = 900, Height = 600, Content = view, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = 60, Top = 60 };
+        window.Show();
+        try
+        {
+            string data = Path.Combine(Path.GetTempPath(), "TerminalMgr-ui-webview-" + Guid.NewGuid().ToString("N"));
+            var messages = new List<string>();
+            var env = Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, data);
+            Pump(() => env.IsCompleted, 20000);
+            if (!env.IsCompletedSuccessfully) { Console.WriteLine("SKIP Command palette in the real WebView2: no WebView2 runtime available here"); return; }
+            var ensure = view.EnsureCoreWebView2Async(env.Result);
+            Pump(() => ensure.IsCompleted, 20000);
+            if (!ensure.IsCompletedSuccessfully || view.CoreWebView2 is null) { Console.WriteLine("SKIP Command palette in the real WebView2: the browser did not start in this session"); return; }
+            var core = view.CoreWebView2;
+            core.SetVirtualHostNameToFolderMapping("terminalmgr.local", Path.Combine(AppContext.BaseDirectory, "Terminal"), Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.DenyCors);
+            core.WebMessageReceived += (_, e) => messages.Add(e.WebMessageAsJson);
+            core.Navigate("https://terminalmgr.local/index.html");
+            Pump(() => messages.Any(m => m.Contains("\"ready\"")), 20000);
+            if (messages.Count == 0 && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") { Console.WriteLine("SKIP Command palette in the real WebView2: the page did not load on this runner"); return; }
+            Check(messages.Any(m => m.Contains("\"ready\"")), "The terminal page did not report ready");
+            string Eval(string script) { var task = core.ExecuteScriptAsync(script); Pump(() => task.IsCompleted, 5000); return task.IsCompletedSuccessfully ? task.Result : "timeout"; }
+            core.PostWebMessageAsJson("{\"type\":\"create\",\"id\":\"one\"}");
+            Pump(() => Eval("document.querySelectorAll('.session.active').length") == "1", 5000);
+            core.PostWebMessageAsJson("{\"type\":\"shortcuts\",\"shortcuts\":{\"palette\":\"Ctrl+Shift+K\"},\"sessionModifier\":\"Alt\"}");
+            string items = "[{\"id\":\"favorite:f1\",\"group\":\"Favoriten\",\"title\":\"Archyx\",\"subtitle\":\"devbox\",\"shortcut\":\"Ctrl+Alt+A\",\"showWhenEmpty\":true,\"searchable\":true}]";
+            core.PostWebMessageAsJson("{\"type\":\"palette\",\"cmd\":\"open\",\"items\":" + items + "}");
+            Pump(() => Eval("document.getElementById('palette').hidden") == "false", 5000);
+            Check(Eval("document.getElementById('palette').hidden") == "false", "The palette did not open");
+            // It covers the whole page, above the terminal, and the input has the keyboard focus.
+            Check(Eval("(() => { const r = document.getElementById('palette').getBoundingClientRect(); return r.width >= innerWidth - 1 && r.height >= innerHeight - 1; })()") == "true", "Palette must cover the page");
+            Check(Eval("document.elementFromPoint(innerWidth / 2, 120).closest('#palette') !== null") == "true", "Something is above the palette");
+            Check(Eval("document.activeElement.id") == "\"palette-input\"", "Focus must be in the palette input");
+            Check(Eval("document.querySelector('.palette-title').textContent") == "\"Archyx\"", "Item shown");
+            string renderDirectory = Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") ?? "";
+            if (renderDirectory.Length > 0)
+            {
+                Directory.CreateDirectory(renderDirectory);
+                var capture = core.CapturePreviewAsync(Microsoft.Web.WebView2.Core.CoreWebView2CapturePreviewImageFormat.Png, File.Create(Path.Combine(renderDirectory, "palette.png")));
+                Pump(() => capture.IsCompleted, 10000);
+            }
+            Console.WriteLine("PASS Command palette in the real WebView2: opens over the terminal, covers the page, keyboard focus in the input");
+        }
+        finally { window.Close(); }
     }
 
     private static void TestVersionIsShown()
@@ -342,6 +406,7 @@ internal static class Program
             TestConfigDialogs();
             TestDictationPanel();
             TestWebSpeechEngine();
+            RunInsideDispatcherLoop(TestPaletteInWebView);
             TestVersionIsShown();
             TestShortcutKeys();
             TestTmuxMenu();

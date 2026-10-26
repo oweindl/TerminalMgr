@@ -37,6 +37,7 @@ public static class ShortcutRules
         list.Add(new("windowNext", "Nächstes tmux-Fenster", Shortcut.Parse(shortcuts.NextWindow)));
         list.Add(new("windowPrevious", "Voriges tmux-Fenster", Shortcut.Parse(shortcuts.PreviousWindow)));
         list.Add(new("windowBack", "Zurück zum letzten Fenster", Shortcut.Parse(shortcuts.Back)));
+        list.Add(new("palette", "Befehlspalette", Shortcut.Parse(shortcuts.Palette)));
         foreach (var favorite in settings.Favorites.Where(f => f.Shortcut.Length > 0))
             if (Shortcut.TryParse(favorite.Shortcut, out var parsed)) list.Add(new("favorite:" + favorite.Id, "Favorit „" + favorite.Label + "“", parsed));
         return list;

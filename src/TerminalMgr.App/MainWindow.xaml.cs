@@ -125,6 +125,17 @@ public partial class MainWindow : Window
                 case "speech":
                     _webSpeech?.OnPageMessage(m);
                     break;
+                case "paletteOpened":
+                    _ = RefreshPaletteAsync();
+                    break;
+                case "paletteRun":
+                    if (m.GetProperty("id").GetString() is { } paletteId) RunPaletteItem(paletteId);
+                    break;
+                case "paletteFavorite":
+                    if (m.GetProperty("id").GetString() is { } favoriteId) SavePaletteFavorite(favoriteId);
+                    break;
+                case "paletteClosed":
+                    break;
                 case "ready":
                     _ready = true;
                     LoadingOverlay.Visibility = Visibility.Collapsed;

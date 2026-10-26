@@ -31,6 +31,7 @@ public partial class MainWindow
     private async Task RunNavigationActionAsync(string action)
     {
         if (_closing) return;
+        if (action == "palette") { OpenPaletteFromHost(); return; }
         await _navigationGate.WaitAsync(_shutdown.Token).ConfigureAwait(true);
         try
         {

@@ -24,7 +24,7 @@ public sealed class SettingsDialog : Window
     public ConfigAction ConfigAction { get; private set; }
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine, _windowModifier;
-    private readonly TextBox _nextShortcut, _previousShortcut, _backShortcut;
+    private readonly TextBox _nextShortcut, _previousShortcut, _backShortcut, _paletteShortcut;
     private List<Favorite> _favorites;
     public AppSettings? Result { get; private set; }
 
@@ -82,6 +82,7 @@ public sealed class SettingsDialog : Window
         _nextShortcut = ShortcutField("Nächstes tmux-Fenster", shortcuts.NextWindow, new ShortcutOptions().NextWindow);
         _previousShortcut = ShortcutField("Voriges tmux-Fenster", shortcuts.PreviousWindow, new ShortcutOptions().PreviousWindow);
         _backShortcut = ShortcutField("Zurück zum zuletzt benutzten Fenster (auch auf einem anderen Server)", shortcuts.Back, new ShortcutOptions().Back);
+        _paletteShortcut = ShortcutField("Befehlspalette öffnen (nicht Ctrl+K: das ist in der Shell „bis Zeilenende löschen“)", shortcuts.Palette, new ShortcutOptions().Palette);
         var favoritesButton = new Button { Content = $"Favoriten verwalten … ({_favorites.Count})", ToolTip = "tmux-Fenster mit eigenem Tastenkürzel", HorizontalAlignment = HorizontalAlignment.Left };
         favoritesButton.Click += (_, _) =>
         {
@@ -204,7 +205,7 @@ public sealed class SettingsDialog : Window
                 Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
                 SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)],
                 WindowModifier = ShortcutRules.WindowModifiers[Math.Max(0, _windowModifier.SelectedIndex)],
-                NextWindow = _nextShortcut.Text, PreviousWindow = _previousShortcut.Text, Back = _backShortcut.Text
+                NextWindow = _nextShortcut.Text, PreviousWindow = _previousShortcut.Text, Back = _backShortcut.Text, Palette = _paletteShortcut.Text
             }.Normalized(),
             Favorites = _favorites,
             Dictation = (_original.Dictation with {
