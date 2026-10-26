@@ -24,6 +24,56 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private static void TestClipboardCompactDesign()
+    {
+        var main = new MainWindow();
+        var list = (ListBox)main.FindName("ClipsList");
+        var now = DateTimeOffset.Now;
+        var rows = new[]
+        {
+            new ClipItem(new ClipboardEntry("docker compose logs -f", "linuxdev", now, true)),
+            new ClipItem(new ClipboardEntry("/var/www/app", "webserver", now.AddMinutes(-2))),
+            new ClipItem(new ClipboardEntry("systemctl status nginx", "contabo", now.AddMinutes(-5), true)),
+            new ClipItem(new ClipboardEntry("Host staging\n    HostName staging.local\n    User deploy", "Windows", now.AddMinutes(-8))),
+            new ClipItem(new ClipboardEntry("git status --short", "linuxdev", now.AddMinutes(-12))),
+            new ClipItem(new ClipboardEntry("journalctl -u nginx -n 100", "webserver", now.AddMinutes(-16)))
+        };
+        list.ItemsSource = rows;
+        ((TextBlock)main.FindName("ClipCount")).Text = rows.Length.ToString();
+        list.SelectedIndex = 0;
+        var root = (FrameworkElement)main.Content;
+        root.Measure(new Size(1100, 700)); root.Arrange(new Rect(0, 0, 1100, 700)); root.UpdateLayout();
+        var header = (FrameworkElement)main.FindName("ClipboardHeader");
+        Check(header.ActualHeight <= 100, "Clipboard header wastes space: " + header.ActualHeight);
+        var first = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0);
+        Check(first.ActualHeight <= 72, "A one-line clipboard entry is too tall: " + first.ActualHeight);
+        Check(rows[0].PinnedVisibility == Visibility.Visible && rows[1].PinnedVisibility == Visibility.Collapsed, "Pinned marker");
+
+        string? copied = null;
+        bool pasted = false, pinned = false, removed = false, expanded = false;
+        var menu = ClipboardMenu.Build(rows[3], (_, _) => pasted = true, t => copied = t, _ => expanded = true,
+            (_, _) => pinned = true, (_, _) => removed = true);
+        var actions = menu.Items.OfType<MenuItem>().ToList();
+        foreach (var action in actions) action.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(pasted && pinned && removed && expanded && copied == rows[3].FullText, "Clipboard menu lost an action or copied only the preview");
+        var shortMenu = ClipboardMenu.Build(rows[1], (_, _) => { }, _ => { }, _ => { }, (_, _) => { }, (_, _) => { });
+        Check(!shortMenu.Items.OfType<MenuItem>().ElementAt(2).IsEnabled, "No expansion for complete short text");
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") is { Length: > 0 } directory)
+        {
+            var panel = (FrameworkElement)main.FindName("ClipboardPanel");
+            ((Panel)panel.Parent).Children.Remove(panel);
+            var previewWindow = new Window { Content = panel, Width = 312, Height = 700, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, ShowActivated = false, Left = -10000, Top = -10000 };
+            previewWindow.Show(); previewWindow.UpdateLayout(); Pump(() => false, 150);
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(panel.ActualWidth), (int)Math.Ceiling(panel.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(panel);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            Directory.CreateDirectory(directory);
+            using var png = File.Create(Path.Combine(directory, "clipboard-compact.png"));
+            encoder.Save(png);
+        }
+        Console.WriteLine($"PASS Compact clipboard: header {header.ActualHeight:F0}px, one-line row {first.ActualHeight:F0}px, menu actions retain full text");
+    }
     private static void TestClipboardFullText()
     {
         var shortItem = new ClipItem(new ClipboardEntry("kurz", "dev", DateTimeOffset.Now));
@@ -462,7 +512,7 @@ internal static class Program
     }
 
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         try
         {
@@ -471,6 +521,7 @@ internal static class Program
 
             var app = new App();
             app.InitializeComponent();
+            if (args.Contains("--clipboard-only")) { TestClipboardCompactDesign(); TestClipboardFullText(); return 0; }
             var main = new MainWindow();
             var list = (ListBox)main.FindName("ProfilesList");
             ((IList)list.ItemsSource).Add(new ProfileItem(new Profile { Name = "Testserver", Destination = "test" }));
@@ -488,6 +539,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestClipboardCompactDesign();
             TestClipboardFullText();
             TestUpdateDialog();
             TestConfigDialogs();

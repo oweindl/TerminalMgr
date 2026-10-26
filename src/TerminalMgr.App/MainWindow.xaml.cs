@@ -674,9 +674,43 @@ public partial class MainWindow : Window
         if (_clipList.Active is not { } clip) { StatusText.Text = "Die Clipboard-Liste ist leer."; return; }
         Post(new { type = "paste", id, text = clip.Text });
     }
+    private ContextMenu BuildClipMenu(ClipItem clip) =>
+        ClipboardMenu.Build(clip, PasteClip, SetWindowsClipboard, ToggleClipExpanded, PinClip, RemoveClip);
+
+    private void ClipMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: ClipItem clip } button) return;
+        ClipHover.Close();
+        var menu = BuildClipMenu(clip);
+        menu.PlacementTarget = button;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void ClipContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ClipItem clip } card) return;
+        // Preserve the read-only textbox's own menu for copying a selected part of expanded text.
+        if (e.OriginalSource is DependencyObject origin && FindAncestor<TextBox>(origin) is not null) return;
+        ClipHover.Close();
+        card.ContextMenu = BuildClipMenu(clip);
+    }
+
+    private void ClipboardHistoryMenu(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button) return;
+        var menu = ClipboardMenu.Create();
+        menu.PlacementTarget = button;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        var clear = new MenuItem { Header = "Ungeheftete Einträge entfernen", IsEnabled = _clipList.Items.Any(c => !c.Pinned) };
+        clear.Click += ClearClipboardHistory;
+        menu.Items.Add(clear);
+        menu.IsOpen = true;
+    }
     private void PasteClip(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: ClipItem clip } && Selected is { } item && _sessions.ContainsKey(item.Profile.Id))
+        if (sender is FrameworkElement { Tag: ClipItem clip } && Selected is { } item && _sessions.ContainsKey(item.Profile.Id))
         {
             _clipList.Activate(clip.Entry);
             Post(new { type = "paste", id = item.Profile.Id, text = clip.Entry.Text });
@@ -685,13 +719,13 @@ public partial class MainWindow : Window
     }
     private void PinClip(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: ClipItem clip }) return;
+        if (sender is not FrameworkElement { Tag: ClipItem clip }) return;
         _clipList.TogglePin(clip.Entry);
         RenderClips(); SaveSettings();
     }
     private void RemoveClip(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: ClipItem clip }) { _clipList.Remove(clip.Entry); RenderClips(); SaveSettings(); }
+        if (sender is FrameworkElement { Tag: ClipItem clip }) { _clipList.Remove(clip.Entry); RenderClips(); SaveSettings(); }
     }
     private void ClearClipboardHistory(object sender, RoutedEventArgs e) { _clipList.ClearUnpinned(); RenderClips(); }
 
