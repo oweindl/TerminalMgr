@@ -32,6 +32,9 @@
   <Border Grid.Column="0" Background="{DynamicResource BarBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0">
    <DockPanel>
     <StackPanel DockPanel.Dock="Bottom" HorizontalAlignment="Center" Margin="0,0,0,10">
+     <Button Style="{StaticResource FlatButton}" Click="ToggleFocus" ToolTip="Fokusmodus: Seitenbereiche ausblenden" AutomationProperties.Name="Fokusmodus" Width="40" Height="40" Margin="0,3">
+      <Path Style="{StaticResource IconPath}" Data="{StaticResource IconFocus}"/>
+     </Button>
      <ToggleButton x:Name="SettingsButton" Style="{StaticResource IconBarButton}" Click="OpenSettings" ToolTip="Einstellungen" AutomationProperties.Name="Einstellungen">
       <Path Style="{StaticResource IconPath}" Data="{StaticResource IconSettings}"/>
      </ToggleButton>
@@ -99,14 +102,6 @@
    <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
    <Border Background="{DynamicResource BarBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
     <DockPanel>
-     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-      <TextBlock x:Name="TabHint" Text="Ctrl+Shift+K alles finden" Foreground="{DynamicResource Text2Brush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
-      <Button Style="{StaticResource FlatButton}" Click="FontSmaller" ToolTip="Schrift verkleinern" AutomationProperties.Name="Schrift verkleinern" Content="A−" FontWeight="SemiBold"/>
-      <Button Style="{StaticResource FlatButton}" Click="FontLarger" ToolTip="Schrift vergrößern" AutomationProperties.Name="Schrift vergrößern" Content="A+" FontWeight="SemiBold"/>
-      <Button Style="{StaticResource FlatButton}" Click="ToggleFocus" ToolTip="Fokusmodus: Seitenbereiche ausblenden" AutomationProperties.Name="Fokusmodus">
-       <Path Style="{StaticResource IconPath}" Data="{StaticResource IconFocus}" Width="16" Height="16"/>
-      </Button>
-     </StackPanel>
      <Grid>
      <ListBox x:Name="WindowStrip" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="8,7,8,7" Focusable="False" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden" AutomationProperties.Name="tmux-Fenster">
       <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -204,11 +199,16 @@
    <StackPanel x:Name="ClipboardHeader" DockPanel.Dock="Top" Margin="12,10,12,6">
     <DockPanel LastChildFill="True">
      <Button DockPanel.Dock="Right" Content="⋯" Click="ClipboardHistoryMenu" Style="{StaticResource ClipActionButton}" ToolTip="Clipboard-Aktionen" AutomationProperties.Name="Clipboard-Aktionen"/>
+     <Button DockPanel.Dock="Right" Style="{StaticResource ClipActionButton}" Click="FontLarger" ToolTip="Schrift vergrößern" AutomationProperties.Name="Schrift vergrößern" Content="A+" FontWeight="SemiBold"/>
+     <Button DockPanel.Dock="Right" Style="{StaticResource ClipActionButton}" Click="FontSmaller" ToolTip="Schrift verkleinern" AutomationProperties.Name="Schrift verkleinern" Content="A−" FontWeight="SemiBold"/>
      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
       <TextBlock Text="CLIPBOARD" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Text2Brush}"/>
       <TextBlock x:Name="ClipCount" Text="0" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="8,1,0,0"/>
      </StackPanel>
     </DockPanel>
+    <Button Click="OpenPaletteClick" Style="{StaticResource FlatButton}" HorizontalContentAlignment="Left" Margin="0,6,0,0" Padding="8,5" ToolTip="Befehlspalette: Fenster, Favoriten, Clipboard und Aktionen finden" AutomationProperties.Name="Alles finden">
+     <StackPanel Orientation="Horizontal"><TextBlock Text="🔍" FontSize="12" Margin="0,0,8,0" Foreground="{DynamicResource Text2Brush}"/><TextBlock x:Name="TabHint" Text="Ctrl+Shift+K alles finden" Foreground="{DynamicResource Text2Brush}" FontSize="12"/></StackPanel>
+    </Button>
     <DockPanel Margin="0,6,0,0">
      <ToggleButton x:Name="PinnedOnly" DockPanel.Dock="Right" Style="{StaticResource ClipPinFilter}" Checked="FilterClips" Unchecked="FilterClips" ToolTip="Nur angeheftete Einträge" AutomationProperties.Name="Nur angeheftete Einträge">
       <Path Data="M9,3 H15 M10,3 V9 L7,13 V15 H17 V13 L14,9 V3 M12,15 V21" Style="{StaticResource IconPath}" Width="15" Height="15"/>

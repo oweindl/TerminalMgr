@@ -50,6 +50,8 @@ public partial class MainWindow
     private void PostPaletteItems() => Post(new { type = "paletteItems", items = PaletteMessageItems() });
 
     /// <summary>The palette was opened from a WPF control: the page shows it with the cached list, the refresh follows.</summary>
+    private void OpenPaletteClick(object sender, RoutedEventArgs e) => OpenPaletteFromHost();
+
     private void OpenPaletteFromHost()
     {
         if (!_ready) return;
