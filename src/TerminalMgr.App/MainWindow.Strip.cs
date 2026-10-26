@@ -9,19 +9,22 @@ namespace TerminalMgr.App;
 
 /// <summary>
 /// The strip of tmux windows below the title bar: the windows of the session the selected server shows, the ones Ctrl+0 to Ctrl+9
-/// reach, each with its state (running, done, asking, idle), the last lines and an activity history. It is read with a separate
-/// SSH call every few seconds and never touches the running programs. Off, the old server tabs are shown instead.
+/// reach, each with its state (running, done, asking, idle), the lines that appeared last and an activity history. One long-lived
+/// SSH connection delivers the screens of all windows once a second (see <see cref="TmuxStripStream"/>); the state comes from whether
+/// the screens change. Nothing is sent into the running programs. Off, the old server tabs are shown instead.
 /// </summary>
 public partial class MainWindow
 {
-    private static readonly TimeSpan StripInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan StripRetry = TimeSpan.FromSeconds(10);
     private readonly ObservableCollection<StripCard> _stripCards = [];
     private readonly Dictionary<string, WindowActivityTracker> _trackers = [];
     private readonly Dictionary<string, string> _stripTargets = [];
     private DispatcherTimer? _stripTimer;
-    private bool _stripOpen = true, _stripBusy;
-    private DateTimeOffset _stripLastPoll = DateTimeOffset.MinValue;
-    private int _stripCurrent = -1;
+    private TmuxStripStream? _stream;
+    private string? _streamProfileId, _streamTarget;
+    private int _streamGeneration, _stripCurrent = -1;
+    private bool _stripOpen = true, _stripStarting;
+    private DateTimeOffset _streamRetryAt = DateTimeOffset.MinValue;
 
     private void InitializeStrip()
     {
@@ -33,7 +36,8 @@ public partial class MainWindow
             viewer.ScrollToHorizontalOffset(viewer.HorizontalOffset - e.Delta);
             e.Handled = true;
         };
-        _stripTimer = new DispatcherTimer(StripInterval, DispatcherPriority.Background, (_, _) => _ = PollStripAsync(), Dispatcher);
+        // The connection itself delivers the frames; this timer only checks that it is running for the selected, connected server.
+        _stripTimer = new DispatcherTimer(TimeSpan.FromSeconds(2), DispatcherPriority.Background, (_, _) => EnsureStrip(), Dispatcher);
         _stripTimer.Start();
     }
 
@@ -43,9 +47,9 @@ public partial class MainWindow
     {
         _stripOpen = open;
         StripButton.IsChecked = open;
-        if (!open) _stripCards.Clear();
+        if (!open) { StopStream(); _stripCards.Clear(); }
         UpdateStripVisibility();
-        if (open) _ = PollStripAsync(force: true);
+        EnsureStrip();
     }
 
     /// <summary>The strip replaces the server tabs while it has something to show; otherwise (off, no tmux, not connected) the tabs stay.</summary>
@@ -63,42 +67,86 @@ public partial class MainWindow
         UpdateStripVisibility();
     }
 
-    private async Task PollStripAsync(bool force = false)
+    /// <summary>Starts, keeps or stops the frame connection according to what is selected and connected.</summary>
+    private void EnsureStrip()
     {
-        if (_closing || _stripBusy) return;
-        // In the background a slow rhythm is enough; the strip catches up when the window comes back.
-        if (!force && !IsActive && DateTimeOffset.Now - _stripLastPoll < TimeSpan.FromSeconds(30)) return;
+        if (_closing) return;
         if (!_stripOpen || Selected is not { } item || item.Connection != ConnectionState.Connected || !_sessions.ContainsKey(item.Profile.Id))
         {
+            StopStream();
             ClearStrip();
             return;
         }
-        _stripBusy = true;
+        if (_stream is not null && _streamProfileId == item.Profile.Id) return;
+        if (_stripStarting || DateTimeOffset.Now < _streamRetryAt) return;
+        _ = StartStreamAsync(item);
+    }
+
+    private async Task StartStreamAsync(ProfileItem item)
+    {
+        _stripStarting = true;
         try
         {
-            using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
-            cancel.CancelAfter(TimeSpan.FromSeconds(9));
             string profileId = item.Profile.Id;
             if (!_stripTargets.TryGetValue(profileId, out string? target))
             {
+                using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+                cancel.CancelAfter(TimeSpan.FromSeconds(8));
                 var (sessionId, sessionName) = await AttachedTmuxAsync(item, cancel.Token);
                 target = sessionId ?? sessionName;
-                if (target is null) { ClearStrip(); return; }
+                if (target is null) { _streamRetryAt = DateTimeOffset.Now + StripRetry; return; }
                 _stripTargets[profileId] = target;
             }
-            var poll = await _tmuxQuery.StripAsync(item.Profile, target, TimeSpan.FromSeconds(8), cancel.Token);
-            _stripLastPoll = DateTimeOffset.Now;
-            if (!ReferenceEquals(Selected, item) || !_stripOpen) return;     // the user moved on while the answer was on its way
+            if (!ReferenceEquals(Selected, item) || !_stripOpen || _closing) return;
+            StopStream();
+            int generation = ++_streamGeneration;
             if (!_trackers.TryGetValue(profileId, out var tracker)) _trackers[profileId] = tracker = new WindowActivityTracker();
-            ShowCards(tracker.Update(poll, DateTimeOffset.Now, StripInterval.TotalSeconds));
+            tracker.Reset();      // the first frame is a baseline, not a change
+            _stream = TmuxStripStream.Start(item.Profile, target,
+                poll => Dispatcher.BeginInvoke(() => OnStripFrame(generation, item, tracker, poll)),
+                reason => Dispatcher.BeginInvoke(() => OnStripEnded(generation, profileId, reason)));
+            _streamProfileId = profileId;
+            _streamTarget = target;
         }
         catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException)
         {
-            // No tmux in this session, no key login for the query, a slow server: the strip simply is not there (the tabs stay).
-            if (ex is InvalidOperationException) _stripTargets.Remove(Selected?.Profile.Id ?? "");
-            ClearStrip();
+            _streamRetryAt = DateTimeOffset.Now + StripRetry;
         }
-        finally { _stripBusy = false; }
+        finally { _stripStarting = false; }
+    }
+
+    private void StopStream()
+    {
+        var stream = _stream;
+        _stream = null; _streamProfileId = null; _streamTarget = null;
+        _streamGeneration++;
+        if (stream is not null) _ = stream.DisposeAsync().AsTask();
+    }
+
+    private void OnStripFrame(int generation, ProfileItem item, WindowActivityTracker tracker, WindowPoll poll)
+    {
+        if (generation != _streamGeneration || !ReferenceEquals(Selected, item) || !_stripOpen) return;
+        ShowCards(tracker.Update(poll, DateTimeOffset.Now));
+    }
+
+    /// <summary>No tmux in this session, no key login for the query, the connection dropped: the strip is gone (the tabs stay) and tries again later.</summary>
+    private void OnStripEnded(int generation, string profileId, string reason)
+    {
+        if (generation != _streamGeneration) return;
+        StopStream();
+        _stripTargets.Remove(profileId);
+        _streamRetryAt = DateTimeOffset.Now + StripRetry;
+        ClearStrip();
+    }
+
+    /// <summary>The server attaches to another tmux session (or reconnects): the cached session and the running connection are stale.</summary>
+    private void StripSessionChanged(string profileId, string? sessionId)
+    {
+        if (sessionId is not null && _stripTargets.TryGetValue(profileId, out string? known) && known == sessionId) return;
+        _stripTargets.Remove(profileId);
+        if (_streamProfileId == profileId) { StopStream(); ClearStrip(); }
+        _streamRetryAt = DateTimeOffset.MinValue;
+        EnsureStrip();
     }
 
     private void ShowCards(IReadOnlyList<WindowCard> cards)
@@ -136,8 +184,10 @@ public partial class MainWindow
     /// <summary>The server changed: the old cards belong to another session.</summary>
     private void StripSelectionChanged()
     {
+        StopStream();
         _stripCards.Clear();
         UpdateStripVisibility();
-        _ = PollStripAsync(force: true);
+        _streamRetryAt = DateTimeOffset.MinValue;
+        EnsureStrip();
     }
 }

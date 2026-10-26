@@ -71,7 +71,6 @@ public partial class MainWindow
     {
         await Task.Delay(350);
         await RecordPositionAsync(item, TimeSpan.FromSeconds(5));
-        _ = PollStripAsync(force: true);
     }
 
     /// <summary>Asks the server which window the attached session shows now and puts it at the front of the history.</summary>

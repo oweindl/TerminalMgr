@@ -37,11 +37,11 @@ public static class SshCommand
     public static IReadOnlyList<string> TmuxWindowsArguments(Profile profile) =>
         OverrideArguments(profile, interactive: false, "tmux list-windows -a -F " + ShellQuote(TmuxWindowParser.Format));
 
-    /// <summary>Windows of one session with state and the last lines of each, in one call (see <see cref="WindowStripParser.Script"/>).</summary>
-    public static IReadOnlyList<string> TmuxStripArguments(Profile profile, string sessionTarget)
+    /// <summary>Windows of one session with the screen of each: one frame, or with <paramref name="loopSeconds"/> a frame per interval until the connection ends (see <see cref="WindowStripParser.Script"/>).</summary>
+    public static IReadOnlyList<string> TmuxStripArguments(Profile profile, string sessionTarget, int loopSeconds = 0)
     {
         if (string.IsNullOrWhiteSpace(sessionTarget) || sessionTarget.Any(char.IsControl)) throw new ArgumentException("Ungültige tmux-Session.");
-        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(WindowStripParser.Script(sessionTarget)));
+        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(WindowStripParser.Script(sessionTarget, loopSeconds)));
     }
 
     /// <summary>Attach straight to one window; an existing session is required, nothing is created.</summary>
