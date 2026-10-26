@@ -80,6 +80,9 @@ public static class ConfigImporter
             result = result with {
                 FontSize = Math.Clamp(s.FontSize, 10, 28), ClipHistoryLimit = Math.Clamp(s.ClipHistoryLimit, 1, 1000), AcceptOsc52 = s.AcceptOsc52,
                 Shortcuts = s.Shortcuts.Normalized(),
+                // Favorites: replaced entirely in "replace all", otherwise the incoming ones are added (an entry with the same ID is replaced).
+                Favorites = plan.Mode == ImportMode.ReplaceAll ? s.Favorites.ToList()
+                    : result.Favorites.Where(f => s.Favorites.All(i => i.Id != f.Id)).Concat(s.Favorites).ToList(),
                 Update = result.Update with { CheckOnStart = s.CheckForUpdates },
                 // The model, the microphone and the Windows start stay as they are on this machine.
                 Dictation = (result.Dictation with { Shortcut = s.Dictation.Shortcut, Language = s.Dictation.Language, InitialPrompt = s.Dictation.InitialPrompt,

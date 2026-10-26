@@ -372,6 +372,98 @@ try
         Check(agreement.ConfirmedText == "hallo welt und mehr" && agreement.TentativeText == "", "Repeated word: " + agreement.FullText);
         Check(new WordAgreement().Feed([W("[BLANK_AUDIO]", 0, 1), W("...", 1, 2)]).Count == 0, "Words without letters are ignored");
     });
+    Test("Navigation shortcuts: defaults are free of conflicts, '<' is a key, window modifiers are limited", () =>
+    {
+        Check(Shortcut.TryParse("Ctrl+<", out var back) && back.Key == "<" && Shortcut.FromDomCode("IntlBackslash") == "<", "Ctrl+< must parse and map from the ISO key");
+        var defaults = new AppSettings();
+        var navigation = ShortcutRules.NavigationShortcuts(defaults);
+        Check(navigation.Count == 13 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
+            && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Shift+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+<"), "Default navigation shortcuts");
+        Check(ShortcutRules.FindConflict(defaults) is null, "Defaults must not conflict: " + ShortcutRules.FindConflict(defaults));
+        Check((new ShortcutOptions { WindowModifier = "Ctrl+Alt" }).Normalized().WindowModifier == "Ctrl", "Ctrl+Alt is AltGr on German keyboards and not offered");
+        Check(ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+3")) is { } hint && hint.Contains("Escape"), "Hint for Ctrl+digit");
+    });
+    Test("Navigation shortcuts: conflicts with window digits, between favorites, with the tmux prefix and with invalid texts are refused", () =>
+    {
+        AppSettings With(params Favorite[] favorites) => new() { Favorites = [.. favorites] };
+        Check(ShortcutRules.FindConflict(With(new Favorite { Name = "A", Shortcut = "Ctrl+2" })) is { } c1 && c1.Contains("Ctrl+2") && c1.Contains("tmux-Fenster"), "Favorite on Ctrl+2");
+        Check(ShortcutRules.FindConflict(With(new Favorite { Name = "A", Shortcut = "Ctrl+Alt+A" }, new Favorite { Name = "B", Shortcut = "Ctrl+Alt+A" })) is { } c2 && c2.Contains("doppelt"), "Two favorites on the same keys");
+        Check(ShortcutRules.FindConflict(With(new Favorite { Name = "A", Shortcut = "Ctrl+B" })) is { } c3 && c3.Contains("tmux"), "Ctrl+B stays with tmux");
+        Check(ShortcutRules.FindConflict(With(new Favorite { Name = "A", Shortcut = "Strg+Q+Q" })) is { } c4 && c4.Contains("ungültig"), "Invalid text");
+        Check(ShortcutRules.FindConflict(With(new Favorite { Name = "A", Shortcut = "Ctrl+Alt+A" }, new Favorite { Name = "Nur Palette" })) is null, "A favorite without shortcut is fine");
+        var sameModifier = new AppSettings { Shortcuts = new ShortcutOptions { SessionModifier = "Alt+Shift", WindowModifier = "Alt+Shift" } };
+        Check(ShortcutRules.FindConflict(sameModifier) is { } c5 && c5.Contains("doppelt"), "Session and window digits on the same modifier");
+        Check(ShortcutRules.FindConflict(new AppSettings { Shortcuts = new ShortcutOptions { Back = "Ctrl+Tab" } }) is { } c6 && c6.Contains("doppelt"), "Back on the Next shortcut");
+    });
+    Test("Favorites resolve by server, session name and window name, not by tmux IDs", () =>
+    {
+        TmuxWindowRecord Win(string sid, string session, string wid, int index, string name) => new(sid, session, wid, index, name, "bash", false);
+        var favorite = new Favorite { ProfileId = "p1", SessionName = "main", WindowName = "archyx", Name = "Archyx" };
+        var before = new[] { Win("$0", "main", "@1", 0, "shell"), Win("$0", "main", "@4", 2, "archyx"), Win("$0", "main", "@7", 3, "archyx"), Win("$1", "work", "@9", 0, "archyx") };
+        var found = FavoriteResolver.Resolve(favorite, before);
+        Check(found.Status == FavoriteStatus.Found && found.Window!.WindowId == "@4", "The first window of that name in that session wins");
+        var afterRestart = new[] { Win("$5", "main", "@20", 0, "archyx") };
+        Check(FavoriteResolver.Resolve(favorite, afterRestart).Window!.WindowId == "@20" && FavoriteResolver.Resolve(favorite, afterRestart).Window!.SessionId == "$5", "New IDs after a tmux restart");
+        var noWindow = FavoriteResolver.Resolve(favorite, [Win("$0", "main", "@1", 0, "shell")]);
+        Check(noWindow.Status == FavoriteStatus.NoWindow && noWindow.Window is null && noWindow.Message.Contains("kein Fenster"), "Missing window is a hint: " + noWindow.Message);
+        var noSession = FavoriteResolver.Resolve(favorite, [Win("$1", "work", "@9", 0, "archyx")]);
+        Check(noSession.Status == FavoriteStatus.NoSession && noSession.Message.Contains("Session"), "Missing session is a hint");
+        Check(FavoriteResolver.Resolve(favorite, []).Status == FavoriteStatus.NoSession, "Empty server");
+        var made = FavoriteResolver.For("p1", before[1]);
+        Check(made.SessionName == "main" && made.WindowName == "archyx" && made.ProfileId == "p1" && made.Label == "main › archyx", "Favorite from a window");
+    });
+    Test("Navigation history: most recent first, one entry per window, back toggles between two, stale entries are forgotten", () =>
+    {
+        NavigationPosition P(string profile, string window) => new(profile, "$0", "main", window, "w" + window);
+        var history = new NavigationHistory(capacity: 4);
+        Check(history.Current is null && history.Previous is null, "Empty");
+        history.Visit(P("a", "@1"));
+        Check(history.Previous is null, "One window has no previous");
+        history.Visit(P("a", "@2")); history.Visit(P("b", "@1"));
+        Check(history.Current!.ProfileId == "b" && history.Previous!.WindowId == "@2", "Across servers: same window ID on another server is another window");
+        history.Visit(history.Previous!);   // back
+        Check(history.Current!.WindowId == "@2" && history.Previous!.ProfileId == "b", "Going back again returns");
+        history.Visit(P("a", "@2"));
+        Check(history.Items.Count == 3, "A window appears once: " + history.Items.Count);
+        history.Visit(P("a", "@3")); history.Visit(P("a", "@4")); history.Visit(P("a", "@5"));
+        Check(history.Items.Count == 4 && history.Items[^1].WindowId != "@1", "Capacity drops the oldest");
+        history.Forget(p => p.WindowId == "@4");
+        Check(history.Items.All(p => p.WindowId != "@4") && history.Previous!.WindowId == "@3", "Forget");
+        history.Forget(p => p.ProfileId == "a");
+        Check(history.Items.Count == 0, "Forget a whole server");
+    });
+    Test("tmux navigation commands: window by index, next, previous, in two steps; nothing for out-of-range indices", () =>
+    {
+        Check(TmuxNavigation.SelectIndex(2) == "select-window -t :2" && TmuxNavigation.SelectIndex(0) == "select-window -t :0", "Index commands");
+        Check(TmuxNavigation.Steps(TmuxNavigation.Next).SequenceEqual(["\u0002:", "next-window\r"]) && TmuxNavigation.Steps(TmuxNavigation.Previous)[1] == "previous-window\r", "Steps");
+        bool refused = false;
+        try { TmuxNavigation.SelectIndex(10); } catch (ArgumentOutOfRangeException) { refused = true; }
+        Check(refused, "Index 10 is not a shortcut");
+    });
+    Test("Settings with favorites survive a round trip; files from before the favorites still load", () =>
+    {
+        var store = new SettingsStore(Path.Combine(root, "favorites"));
+        store.Save(new() { Favorites = [new Favorite { Name = "Archyx", ProfileId = "p1", SessionName = "main", WindowName = "archyx", Shortcut = "Ctrl+Alt+A" }],
+            Shortcuts = new ShortcutOptions { WindowModifier = "Alt+Shift", Back = "Ctrl+Shift+Left" } });
+        var loaded = store.Load();
+        Check(loaded.Favorites.Single() is { Name: "Archyx", SessionName: "main", WindowName: "archyx", Shortcut: "Ctrl+Alt+A" } && loaded.Shortcuts.WindowModifier == "Alt+Shift" && loaded.Shortcuts.Back == "Ctrl+Shift+Left", "Round trip");
+        var old = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("{\"Shortcuts\":{\"Copy\":\"Ctrl+Shift+C\"}}")!;
+        Check(old.Favorites.Count == 0 && old.Shortcuts.Normalized().NextWindow == "Ctrl+Tab" && old.Shortcuts.Normalized().Back == "Ctrl+<", "Old file");
+    });
+    Test("Favorites are exported with the settings and merged (or replaced) on import", () =>
+    {
+        var mine = new Favorite { Id = "f1", Name = "Archyx", ProfileId = "p1", SessionName = "main", WindowName = "archyx", Shortcut = "Ctrl+Alt+A" };
+        var theirs = new Favorite { Id = "f2", Name = "Logs", ProfileId = "p1", SessionName = "main", WindowName = "logs", Shortcut = "Ctrl+Alt+L" };
+        var source = new AppSettings { Favorites = [mine] };
+        var file = ConfigFile.Serialize(ConfigFile.Build(source, new ExportSelection(false, true, false, false), []), "0.2.0", DateTimeOffset.UtcNow, null);
+        var content = ConfigFile.Parse(file, null).Content;
+        Check(content.Settings!.Favorites.Single().Shortcut == "Ctrl+Alt+A", "Favorites in the file");
+        var target = new AppSettings { Favorites = [theirs] };
+        var merged = ConfigImporter.Apply(target, content, ConfigImporter.BuildPlan(target, content, [], ImportMode.Merge), new Dictionary<string, ConflictChoice>(), false, true, false, false).Settings;
+        Check(merged.Favorites.Select(f => f.Id).OrderBy(i => i).SequenceEqual(["f1", "f2"]), "Merge keeps both");
+        var replaced = ConfigImporter.Apply(target, content, ConfigImporter.BuildPlan(target, content, [], ImportMode.ReplaceAll), new Dictionary<string, ConflictChoice>(), false, true, false, false).Settings;
+        Check(replaced.Favorites.Single().Id == "f1", "Replace all takes the file's favorites");
+    });
     Test("Word error rate", () =>
     {
         Check(WordErrorRate.Compute("Starte den Server", "starte den server.") == 0, "Case and punctuation do not count");
@@ -1309,6 +1401,7 @@ else if (args.Contains("--ssh-smoke"))
         passed += await RealTmuxWindowScenario();
         passed += await RealExitCodeScenario();
         passed += await RealOsc52Scenario();
+        passed += await RealNavigationScenario();
     }
     catch (Exception ex) { failures.Add("SSH smoke: " + ex.Message); Console.WriteLine("FAIL " + ex.Message); }
     finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
@@ -1530,6 +1623,63 @@ async Task<int> RealOsc52Scenario()
     {
         if (client is not null) await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         await Remote("tmux kill-session -t tmgr-osc 2>/dev/null; true");
+    }
+}
+
+// The navigation shortcuts switch the tmux window through the command prompt of the own client. While a program runs in the window
+// that is left, not a single byte of those commands may reach it. A throw-away tmux session with a recording program (raw tty, cat)
+// stands in for Claude Code; the user's own tmux sessions are not touched.
+async Task<int> RealNavigationScenario()
+{
+    string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
+    var profile = new Profile { Name = "testhost", Destination = sshHost };
+    async Task<string> Remote(string command)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", sshHost, command }) start.ArgumentList.Add(a);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        return await stdout + await stderr;
+    }
+    async Task<string> CurrentWindow() => (await Remote("tmux display-message -p -t tmgr-nav '#{window_index}'")).Trim();
+    PtySession? client = null;
+    try
+    {
+        await Remote("rm -f /tmp/tmgr-nav.bin; tmux kill-session -t tmgr-nav 2>/dev/null; tmux new-session -d -s tmgr-nav -n recorder 'stty raw -echo; exec cat > /tmp/tmgr-nav.bin' && tmux new-window -t tmgr-nav -n w1 'sleep 600' && tmux new-window -t tmgr-nav -n w2 'sleep 600' && tmux select-window -t tmgr-nav:0");
+        var session = (await new TmuxSessionQuery().ListAsync(profile)).Single(s => s.Name == "tmgr-nav");
+        client = new PtySession();
+        client.Output += _ => { };
+        client.Start(ssh, SshCommand.TmuxAttachArguments(profile, session.Id, (await new TmuxSessionQuery().ListWindowsAsync(profile)).Single(w => w.SessionName == "tmgr-nav" && w.Index == 0).WindowId), 120, 30);
+        await Task.Delay(1500);
+        Check(await CurrentWindow() == "0", "Start in the recording window");
+        async Task Run(string command, string expectedWindow)
+        {
+            await TmuxClient.RunCommandAsync(client, command);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline && await CurrentWindow() != expectedWindow) await Task.Delay(100);
+            Check(await CurrentWindow() == expectedWindow, $"'{command}' should end in window {expectedWindow}, is in {await CurrentWindow()}");
+        }
+        await Run(TmuxNavigation.SelectIndex(2), "2");
+        await Run(TmuxNavigation.Next, "0");        // wraps around
+        await Run(TmuxNavigation.Previous, "2");
+        await Run(TmuxNavigation.SelectIndex(0), "0");
+        // Many switches that start in the recording window, where a leaked character would be caught.
+        for (int i = 0; i < 12; i++)
+        {
+            await Run(TmuxNavigation.SelectIndex(1), "1");   // starts in the recording window
+            await Run(TmuxNavigation.Previous, "0");         // and back
+        }
+        string received = (await Remote("wc -c < /tmp/tmgr-nav.bin")).Trim();
+        Check(received == "0", "The program received " + received + " bytes: " + (await Remote("od -c /tmp/tmgr-nav.bin | head -5")));
+        Console.WriteLine("PASS Real tmux: window by index, next, previous through the command prompt; 0 bytes reached the program in 28 switches");
+        return 1;
+    }
+    finally
+    {
+        if (client is not null) await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await Remote("tmux kill-session -t tmgr-nav 2>/dev/null; rm -f /tmp/tmgr-nav.bin; true");
     }
 }
 

@@ -71,8 +71,18 @@ public sealed record ShortcutOptions
     public string Paste { get; init; } = "Ctrl+Shift+V";
     /// <summary>Modifier for session switching together with 1–9, one of <see cref="ShortcutRules.SessionModifiers"/>.</summary>
     public string SessionModifier { get; init; } = "Alt";
+    /// <summary>Modifier for the tmux window of the current session together with 0–9, one of <see cref="ShortcutRules.WindowModifiers"/>.</summary>
+    public string WindowModifier { get; init; } = "Ctrl";
+    public string NextWindow { get; init; } = "Ctrl+Tab";
+    public string PreviousWindow { get; init; } = "Ctrl+Shift+Tab";
+    /// <summary>Back to the window used before, across servers.</summary>
+    public string Back { get; init; } = "Ctrl+<";
 
     public ShortcutOptions Normalized() => this with {
+        WindowModifier = ShortcutRules.WindowModifiers.Contains(WindowModifier) ? WindowModifier : "Ctrl",
+        NextWindow = Shortcut.TryParse(NextWindow, out var next) ? next.ToString() : "Ctrl+Tab",
+        PreviousWindow = Shortcut.TryParse(PreviousWindow, out var previous) ? previous.ToString() : "Ctrl+Shift+Tab",
+        Back = Shortcut.TryParse(Back, out var back) ? back.ToString() : "Ctrl+<",
         Copy = Shortcut.TryParse(Copy, out var copy) ? copy.ToString() : "Ctrl+Shift+C",
         Paste = Shortcut.TryParse(Paste, out var paste) ? paste.ToString() : "Ctrl+Shift+V",
         SessionModifier = ShortcutRules.SessionModifiers.Contains(SessionModifier) ? SessionModifier : "Alt"
@@ -98,6 +108,8 @@ public sealed record AppSettings
     public bool AcceptOsc52 { get; init; } = true;
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
+    /// <summary>Saved tmux windows with their own shortcut (see <see cref="Favorite"/>).</summary>
+    public List<Favorite> Favorites { get; init; } = [];
     public int FontSize { get; init; } = 14;
     public int ClipHistoryLimit { get; init; } = 100;
 }

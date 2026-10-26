@@ -28,6 +28,8 @@ public sealed record ExportedSettings
     public bool CheckForUpdates { get; init; } = true;
     public ShortcutOptions Shortcuts { get; init; } = new();
     public ExportedDictation Dictation { get; init; } = new();
+    /// <summary>Favorite tmux windows; they refer to servers by profile ID, which an imported profile keeps.</summary>
+    public List<Favorite> Favorites { get; init; } = [];
 }
 
 public sealed record ConfigContent
@@ -89,7 +91,7 @@ public static class ConfigFile
             Settings = selection.Settings ? new ExportedSettings
             {
                 FontSize = settings.FontSize, ClipHistoryLimit = settings.ClipHistoryLimit, AcceptOsc52 = settings.AcceptOsc52,
-                CheckForUpdates = settings.Update.CheckOnStart, Shortcuts = settings.Shortcuts.Normalized(),
+                CheckForUpdates = settings.Update.CheckOnStart, Shortcuts = settings.Shortcuts.Normalized(), Favorites = settings.Favorites.ToList(),
                 Dictation = new ExportedDictation { Shortcut = dictation.Shortcut, Language = dictation.Language, InitialPrompt = dictation.InitialPrompt,
                     SilenceSeconds = dictation.SilenceSeconds, LevelThreshold = dictation.LevelThreshold }
             } : null,

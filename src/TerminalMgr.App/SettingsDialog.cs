@@ -23,12 +23,15 @@ public sealed class SettingsDialog : Window
     /// <summary>"Exportieren" or "Importieren" was pressed: the settings are saved and the caller opens the matching dialog.</summary>
     public ConfigAction ConfigAction { get; private set; }
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
-    private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine;
+    private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine, _windowModifier;
+    private readonly TextBox _nextShortcut, _previousShortcut, _backShortcut;
+    private List<Favorite> _favorites;
     public AppSettings? Result { get; private set; }
 
-    public SettingsDialog(AppSettings settings)
+    public SettingsDialog(AppSettings settings, IReadOnlyList<NavigationPosition>? recentWindows = null)
     {
         _original = settings;
+        _favorites = [.. settings.Favorites];
         var dictation = settings.Dictation.Normalized();
         var shortcuts = settings.Shortcuts.Normalized();
         Style = (Style)FindResource(typeof(Window));
@@ -73,6 +76,19 @@ public sealed class SettingsDialog : Window
         _copyShortcut = ShortcutField("Markierung kopieren", shortcuts.Copy, new ShortcutOptions().Copy);
         _pasteShortcut = ShortcutField("Zwischenablage einfügen", shortcuts.Paste, new ShortcutOptions().Paste);
         _sessionModifier = Combo("Session wechseln: Tasten plus 1 bis 9", ShortcutRules.SessionModifiers.Select(m => m + "+1 … 9"), shortcuts.SessionModifier + "+1 … 9");
+
+        _windowModifier = Combo("tmux-Fenster der aktuellen Session: Tasten plus 0 bis 9", ShortcutRules.WindowModifiers.Select(m => m + "+0 … 9"), shortcuts.WindowModifier + "+0 … 9");
+        _windowModifier.ToolTip = "Wechselt per tmux-Befehl, ohne dass ein Zeichen im Programm ankommt. Ctrl+0 bis 9 hatten im Terminal eine seltene Altbedeutung (Ctrl+3 ist Escape); Alt+Shift vermeidet das.";
+        _nextShortcut = ShortcutField("Nächstes tmux-Fenster", shortcuts.NextWindow, new ShortcutOptions().NextWindow);
+        _previousShortcut = ShortcutField("Voriges tmux-Fenster", shortcuts.PreviousWindow, new ShortcutOptions().PreviousWindow);
+        _backShortcut = ShortcutField("Zurück zum zuletzt benutzten Fenster (auch auf einem anderen Server)", shortcuts.Back, new ShortcutOptions().Back);
+        var favoritesButton = new Button { Content = $"Favoriten verwalten … ({_favorites.Count})", ToolTip = "tmux-Fenster mit eigenem Tastenkürzel", HorizontalAlignment = HorizontalAlignment.Left };
+        favoritesButton.Click += (_, _) =>
+        {
+            var dialog = new FavoritesDialog(_favorites, _original.Profiles, recentWindows ?? []) { Owner = this };
+            if (dialog.ShowDialog() == true && dialog.Result is { } result) { _favorites = result; favoritesButton.Content = $"Favoriten verwalten … ({_favorites.Count})"; }
+        };
+        _panel.Children.Add(favoritesButton);
 
         Heading("Clipboard");
         _historyLimit = Field("Ungeheftete Einträge im Verlauf (1 bis 1000)", settings.ClipHistoryLimit.ToString());
@@ -186,8 +202,11 @@ public sealed class SettingsDialog : Window
             Update = new UpdateOptions { CheckOnStart = _checkUpdates.IsChecked == true, SkippedVersion = _skippedVersion },
             Shortcuts = new ShortcutOptions {
                 Copy = _copyShortcut.Text, Paste = _pasteShortcut.Text,
-                SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)]
+                SessionModifier = ShortcutRules.SessionModifiers[Math.Max(0, _sessionModifier.SelectedIndex)],
+                WindowModifier = ShortcutRules.WindowModifiers[Math.Max(0, _windowModifier.SelectedIndex)],
+                NextWindow = _nextShortcut.Text, PreviousWindow = _previousShortcut.Text, Back = _backShortcut.Text
             }.Normalized(),
+            Favorites = _favorites,
             Dictation = (_original.Dictation with {
                 Shortcut = _dictationShortcut.Text,
                 Microphone = microphone == DefaultMicrophone ? null : microphone,

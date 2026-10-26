@@ -31,7 +31,7 @@ public partial class MainWindow
         var options = _settings.Shortcuts.Normalized();
         Post(new {
             type = "shortcuts",
-            shortcuts = new Dictionary<string, string> { ["dictation"] = DictationSettings.Shortcut, ["copy"] = options.Copy, ["paste"] = options.Paste },
+            shortcuts = ShortcutTable(options),
             sessionModifier = options.SessionModifier
         });
     }
