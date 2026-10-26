@@ -4,12 +4,25 @@ using System.Windows;
 using TerminalMgr.Core;
 namespace TerminalMgr.App;
 
+/// <summary>A session tab: the server, its Alt number, and the tooltip (destination and status).</summary>
+public sealed class TabModel(ProfileItem item, string number)
+{
+    public ProfileItem Item { get; } = item;
+    public string Number { get; } = number;
+    public string Tooltip => $"{Item.Name} · {Item.Profile.Destination}{Environment.NewLine}{Item.Status}" + (Number.Length > 0 ? $"{Environment.NewLine}Alt+{Number}" : "");
+}
+
+public enum ConnectionState { Disconnected, Connecting, Connected }
+
 public sealed class ProfileItem(Profile profile) : INotifyPropertyChanged
 {
     public Profile Profile { get; set; } = profile;
     public string Name => Profile.Name;
     private string _status = profile.AutoConnect ? "Autostart · getrennt" : "Getrennt";
-    public string Status { get => _status; set { _status = value; Changed(); } }
+    public string Status { get => _status; set { _status = value; Changed(); Changed(nameof(Connection)); } }
+    /// <summary>What the tab shows as a dot: green when connected, an amber ring while connecting, nothing otherwise.</summary>
+    public ConnectionState Connection => _status.StartsWith('●') ? ConnectionState.Connected
+        : _status.StartsWith("Verbinde", StringComparison.Ordinal) || _status.StartsWith("Verbindung verloren", StringComparison.Ordinal) ? ConnectionState.Connecting : ConnectionState.Disconnected;
     public event PropertyChangedEventHandler? PropertyChanged;
     public void Refresh() { Changed(nameof(Name)); Changed(nameof(Status)); }
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));

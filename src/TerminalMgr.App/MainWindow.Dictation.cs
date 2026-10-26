@@ -187,8 +187,11 @@ public partial class MainWindow
                 DictationStatus.Text = "Aufnahme …";
                 DictationRecordButton.Content = "■ Stopp";
                 DictationRecordButton.IsEnabled = true;
-                DictationButton.Content = "● Aufnahme";
-                DictationButton.Background = new SolidColorBrush(Color.FromRgb(0xB0, 0x3A, 0x2E));
+                // The mic button of the icon bar turns red and pulses; the panel shows a red recording dot.
+                DictationButton.IsChecked = true;
+                DictationButton.Foreground = (Brush)FindResource("RecordingBrush");
+                DictationButton.ToolTip = "Aufnahme läuft – Diktat stoppen (" + DictationSettings.Shortcut + ")";
+                DictationDot.Visibility = Visibility.Visible;
                 DictationButton.BeginAnimation(OpacityProperty, new DoubleAnimation(1.0, 0.55, TimeSpan.FromMilliseconds(650)) {
                     AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
                 break;
@@ -196,14 +199,17 @@ public partial class MainWindow
                 DictationStatus.Text = "Transkribiere …";
                 DictationRecordButton.IsEnabled = false;
                 DictationButton.BeginAnimation(OpacityProperty, null);
-                DictationButton.Content = "Verarbeite …";
-                DictationButton.Background = new SolidColorBrush(Color.FromRgb(0x8A, 0x6D, 0x1F));
+                DictationButton.Foreground = (Brush)FindResource("AccentBrush");
+                DictationButton.ToolTip = "Transkribiere …";
+                DictationDot.Visibility = Visibility.Collapsed;
                 DictationLevel.Value = 0;
                 break;
             default:
                 DictationButton.BeginAnimation(OpacityProperty, null);
-                DictationButton.ClearValue(BackgroundProperty);
-                DictationButton.Content = "🎤 Diktat";
+                DictationButton.ClearValue(System.Windows.Controls.Control.ForegroundProperty);
+                DictationButton.IsChecked = _dictationOpen;
+                DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
+                DictationDot.Visibility = Visibility.Collapsed;
                 DictationRecordButton.Content = "● Aufnahme";
                 DictationRecordButton.IsEnabled = true;
                 DictationLevel.Value = 0;

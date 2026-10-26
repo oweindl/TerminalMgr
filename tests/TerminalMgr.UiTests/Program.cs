@@ -223,6 +223,91 @@ internal static class Program
         if (!done) throw new Exception("The WebView2 test did not finish");
     }
 
+    // One source for colors and fonts: the WPF brushes come from Theme.Dark, terminal.css has the same defaults, the fonts are shipped.
+    private static void TestThemeSources()
+    {
+        var resources = new ThemeDictionary();
+        foreach (var (token, hex) in Theme.Dark.Colors)
+        {
+            string name = ThemeDictionary.Pascal(token);
+            Check(resources[name + "Brush"] is System.Windows.Media.SolidColorBrush brush && brush.Color == (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex), "Brush for " + token);
+        }
+        Check(ThemeDictionary.Pascal("accent-tint") == "AccentTint" && ThemeDictionary.Pascal("text-2") == "Text2", "Token names");
+        string terminal = Path.Combine(AppContext.BaseDirectory, "Terminal");
+        string css = File.ReadAllText(Path.Combine(terminal, "terminal.css"));
+        var root = System.Text.RegularExpressions.Regex.Match(css, @":root\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+        var declared = System.Text.RegularExpressions.Regex.Matches(root, @"--(?<name>[a-z0-9-]+):\s*(?<value>#[0-9a-fA-F]{6})").ToDictionary(m => m.Groups["name"].Value, m => m.Groups["value"].Value.ToLowerInvariant());
+        foreach (var (token, hex) in Theme.Dark.Colors) Check(declared.GetValueOrDefault(token) == hex, $"terminal.css --{token} is {declared.GetValueOrDefault(token)}, the theme says {hex}");
+        Check(declared.Count == Theme.Dark.Colors.Count, "terminal.css declares colors that the theme does not have");
+        foreach (string file in new[] { "IBMPlexSans-Regular.ttf", "IBMPlexSans-Medium.ttf", "IBMPlexSans-SemiBold.ttf", "JetBrainsMono-Regular.ttf", "JetBrainsMono-Bold.ttf", "OFL-ibmplexsans.txt", "OFL-JetBrainsMono.txt" })
+            Check(File.Exists(Path.Combine(terminal, "fonts", file)), "Missing font file " + file);
+        foreach (var match in System.Text.RegularExpressions.Regex.Matches(css, "url\\(\"(?<path>[^\"]+)\"\\)").Cast<System.Text.RegularExpressions.Match>())
+            Check(File.Exists(Path.Combine(terminal, match.Groups["path"].Value)), "terminal.css refers to a missing file: " + match.Groups["path"].Value);
+        Check(!css.Contains("http://") && !css.Contains("https://") && !css.Contains("@import"), "Fonts and styles must not come from the network");
+        var families = System.Windows.Media.Fonts.GetFontFamilies(new Uri(Path.Combine(terminal, "fonts") + Path.DirectorySeparatorChar)).Select(f => f.Source).ToList();
+        Check(families.Any(f => f.Contains("IBM Plex Sans")) && families.Any(f => f.Contains("JetBrains Mono")), "Shipped fonts are not found by WPF: " + string.Join(", ", families));
+        Console.WriteLine("PASS Theme: one source for WPF brushes and CSS variables, terminal.css defaults equal the theme, fonts are shipped and load locally");
+    }
+
+    // The Commander layout: icon bar toggles, server panel, tabs for connected servers (and the selected one), focus mode.
+    private static void TestCommanderLayout()
+    {
+        var main = new MainWindow();
+        var list = (ListBox)main.FindName("ProfilesList");
+        var tabs = (ListBox)main.FindName("SessionTabs");
+        var profiles = (System.Collections.ObjectModel.ObservableCollection<ProfileItem>)list.ItemsSource;
+        var devbox = new ProfileItem(new Profile { Name = "devbox", Destination = "devbox" });
+        var server1 = new ProfileItem(new Profile { Name = "server1", Destination = "server1" });
+        var staging = new ProfileItem(new Profile { Name = "staging", Destination = "staging" });
+        profiles.Add(devbox); profiles.Add(server1); profiles.Add(staging);
+        var root = (FrameworkElement)main.Content;
+        root.Measure(new Size(1480, 940)); root.Arrange(new Rect(0, 0, 1480, 940)); root.UpdateLayout();
+
+        // Names the code and the old tests rely on are still there; everything the old header and status bar offered is reachable.
+        foreach (string name in new[] { "ServerButton", "ClipboardButton", "DictationButton", "SettingsButton", "ServerPanel", "ProfilesList", "SessionTabs", "TerminalView", "ClipboardPanel", "ClipsList", "DictationPanel", "ConnectButton", "DisconnectButton", "TabHint" })
+            Check(main.FindName(name) is not null, "Missing element " + name);
+        Check(((TextBlock)main.FindName("TabHint")).Text.Contains("K alles finden"), "Palette hint: " + ((TextBlock)main.FindName("TabHint")).Text);
+
+        // Tabs: only connected servers and the selected one, with their Alt number.
+        Check(tabs.Items.Count == 0, "No tab before anything is connected or selected: " + tabs.Items.Count);
+        list.SelectedItem = devbox;
+        Check(tabs.Items.Count == 1 && ((TabModel)tabs.Items[0]).Item == devbox && ((TabModel)tabs.Items[0]).Number == "1", "The selected server gets a tab");
+        server1.Status = "● SSH läuft";
+        staging.Status = "Verbinde …";
+        Check(tabs.Items.Cast<TabModel>().Select(t => t.Item.Name).SequenceEqual(["devbox", "server1", "staging"]), "Tabs: " + string.Join(",", tabs.Items.Cast<TabModel>().Select(t => t.Item.Name)));
+        Check(tabs.Items.Cast<TabModel>().Select(t => t.Number).SequenceEqual(["1", "2", "3"]), "Alt numbers follow the server list");
+        Check(server1.Connection == ConnectionState.Connected && staging.Connection == ConnectionState.Connecting && devbox.Connection == ConnectionState.Disconnected, "Status dots");
+        tabs.SelectedItem = tabs.Items[1];
+        Check(ReferenceEquals(list.SelectedItem, server1), "A click on a tab selects the server");
+        list.SelectedItem = staging;
+        Check(ReferenceEquals(((TabModel)tabs.SelectedItem).Item, staging), "Selecting a server selects its tab");
+        server1.Status = "Getrennt";
+        Check(!tabs.Items.Cast<TabModel>().Any(t => t.Item == server1), "server1 is disconnected and not selected, so it has no tab: " + string.Join(",", tabs.Items.Cast<TabModel>().Select(t => t.Item.Name)));
+
+        // Icon bar: the server panel opens and closes, the clipboard column too, focus mode restores what was open.
+        var server = (System.Windows.Controls.Primitives.ToggleButton)main.FindName("ServerButton");
+        var clipboard = (System.Windows.Controls.Primitives.ToggleButton)main.FindName("ClipboardButton");
+        var serverPanel = (FrameworkElement)main.FindName("ServerPanel");
+        var clipboardPanel = (FrameworkElement)main.FindName("ClipboardPanel");
+        void Click(System.Windows.Controls.Primitives.ToggleButton button) { button.IsChecked = !button.IsChecked; button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)); }
+        if (server.IsChecked == true) Click(server);
+        Check(serverPanel.Visibility == Visibility.Collapsed && server.IsChecked == false, "Server panel closed");
+        Click(server);
+        Check(serverPanel.Visibility == Visibility.Visible && server.IsChecked == true, "Server panel opened from the bar");
+        Click(clipboard);
+        Check(clipboardPanel.Visibility == Visibility.Collapsed && clipboard.IsChecked == false, "Clipboard column hidden from the bar");
+        Click(clipboard);
+        Check(clipboardPanel.Visibility == Visibility.Visible && clipboard.IsChecked == true, "Clipboard column shown again");
+        var toggleFocus = typeof(MainWindow).GetMethod("ToggleFocus", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        toggleFocus.Invoke(main, [main, new RoutedEventArgs()]);
+        Check(serverPanel.Visibility == Visibility.Collapsed && clipboardPanel.Visibility == Visibility.Collapsed, "Focus mode hides both side areas");
+        toggleFocus.Invoke(main, [main, new RoutedEventArgs()]);
+        Check(serverPanel.Visibility == Visibility.Visible && clipboardPanel.Visibility == Visibility.Visible, "Leaving focus mode restores them");
+        root.Measure(new Size(1480, 940)); root.Arrange(new Rect(0, 0, 1480, 940)); root.UpdateLayout();
+        Check(((FrameworkElement)main.FindName("SessionTabs")).ActualHeight > 30 && ((FrameworkElement)main.FindName("TerminalView")).ActualHeight > 600, "Tab strip and terminal are laid out");
+        Console.WriteLine("PASS Commander layout: icon bar toggles, server panel, tabs for connected servers with Alt numbers and status, focus mode restores");
+    }
+
     // The palette in the real WebView2: it is part of the page, so it covers the terminal (a WPF element would sit behind it).
     private static void TestPaletteInWebView()
     {
@@ -405,6 +490,8 @@ internal static class Program
             TestUpdateDialog();
             TestConfigDialogs();
             TestDictationPanel();
+            TestThemeSources();
+            TestCommanderLayout();
             TestWebSpeechEngine();
             RunInsideDispatcherLoop(TestPaletteInWebView);
             TestVersionIsShown();

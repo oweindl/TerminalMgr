@@ -43,7 +43,7 @@ public partial class MainWindow : Window
     private readonly string _dataDirectory;
     private bool _ready, _closing, _closed, _canSave = true;
     private int _fontSize = 14;
-    private double _serverWidth = 220, _clipWidth = 300;
+    private double _serverWidth = 260, _clipWidth = 312;
 
     public MainWindow()
     {
@@ -53,6 +53,7 @@ public partial class MainWindow : Window
         _dataDirectory = AppPaths.DataDirectory();
         _store = new SettingsStore(_dataDirectory);
         ProfilesList.ItemsSource = _profiles;
+        InitializeLayout();
         _flush = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => FlushOutput(), Dispatcher);
         _flush.Start();
     }
@@ -74,6 +75,9 @@ public partial class MainWindow : Window
                 if (File.Exists(config)) AddImported(config);
             }
             RenderClips();
+            // The server list opens from the icon bar; it starts open when nothing connects by itself (so the first thing to do is visible).
+            SetServerPanel(!_profiles.Any(p => p.Profile.AutoConnect));
+            if (!_profiles.Any(p => ReferenceEquals(p, Selected)) && _profiles.Count > 0) RefreshTabs();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -139,6 +143,7 @@ public partial class MainWindow : Window
                 case "ready":
                     _ready = true;
                     LoadingOverlay.Visibility = Visibility.Collapsed;
+                    PostTheme();
                     Post(new { type = "font", size = _fontSize });
                     PostShortcuts();
                     PostTerminalSettings();
@@ -214,6 +219,7 @@ public partial class MainWindow : Window
         if (!_ready) { StatusText.Text = "Das Terminal wird noch vorbereitet."; return; }
         if (_closing || _sessions.ContainsKey(id) || !_connecting.Add(id)) return;
         if (!automatic) CancelReconnect(id, reset: true);
+        item.Status = "Verbinde …";
         PtySession? pty = null;
         try
         {
@@ -364,6 +370,7 @@ public partial class MainWindow : Window
         SessionTitle.Text = TitleFor(item);
         Post(new { type = "select", id = item.Profile.Id });
         UpdateDimensions(item.Profile.Id);
+        RefreshTabs();
     }
     private string TitleFor(ProfileItem item) => _tmuxLabel.TryGetValue(item.Profile.Id, out var label)
         ? item.Name + " · " + label : item.Name + " · " + item.Profile.Destination;
@@ -377,6 +384,7 @@ public partial class MainWindow : Window
         DimensionsText.Text = _sizes.TryGetValue(id, out var size)
             ? $"{size.Cols} Spalten × {size.Rows} Zeilen   ·   Ctrl+B → tmux   ·   {_fontSize} px"
             : $"Ctrl+B → tmux   ·   {_fontSize} px";
+        TabHint.ToolTip = DimensionsText.Text;
     }
 
     private void ServerRightClick(object sender, MouseButtonEventArgs e)
@@ -385,6 +393,13 @@ public partial class MainWindow : Window
         var container = ItemsControl.ContainerFromElement(ProfilesList, source) as ListBoxItem;
         if (container?.DataContext is not ProfileItem item) return;
         ProfilesList.SelectedItem = item;
+        ShowServerMenu(item, container);
+        e.Handled = true;
+    }
+
+    /// <summary>Context menu of a server (list or tab): tmux sessions and windows, connect, disconnect, edit.</summary>
+    private void ShowServerMenu(ProfileItem item, FrameworkElement container)
+    {
         var menu = new ContextMenu { PlacementTarget = container };
         void Add(string label, RoutedEventHandler click)
         {
@@ -405,7 +420,6 @@ public partial class MainWindow : Window
         var closed = new CancellationTokenSource();
         menu.Closed += (_, _) => closed.Cancel();
         menu.IsOpen = true;
-        e.Handled = true;
         _ = LoadTmuxWindowsIntoMenuAsync(menu, placeholder, item, closed.Token);
     }
 
@@ -619,6 +633,7 @@ public partial class MainWindow : Window
         var items = _clipList.Items.Where(c => (PinnedOnly?.IsChecked != true || c.Pinned)
             && (c.Text.Contains(search, StringComparison.OrdinalIgnoreCase) || c.Source.Contains(search, StringComparison.OrdinalIgnoreCase)))
             .Select(c => new ClipItem(c, c.Text == _clipList.ExpandedText)).ToList();
+        ClipCount.Text = _clipList.Items.Count.ToString();
         _renderingClips = true;
         try
         {
@@ -740,6 +755,7 @@ public partial class MainWindow : Window
         var shortcuts = _settings.Shortcuts.Normalized();
         DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
         SessionHint.Text = $"{shortcuts.SessionModifier}+1 … {shortcuts.SessionModifier}+9 · Session wechseln";
+        ApplyPaletteHint();
         string? exe = Environment.ProcessPath;
         // Only the installed/published app registers itself, never "dotnet run" or a test host.
         if (exe is null || !string.Equals(Path.GetFileName(exe), "TerminalMgr.App.exe", StringComparison.OrdinalIgnoreCase)) return;
@@ -763,26 +779,17 @@ public partial class MainWindow : Window
     private void FontSmaller(object sender, RoutedEventArgs e) => SetFont(_fontSize - 1);
     private void FontLarger(object sender, RoutedEventArgs e) => SetFont(_fontSize + 1);
     private void SetFont(int size) { _fontSize = Math.Clamp(size, 10, 28); Post(new { type = "font", size = _fontSize }); SaveSettings(); }
-    private void ToggleClipboard(object sender, RoutedEventArgs e)
-    {
-        bool hide = ClipboardColumn.Width.Value > 0;
-        if (hide) _clipWidth = ClipboardColumn.ActualWidth;
-        ClipboardColumn.Width = new GridLength(hide ? 0 : _clipWidth);
-        ClipboardSplitterColumn.Width = new GridLength(hide ? 0 : 4);
-        ClipboardPanel.Visibility = ClipboardSplitter.Visibility = hide ? Visibility.Collapsed : Visibility.Visible;
-    }
-    private void ToggleFocus(object sender, RoutedEventArgs e)
-    {
-        bool hide = ServerColumn.Width.Value > 0;
-        if (hide) _serverWidth = ServerColumn.ActualWidth;
-        ServerColumn.Width = new GridLength(hide ? 0 : _serverWidth);
-        ServerSplitterColumn.Width = new GridLength(hide ? 0 : 4);
-        ServerPanel.Visibility = ServerSplitter.Visibility = hide ? Visibility.Collapsed : Visibility.Visible;
-        if ((ClipboardColumn.Width.Value > 0) == hide) ToggleClipboard(sender, e);
-    }
     private void WindowKeyDown(object sender, KeyEventArgs e)
     {
         // The dictation shortcut also works while a WPF control has the focus (Ctrl+Y would otherwise be "redo" in a text box).
+        // Esc closes the server panel (when the focus is not in the dictation text, where Esc discards the dictation).
+        if (e.Key == Key.Escape && ServerPanelOpen && !_focusMode && !ReferenceEquals(Keyboard.FocusedElement, DictationBox) && ProfilesList.IsKeyboardFocusWithin)
+        {
+            SetServerPanel(false);
+            Post(new { type = "focus", id = Selected?.Profile.Id });
+            e.Handled = true;
+            return;
+        }
         if (ShortcutKeys.FromEvent(e) is not { } pressed) return;
         if (Shortcut.TryParse(DictationSettings.Shortcut, out var dictation) && pressed == dictation)
         {
