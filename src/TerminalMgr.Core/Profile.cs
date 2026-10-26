@@ -111,6 +111,8 @@ public sealed record AppSettings
     public bool AcceptOsc52 { get; init; } = true;
     /// <summary>Copy a mouse selection as soon as it is made, in a plain shell and in tmux or Claude Code alike. Off: it is copied with a right click.</summary>
     public bool CopyOnSelect { get; init; }
+    /// <summary>Window position, size and open panels of the last run (see <see cref="WindowLayout"/>).</summary>
+    public WindowLayout? Window { get; init; }
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     /// <summary>Saved tmux windows with their own shortcut (see <see cref="Favorite"/>).</summary>

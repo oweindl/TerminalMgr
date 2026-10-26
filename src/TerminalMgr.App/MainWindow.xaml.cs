@@ -54,6 +54,7 @@ public partial class MainWindow : Window
         _store = new SettingsStore(_dataDirectory);
         ProfilesList.ItemsSource = _profiles;
         InitializeLayout();
+        RestoreWindowPlacement();
         _flush = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => FlushOutput(), Dispatcher);
         _flush.Start();
     }
@@ -76,7 +77,7 @@ public partial class MainWindow : Window
             }
             RenderClips();
             // The server list opens from the icon bar; it starts open when nothing connects by itself (so the first thing to do is visible).
-            SetServerPanel(!_profiles.Any(p => p.Profile.AutoConnect));
+            RestorePanels(!_profiles.Any(p => p.Profile.AutoConnect));
             if (!_profiles.Any(p => ReferenceEquals(p, Selected)) && _profiles.Count > 0) RefreshTabs();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -169,7 +170,7 @@ public partial class MainWindow : Window
                     break;
                 case "switch":
                     int index = m.GetProperty("index").GetInt32();
-                    if (index >= 0 && index < _profiles.Count) ProfilesList.SelectedIndex = index;
+                    if (index >= 0 && index < _profiles.Count) { ProfilesList.SelectedIndex = index; FocusTerminal(Selected?.Profile.Id); }
                     break;
                 case "copy":
                     string text = ClipboardText.TrimTrailingSpaces(m.GetProperty("text").GetString() ?? "");
@@ -263,7 +264,7 @@ public partial class MainWindow : Window
             Reconnect(id).Connected(DateTimeOffset.Now);
             item.Status = item.Profile.AutoConnect ? "● SSH läuft · Autostart" : "● SSH läuft";
             StatusText.Text = automatic ? item.Name + ": wieder verbunden." : "SSH läuft. Anmeldung und Host-Key-Abfragen erscheinen im Terminal.";
-            if (!automatic || Selected == item) Post(new { type = "focus", id });
+            if (!automatic || Selected == item) FocusTerminal(id, keyboard: !automatic);
         }
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception ex)
@@ -488,7 +489,7 @@ public partial class MainWindow : Window
             _tmuxLabel[id] = $"tmux: {window.SessionName} / {window.Name}";
             _history.Visit(new(id, window.SessionId, window.SessionName, window.WindowId, window.Name));
             SessionTitle.Text = TitleFor(item);
-            Post(new { type = "focus", id });
+            FocusTerminal(id);
         }
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception ex) { ShowError("Wechsel in das tmux-Fenster fehlgeschlagen.", ex); }
@@ -512,7 +513,7 @@ public partial class MainWindow : Window
         if (_sessions.TryGetValue(item.Profile.Id, out var session))
         {
             await session.SendAsync("\x02w");
-            Post(new { type = "focus", id = item.Profile.Id });
+            FocusTerminal(item.Profile.Id);
         }
         else StatusText.Text = "Zuerst verbinden. Der Aufruf setzt eine laufende tmux-Session mit Präfix Ctrl+B voraus.";
     }
@@ -771,7 +772,7 @@ public partial class MainWindow : Window
         {
             _settings = _settings with { Profiles = _profiles.Select(p => p.Profile).ToList(),
                 PinnedClips = _clipList.Items.Where(c => c.Pinned).ToList(), FontSize = _fontSize,
-                ClipHistoryLimit = _clipList.MaxUnpinned };
+                ClipHistoryLimit = _clipList.MaxUnpinned, Window = _layoutReady ? CaptureLayout() : _settings.Window };
             _store.Save(_settings);
         }
         catch (Exception ex) { ShowError("Einstellungen konnten nicht gespeichert werden.", ex); }
@@ -786,7 +787,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape && ServerPanelOpen && !_focusMode && !ReferenceEquals(Keyboard.FocusedElement, DictationBox) && ProfilesList.IsKeyboardFocusWithin)
         {
             SetServerPanel(false);
-            Post(new { type = "focus", id = Selected?.Profile.Id });
+            FocusTerminal(Selected?.Profile.Id);
             e.Handled = true;
             return;
         }
@@ -808,7 +809,7 @@ public partial class MainWindow : Window
             Shortcut.Parse(_settings.Shortcuts.Normalized().SessionModifier + "+" + pressed.Key) == pressed)
         {
             int index = pressed.Key[0] - '1';
-            if (index < Math.Min(9, _profiles.Count)) { ProfilesList.SelectedIndex = index; e.Handled = true; }
+            if (index < Math.Min(9, _profiles.Count)) { ProfilesList.SelectedIndex = index; FocusTerminal(Selected?.Profile.Id); e.Handled = true; }
         }
     }
 

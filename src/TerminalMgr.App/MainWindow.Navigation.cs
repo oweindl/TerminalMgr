@@ -62,7 +62,7 @@ public partial class MainWindow
         // The starting point is needed for "back"; it is looked up once per server, before the first switch.
         if (_history.Current?.ProfileId != item.Profile.Id) await RecordPositionAsync(item, TimeSpan.FromSeconds(2));
         await TmuxClient.RunCommandAsync(pty, command, _shutdown.Token);
-        Post(new { type = "focus", id = item.Profile.Id });
+        FocusTerminal(item.Profile.Id);
         _ = RecordPositionAfterSwitchAsync(item);
     }
 

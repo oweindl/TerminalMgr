@@ -27,6 +27,16 @@ public partial class MainWindow
         ApplyPaletteHint();
     }
 
+    /// <summary>
+    /// Puts the keyboard focus into the terminal: the WPF focus onto the browser control (it may sit on the server list, a tab or the
+    /// dictation box after a keyboard switch) and the page focus onto the input line of the session.
+    /// </summary>
+    private void FocusTerminal(string? id, bool keyboard = true)
+    {
+        if (keyboard && !Equals(Keyboard.FocusedElement, DictationBox)) TerminalView.Focus();
+        Post(new { type = "focus", id });
+    }
+
     private bool ServerPanelOpen => ServerColumn.Width.Value > 0;
     private bool ClipboardOpen => ClipboardColumn.Width.Value > 0;
 
@@ -51,8 +61,8 @@ public partial class MainWindow
         ClipboardButton.IsChecked = open;
     }
 
-    private void ToggleServerPanel(object sender, RoutedEventArgs e) => SetServerPanel(!ServerPanelOpen);
-    private void ToggleClipboard(object sender, RoutedEventArgs e) => SetClipboard(!ClipboardOpen);
+    private void ToggleServerPanel(object sender, RoutedEventArgs e) { SetServerPanel(!ServerPanelOpen); SaveSettings(); }
+    private void ToggleClipboard(object sender, RoutedEventArgs e) { SetClipboard(!ClipboardOpen); SaveSettings(); }
 
     /// <summary>Focus mode: side areas out of the way. Leaving it brings back exactly what was open before.</summary>
     private void ToggleFocus(object sender, RoutedEventArgs e)
@@ -115,7 +125,7 @@ public partial class MainWindow
     private void TabSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingTabs || SessionTabs.SelectedItem is not TabModel tab) return;
-        if (!ReferenceEquals(Selected, tab.Item)) ProfilesList.SelectedItem = tab.Item;
+        if (!ReferenceEquals(Selected, tab.Item)) { ProfilesList.SelectedItem = tab.Item; FocusTerminal(tab.Item.Profile.Id); }
     }
 
     private void TabRightClick(object sender, MouseButtonEventArgs e)
