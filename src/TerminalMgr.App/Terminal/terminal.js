@@ -8,7 +8,7 @@
   // App shortcuts (for example dictation on Ctrl+Y) are taken here and never reach the session. The host sends the
   // configured ones as canonical text ("Ctrl+Shift+D"); key names match Shortcut.FromDomCode in TerminalMgr.Core.
   const keyNames = { Escape:'Esc', Comma:',', Period:'.', Minus:'-', Slash:'/', Semicolon:';', Quote:"'", BracketLeft:'[', BracketRight:']',
-    Backquote:'`', Backslash:'\\', Equal:'=', ArrowUp:'Up', ArrowDown:'Down', ArrowLeft:'Left', ArrowRight:'Right', NumpadEnter:'Enter',
+    Backquote:'`', Backslash:'\\', Equal:'=', IntlBackslash:'<', ArrowUp:'Up', ArrowDown:'Down', ArrowLeft:'Left', ArrowRight:'Right', NumpadEnter:'Enter',
     Enter:'Enter', Space:'Space', Tab:'Tab', Backspace:'Backspace', Delete:'Delete', Insert:'Insert', Home:'Home', End:'End', PageUp:'PageUp', PageDown:'PageDown' };
   function keyOf(code) {
     let m;

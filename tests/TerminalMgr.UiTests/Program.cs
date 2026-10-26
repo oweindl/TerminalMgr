@@ -134,6 +134,14 @@ internal static class Program
         var passwordContent = (FrameworkElement)password.Content;
         passwordContent.Measure(new Size(440, double.PositiveInfinity));
         Check(passwordContent.DesiredSize.Height > 80, "Password dialog layout: " + passwordContent.DesiredSize);
+        var profiles = new[] { new Profile { Id = "p1", Name = "devbox", Destination = "devbox" } };
+        var favorites = new FavoritesDialog([new Favorite { ProfileId = "p1", Name = "Archyx", SessionName = "main", WindowName = "archyx", Shortcut = "Ctrl+Alt+A" }], profiles,
+            [new NavigationPosition("p1", "$0", "main", "@4", "archyx")]);
+        var favoritesContent = (FrameworkElement)favorites.Content;
+        favoritesContent.Measure(new Size(860, 560));
+        Check(favoritesContent.DesiredSize.Height > 150 && favorites.Result is null, "Favorites dialog layout");
+        var settingsWithFavorites = new SettingsDialog(new AppSettings { Profiles = [.. profiles], Favorites = [new Favorite { ProfileId = "p1", SessionName = "main", WindowName = "archyx" }] }, [new NavigationPosition("p1", "$0", "main", "@4", "archyx")]);
+        ((FrameworkElement)settingsWithFavorites.Content).Measure(new Size(620, 3000));
         Console.WriteLine("PASS WPF export, import (with conflicts) and password dialogs load");
     }
 

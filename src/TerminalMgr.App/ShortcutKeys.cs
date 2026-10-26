@@ -17,7 +17,7 @@ public static class ShortcutKeys
             Key.Delete => "Delete", Key.Insert => "Insert", Key.Home => "Home", Key.End => "End", Key.PageUp => "PageUp", Key.PageDown => "PageDown",
             Key.Up => "Up", Key.Down => "Down", Key.Left => "Left", Key.Right => "Right",
             Key.OemComma => ",", Key.OemPeriod => ".", Key.OemMinus => "-", Key.OemQuestion => "/", Key.OemSemicolon => ";",
-            Key.OemQuotes => "'", Key.OemOpenBrackets => "[", Key.OemCloseBrackets => "]", Key.OemTilde => "`", Key.OemBackslash => "\\", Key.OemPlus => "=",
+            Key.OemQuotes => "'", Key.OemOpenBrackets => "[", Key.OemCloseBrackets => "]", Key.OemTilde => "`", Key.OemPipe => "\\", Key.OemPlus => "=", Key.OemBackslash => "<",
             _ => null
         };
     }

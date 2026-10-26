@@ -13,7 +13,7 @@ public sealed record Shortcut(bool Ctrl, bool Alt, bool Shift, string Key)
         ["Home"] = "Home", ["End"] = "End", ["PageUp"] = "PageUp", ["PageDown"] = "PageDown",
         ["Up"] = "Up", ["Down"] = "Down", ["Left"] = "Left", ["Right"] = "Right",
         [","] = ",", ["."] = ".", ["-"] = "-", ["/"] = "/", [";"] = ";", ["'"] = "'", ["["] = "[", ["]"] = "]",
-        ["`"] = "`", ["\\"] = "\\", ["="] = "="
+        ["`"] = "`", ["\\"] = "\\", ["="] = "=", ["<"] = "<"
     };
 
     public static bool TryParse(string? text, out Shortcut shortcut)
@@ -64,7 +64,7 @@ public sealed record Shortcut(bool Ctrl, bool Alt, bool Shift, string Key)
         if (code.StartsWith("Numpad") && code.Length == 7 && char.IsAsciiDigit(code[6])) return code[6..];
         return code switch {
             "Comma" => ",", "Period" => ".", "Minus" => "-", "Slash" => "/", "Semicolon" => ";",
-            "Quote" => "'", "BracketLeft" => "[", "BracketRight" => "]", "Backquote" => "`", "Backslash" => "\\", "Equal" => "=",
+            "Quote" => "'", "BracketLeft" => "[", "BracketRight" => "]", "Backquote" => "`", "Backslash" => "\\", "Equal" => "=", "IntlBackslash" => "<",
             "ArrowUp" => "Up", "ArrowDown" => "Down", "ArrowLeft" => "Left", "ArrowRight" => "Right", "NumpadEnter" => "Enter",
             _ => Normalize(code)
         };

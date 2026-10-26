@@ -73,6 +73,22 @@ Gesprochener Text landet in einem Diktatfenster in der rechten Spalte unter der 
 - Drei Engines hinter einer Schnittstelle (Einstellungen › Diktat › Spracherkennung): Whisper (lokal, Vorgabe), Web Speech API in WebView2 und die Windows-Spracherkennung. Die beiden letzten laufen auf diesem System nicht (WebView2 hat keinen Spracherkennungsdienst; Windows verlangt „Onlinespracherkennung“, dann geht das Audio in die Cloud). Prüfung, Messungen und Messmodus: [docs/dictation-engines.md](docs/dictation-engines.md).
 - Einstellungen: Tastenkürzel, Spracherkennung (Engine), Mikrofon, Modell, Modell für den Zwischenstand, Sprache (Deutsch, Englisch, automatisch), Fachbegriffe für die Erkennung (Initial-Prompt), Stilledauer und Pegelschwelle.
 
+### Tastatur-Navigation durch tmux-Fenster und Server
+
+Alle Wechsel laufen über den tmux-Befehlsweg des eigenen Clients (Präfix und `:`, dann der Befehl nach einer kurzen Pause), nie als Tastendruck für das laufende Programm. Geprüft gegen echtes tmux auf einem Testserver mit einem aufzeichnenden Programm im Fenster: in 28 Wechseln kam kein Byte im Programm an.
+
+| Kürzel (Vorgabe) | Wirkung |
+|---|---|
+| Ctrl+0 … Ctrl+9 | tmux-Fenster mit diesem Index in der angezeigten tmux-Session |
+| Ctrl+Tab / Ctrl+Shift+Tab | nächstes / voriges Fenster der Session (springt am Ende herum) |
+| Ctrl+< | zurück zum zuletzt benutzten Fenster, auch auf einem anderen Server (eigener Verlauf der App; nochmal drücken wechselt wieder zurück) |
+| Alt+1 … Alt+9 | Server wechseln (wie bisher) |
+| Favoriten | eigenes Kürzel je Favorit, z. B. Ctrl+Alt+A; bei getrenntem Server wird verbunden |
+
+Einstellungen › Tastenkürzel: Modifier für 0 bis 9 (Ctrl, Alt+Shift, Ctrl+Shift), Nächstes, Voriges, Zurück und „Favoriten verwalten …“. Doppelte Belegungen und Ctrl+B (tmux-Präfix) werden abgelehnt. Hinweis: Ctrl+0 bis 9 hatten im Terminal eine seltene Altbedeutung (Ctrl+3 = Escape); wer sie braucht, nimmt Alt+Shift. Ctrl+K und die anderen Readline-Tasten erreichen die Shell weiterhin. Die Taste `<` ist auf dem deutschen Layout die Taste links neben Y; wer lieber `^` nimmt, stellt „Zurück“ auf Ctrl+` ein.
+
+Favoriten sind an Server, Session-Namen und Fenster-Namen gebunden, nicht an tmux-IDs (die ändern sich nach einem tmux-Neustart); bei gleichnamigen Fenstern gilt das erste. Fehlt das Fenster, erscheint ein Hinweis in der Statuszeile. Die Favoriten gehören zum Konfigurationsexport.
+
 ### Tastenkürzel, Wiederverbindung, Start mit Windows
 
 - **Tastenkürzel** (*Einstellungen*): Diktat (Vorgabe Ctrl+Y), Markierung kopieren (Ctrl+Shift+C), Zwischenablage einfügen (Ctrl+Shift+V) und der Modifikator für den Sessionwechsel mit 1 bis 9 (Vorgabe Alt; alternativ Ctrl+Alt, Alt+Shift, Ctrl+Shift). Die Kürzel gelten, bevor die Session die Taste sieht. Eine Kombination braucht Ctrl oder Alt (nur F1 bis F12 gehen allein). Ctrl+B bleibt für tmux reserviert, doppelte Belegungen werden beim Speichern abgelehnt. Ein Hinweis erscheint, wenn eine Kombination in bash/readline etwas bedeutet (Ctrl+Y ist „yank“).

@@ -290,3 +290,49 @@ test('Web Speech engine: errors are reported, abort ends quietly, a missing API 
   await page.evaluate(() => window.__hostMessage({type:'speech', cmd:'start'}));
   await expect.poll(async () => (await speech(page)).map(m => m.event + ':' + (m.error ?? ''))).toEqual(['error:unsupported', 'end:']);
 });
+
+// Keyboard navigation: the host sends the navigation shortcuts with the others; the page takes them before the session sees a key.
+const navigationTable = {
+  dictation:'Ctrl+Y', copy:'Ctrl+Shift+C', paste:'Ctrl+Shift+V',
+  window0:'Ctrl+0', window1:'Ctrl+1', window2:'Ctrl+2', window3:'Ctrl+3', windowNext:'Ctrl+Tab', windowPrevious:'Ctrl+Shift+Tab', windowBack:'Ctrl+<',
+  'favorite:f1':'Ctrl+Alt+A'
+};
+const shortcutActions = page => page.evaluate(() => window.__messages.filter(m => m.type === 'shortcut').map(m => m.action));
+const typedInput = page => page.evaluate(() => window.__messages.filter(m => m.type === 'input').map(m => m.data));
+
+test('Navigation shortcuts reach the host as actions and never the program', async ({page}) => {
+  await page.evaluate(table => window.__hostMessage({type:'shortcuts', shortcuts:table, sessionModifier:'Alt'}), navigationTable);
+  await page.keyboard.press('Control+2');
+  await page.keyboard.press('Control+0');
+  await page.keyboard.press('Control+Tab');
+  await page.keyboard.press('Control+Shift+Tab');
+  await page.keyboard.press('Control+Alt+A');
+  await expect.poll(() => shortcutActions(page)).toEqual(['window2', 'window0', 'windowNext', 'windowPrevious', 'favorite:f1']);
+  expect(await typedInput(page)).toEqual([]);
+});
+
+test('Ctrl+< (the ISO key next to the left Shift) is a navigation shortcut', async ({page}) => {
+  await page.evaluate(table => window.__hostMessage({type:'shortcuts', shortcuts:table, sessionModifier:'Alt'}), navigationTable);
+  await page.locator('.session.active .xterm-helper-textarea').evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', { code:'IntlBackslash', key:'<', ctrlKey:true, bubbles:true, cancelable:true })));
+  await expect.poll(() => shortcutActions(page)).toEqual(['windowBack']);
+  expect(await typedInput(page)).toEqual([]);
+});
+
+test('Ctrl+K and other readline keys still reach the shell; held keys fire once', async ({page}) => {
+  await page.evaluate(table => window.__hostMessage({type:'shortcuts', shortcuts:table, sessionModifier:'Alt'}), navigationTable);
+  await page.keyboard.press('Control+k');
+  await expect.poll(() => typedInput(page)).toEqual(['\x0b']);
+  await page.keyboard.down('Control');
+  await page.keyboard.down('2'); await page.keyboard.down('2'); await page.keyboard.down('2');
+  await page.keyboard.up('2'); await page.keyboard.up('Control');
+  await expect.poll(() => shortcutActions(page)).toEqual(['window2']);
+});
+
+test('A changed shortcut table replaces the old one', async ({page}) => {
+  await page.evaluate(table => window.__hostMessage({type:'shortcuts', shortcuts:table, sessionModifier:'Alt'}), { ...navigationTable, window2:'Alt+Shift+2' });
+  await page.keyboard.press('Control+2');
+  await page.waitForTimeout(150); // Ctrl+2 is no shortcut any more: the host hears nothing
+  expect(await shortcutActions(page)).toEqual([]);
+  await page.keyboard.press('Alt+Shift+2');
+  await expect.poll(() => shortcutActions(page)).toEqual(['window2']);
+});

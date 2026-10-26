@@ -167,7 +167,9 @@ public partial class MainWindow : Window
                     PasteSystemClipboard(id);
                     break;
                 case "shortcut":
-                    if (m.GetProperty("action").GetString() == "dictation") ToggleDictation();
+                    if (m.GetProperty("action").GetString() is not { } shortcutAction) break;
+                    if (shortcutAction == "dictation") ToggleDictation();
+                    else RunNavigationAction(shortcutAction);
                     break;
                 case "osc52":
                     // A program (or tmux for Claude Code / copy-mode) asked to set the clipboard: same path as a right-click copy.
@@ -459,6 +461,7 @@ public partial class MainWindow : Window
                 if (!_sessions.ContainsKey(id)) return;
             }
             _tmuxLabel[id] = $"tmux: {window.SessionName} / {window.Name}";
+            _history.Visit(new(id, window.SessionId, window.SessionName, window.WindowId, window.Name));
             SessionTitle.Text = TitleFor(item);
             Post(new { type = "focus", id });
         }
@@ -561,6 +564,7 @@ public partial class MainWindow : Window
             Post(new { type = "remove", id = item.Profile.Id });
             _terminals.Remove(item.Profile.Id);
             _profiles.Remove(item);
+            _history.Forget(p => p.ProfileId == item.Profile.Id);
         }
         else if (dialog.Result is { } profile)
         {
@@ -706,7 +710,7 @@ public partial class MainWindow : Window
     }
     private void OpenSettings(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(_settings) { Owner = this };
+        var dialog = new SettingsDialog(_settings, RecentWindows) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
         _settings = result;
         _clipList.MaxUnpinned = result.ClipHistoryLimit;
@@ -772,6 +776,12 @@ public partial class MainWindow : Window
         if (Shortcut.TryParse(DictationSettings.Shortcut, out var dictation) && pressed == dictation)
         {
             if (!e.IsRepeat) ToggleDictation();
+            e.Handled = true;
+            return;
+        }
+        if (NavigationActionFor(pressed) is { } navigation)
+        {
+            if (!e.IsRepeat) RunNavigationAction(navigation);
             e.Handled = true;
             return;
         }
