@@ -1,5 +1,22 @@
 <Window x:Class="TerminalMgr.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:wv="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
  Background="{DynamicResource BgBrush}" Foreground="{DynamicResource TextBrush}" Icon="Assets/TerminalMgr.ico" Title="TerminalMgr" Width="1480" Height="940" MinWidth="880" MinHeight="540" Loaded="WindowLoaded" SourceInitialized="WindowSourceInitialized" Closing="WindowClosing" PreviewKeyDown="WindowKeyDown">
+ <Window.Resources>
+  <Style x:Key="ClipActionButton" TargetType="Button" BasedOn="{StaticResource FlatButton}">
+   <Setter Property="Width" Value="26"/><Setter Property="Height" Value="26"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0"/>
+  </Style>
+  <Style x:Key="ClipPinFilter" TargetType="ToggleButton">
+   <Setter Property="Width" Value="30"/><Setter Property="Height" Value="30"/><Setter Property="Margin" Value="6,0,0,0"/>
+   <Setter Property="Foreground" Value="{DynamicResource Text2Brush}"/><Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
+    <Border x:Name="Filter" CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource LineStrongBrush}" Background="Transparent"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Filter" Property="Background" Value="{DynamicResource AccentTintBrush}"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Filter" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Filter" Property="Background" Value="{DynamicResource RaisedBrush}"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Filter" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+ </Window.Resources>
  <Grid>
   <!-- Direction C "Commander": icon bar | server panel (opens from the bar) | session tabs + terminal | right column with clipboard and dictation. -->
   <Grid.ColumnDefinitions>
@@ -91,7 +108,7 @@
         <Setter Property="Padding" Value="16,0"/><Setter Property="Margin" Value="0"/><Setter Property="Height" Value="43"/>
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
          <Border x:Name="Tab" Background="Transparent" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0" Padding="{TemplateBinding Padding}">
-          <Grid>
+     <Grid>
            <Rectangle x:Name="Top" Height="2" VerticalAlignment="Top" Fill="Transparent" Margin="-16,0"/>
            <ContentPresenter VerticalAlignment="Center"/>
           </Grid>
@@ -139,15 +156,26 @@
 
   <!-- Right column: clipboard, dictation below -->
   <DockPanel x:Name="ClipboardPanel" Grid.Column="5" Background="{DynamicResource BarBrush}">
-   <StackPanel DockPanel.Dock="Top" Margin="16,14,16,6">
-    <DockPanel>
-     <Button DockPanel.Dock="Right" Content="Leeren" Click="ClearClipboardHistory" Style="{StaticResource FlatButton}" ToolTip="Ungeheftete Einträge entfernen"/>
-     <TextBlock Text="CLIPBOARD" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center"/>
-     <TextBlock x:Name="ClipCount" Text="0" FontSize="12" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+   <StackPanel x:Name="ClipboardHeader" DockPanel.Dock="Top" Margin="12,10,12,6">
+    <DockPanel LastChildFill="True">
+     <Button DockPanel.Dock="Right" Content="⋯" Click="ClipboardHistoryMenu" Style="{StaticResource ClipActionButton}" ToolTip="Clipboard-Aktionen" AutomationProperties.Name="Clipboard-Aktionen"/>
+     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+      <TextBlock Text="CLIPBOARD" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Text2Brush}"/>
+      <TextBlock x:Name="ClipCount" Text="0" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="8,1,0,0"/>
+     </StackPanel>
     </DockPanel>
-    <TextBox x:Name="ClipSearch" TextChanged="FilterClips" ToolTip="Einträge durchsuchen" Margin="0,8,0,4" AutomationProperties.Name="Clipboard durchsuchen"/>
-    <CheckBox x:Name="PinnedOnly" Content="Nur angeheftete Einträge" Checked="FilterClips" Unchecked="FilterClips" Margin="0,2,0,2"/>
-    <TextBlock Text="Klick: aktiv · Doppelklick: einfügen · Rechtsklick im Terminal: kopieren bzw. aktiven Eintrag einfügen" Foreground="{DynamicResource Text2Brush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+    <DockPanel Margin="0,6,0,0">
+     <ToggleButton x:Name="PinnedOnly" DockPanel.Dock="Right" Style="{StaticResource ClipPinFilter}" Checked="FilterClips" Unchecked="FilterClips" ToolTip="Nur angeheftete Einträge" AutomationProperties.Name="Nur angeheftete Einträge">
+      <Path Data="M9,3 H15 M10,3 V9 L7,13 V15 H17 V13 L14,9 V3 M12,15 V21" Style="{StaticResource IconPath}" Width="15" Height="15"/>
+     </ToggleButton>
+     <Grid>
+      <TextBox x:Name="ClipSearch" TextChanged="FilterClips" Margin="0" Height="30" Padding="8,5" ToolTip="Text oder Herkunft durchsuchen" AutomationProperties.Name="Clipboard durchsuchen"/>
+      <TextBlock Text="Durchsuchen …" Margin="9,0" VerticalAlignment="Center" Foreground="{DynamicResource Text2Brush}" IsHitTestVisible="False">
+       <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=ClipSearch}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+      </TextBlock>
+     </Grid>
+    </DockPanel>
+    <TextBlock Text="Doppelklick zum Einfügen" Foreground="{DynamicResource Text2Brush}" FontSize="10" Margin="1,6,0,0" ToolTip="Klick: aktiv / Volltext · Doppelklick: einfügen · Rechtsklick: Aktionen · Ziehen: ins Terminal übernehmen"/>
    </StackPanel>
    <!-- Dictation under the list: at most a third of the window (MainWindow.Dictation.cs), the text scrolls to the newest words. -->
    <Border x:Name="DictationPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="14,10">
@@ -185,25 +213,34 @@
      <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="0"/></Style>
     </ListBox.ItemContainerStyle>
     <ListBox.ItemTemplate><DataTemplate>
-     <Border x:Name="Card" Background="Transparent" Padding="16,10" PreviewMouseLeftButtonDown="ClipPressed" MouseMove="DragClip" MouseEnter="ClipEnter" MouseLeave="ClipLeave">
-      <StackPanel>
-       <DockPanel>
-        <TextBlock Text="{Binding Time}" Foreground="{DynamicResource Text2Brush}" FontSize="11" DockPanel.Dock="Right"/>
-        <TextBlock x:Name="Active" Text="● AKTIV" Foreground="{DynamicResource AccentBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,8,0" Visibility="Collapsed" DockPanel.Dock="Right"/>
-        <TextBlock Text="{Binding Source}" Foreground="{DynamicResource Text2Brush}" FontSize="11"/>
-       </DockPanel>
-       <StackPanel Visibility="{Binding CollapsedVisibility}">
-        <TextBlock Text="{Binding Line1}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,6,0,0"/>
+     <Border x:Name="Card" Background="Transparent" BorderThickness="2,0,0,0" BorderBrush="Transparent" Padding="10,8,12,8" PreviewMouseLeftButtonDown="ClipPressed" MouseMove="DragClip" MouseEnter="ClipEnter" MouseLeave="ClipLeave" ContextMenuOpening="ClipContextMenuOpening">
+      <Border.ContextMenu><ContextMenu/></Border.ContextMenu>
+      <Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <StackPanel Visibility="{Binding CollapsedVisibility}" Margin="0,0,24,0">
+        <TextBlock Text="{Binding Line1}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
         <TextBlock Text="{Binding Line2}" Visibility="{Binding Line2Visibility}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-        <TextBlock Text="{Binding LengthLabel}" Visibility="{Binding LengthVisibility}" Foreground="{DynamicResource Text2Brush}" FontSize="11" Margin="0,4,0,0"/>
        </StackPanel>
-       <!-- Unfolded: the full text, about 15 lines, scrollable inside the entry; selectable and copyable. -->
-       <TextBox Text="{Binding FullText, Mode=OneWay}" Visibility="{Binding ExpandedVisibility}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="12" Padding="0" Margin="0,6,0,0" MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
-       <WrapPanel Margin="0,6,0,0"><Button Content="Einfügen" Click="PasteClip" Tag="{Binding}" Padding="10,4" Margin="0,0,6,0"/><Button Content="{Binding PinLabel}" Click="PinClip" Tag="{Binding}" Padding="10,4" Margin="0,0,6,0"/><Button Content="×" Click="RemoveClip" Tag="{Binding}" ToolTip="Eintrag entfernen" Padding="10,4" Margin="0"/></WrapPanel>
-      </StackPanel>
+       <TextBox Text="{Binding FullText, Mode=OneWay}" Visibility="{Binding ExpandedVisibility}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="12" Padding="0" Margin="0,0,24,0" MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
+       <Button x:Name="ClipActions" Content="⋯" Click="ClipMenuClick" Tag="{Binding}" Style="{StaticResource ClipActionButton}" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,-3,-4,0" Opacity="0" IsHitTestVisible="False" ToolTip="Einfügen, kopieren, anheften …" AutomationProperties.Name="Eintragsaktionen"/>
+       <Grid Grid.Row="1" Margin="0,5,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Path Visibility="{Binding PinnedVisibility}" Data="M9,3 H15 M10,3 V9 L7,13 V15 H17 V13 L14,9 V3 M12,15 V21" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.5" Stretch="Uniform" Width="10" Height="12" Margin="0,0,6,0" ToolTip="Angeheftet"/>
+        <TextBlock Grid.Column="1" Text="{Binding Source}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Text2Brush}" FontSize="10" ToolTip="{Binding Source}"/>
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+         <TextBlock Text="{Binding LengthLabel}" Visibility="{Binding LengthVisibility}" Foreground="{DynamicResource Text2Brush}" FontSize="10" Margin="6,0,8,0"/>
+         <TextBlock Text="{Binding Time}" Foreground="{DynamicResource Text2Brush}" FontSize="10"/>
+        </StackPanel>
+       </Grid>
+       <!-- Visible frame while the pointer is over the entry; the active entry keeps its accent strip and tint, so the two stay apart. -->
+       <Border x:Name="HoverFrame" Grid.RowSpan="2" Margin="-9,-7,-11,-7" BorderThickness="1" CornerRadius="3" BorderBrush="Transparent" IsHitTestVisible="False"/>
+      </Grid>
      </Border>
      <DataTemplate.Triggers>
-      <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="Active" Property="Visibility" Value="Visible"/></DataTrigger>
+      <Trigger SourceName="Card" Property="IsMouseOver" Value="True"><Setter TargetName="HoverFrame" Property="BorderBrush" Value="{DynamicResource Text2Brush}"/></Trigger>
+      <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+      <Trigger SourceName="Card" Property="IsMouseOver" Value="True"><Setter TargetName="ClipActions" Property="Opacity" Value="1"/><Setter TargetName="ClipActions" Property="IsHitTestVisible" Value="True"/></Trigger>
+      <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="ClipActions" Property="Opacity" Value="1"/><Setter TargetName="ClipActions" Property="IsHitTestVisible" Value="True"/></DataTrigger>
      </DataTemplate.Triggers>
     </DataTemplate></ListBox.ItemTemplate>
    </ListBox>

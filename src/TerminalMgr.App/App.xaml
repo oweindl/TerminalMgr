@@ -65,6 +65,34 @@
           </ControlTemplate.Triggers>
         </ControlTemplate></Setter.Value></Setter>
       </Style>
+      <!-- Clipboard menus: the row stays compact; actions share the application's colors. -->
+      <Style x:Key="ClipboardContextMenu" TargetType="ContextMenu">
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource LineStrongBrush}"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu">
+          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="4"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/></Border>
+        </ControlTemplate></Setter.Value></Setter>
+        <Style.Resources>
+          <Style TargetType="Separator"><Setter Property="Margin" Value="7,4"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource LineBrush}"/></ControlTemplate></Setter.Value></Setter></Style>
+          <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+              <Border x:Name="Row" CornerRadius="5" Padding="{TemplateBinding Padding}" Background="Transparent">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+                  <TextBlock Grid.Column="1" Text="{TemplateBinding InputGestureText}" Foreground="{DynamicResource Text2Brush}" FontSize="11" Margin="20,0,0,0" VerticalAlignment="Center"/>
+                </Grid>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource AccentTintBrush}"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Row" Property="Opacity" Value="0.4"/></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+          </Style>
+        </Style.Resources>
+      </Style>
       <!-- Small flat button in the tab strip (font size, focus mode). -->
       <Style x:Key="FlatButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource Text2Brush}"/><Setter Property="Margin" Value="1,0"/><Setter Property="Padding" Value="8,5"/><Setter Property="Cursor" Value="Hand"/>

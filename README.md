@@ -87,6 +87,8 @@ Maus wie bei PuTTY:
 
 Clipboard-Liste (rechts, neueste oben):
 
+Kompakte Textzeilen ohne dauerhafte Buttonleiste. Herkunft, Zeit und Textlänge stehen gemeinsam unter der Vorschau; die aktive Zeile hat eine schmale Akzentkante. Rechtsklick oder „⋯“ beim Überfahren / Tastaturfokus öffnet Einfügen, Kopieren, Volltext, Anheften und Entfernen. Der Pin neben der Suche filtert angeheftete Einträge; das Kopfmenü enthält „Ungeheftete Einträge entfernen“.
+
 - Alles, was in Sessions markiert oder in einem anderen Programm kopiert wird, landet automatisch oben und ist aktiv. Die Herkunft ist der Sessionname oder „Windows“. Einträge von Passwortmanagern (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` = 0) werden nicht übernommen.
 - Erneut kopierter Text erzeugt kein Duplikat, sondern rückt nach oben.
 - Klick macht einen Eintrag aktiv (der nächste Rechtsklick fügt ihn ein), Doppelklick fügt ihn sofort in die aktive Session ein. Die Vorschau zeigt zwei Zeilen; längere Texte enden mit „…“ und zeigen z. B. „42 Zeilen“. **Volltext gekürzter Einträge:** Bleibt der Mauszeiger etwa 0,4 s auf einem gekürzten Eintrag, erscheint links davon ein Popup mit dem ganzen Text in Monospace (Zeilenumbrüche erhalten, höchstens 60 % der Fensterhöhe und die Breite des Terminalbereichs, scrollbar); es bleibt offen, solange der Zeiger über Eintrag oder Popup ist. Ein Klick macht den Eintrag wie bisher aktiv und klappt ihn zusätzlich in der Liste auf (rund 15 Zeilen, darüber scrollbar); ein weiterer Klick oder ein anderer Eintrag klappt ihn wieder zu, es ist höchstens einer aufgeklappt. Der Text im Popup und im aufgeklappten Eintrag lässt sich markieren und mit Ctrl+C kopieren. Vollständig angezeigte Einträge haben kein Popup.

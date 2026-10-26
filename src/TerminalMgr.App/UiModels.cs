@@ -61,5 +61,6 @@ public sealed class ClipItem : INotifyPropertyChanged
     public Visibility Line2Visibility => _preview.Line2 is null ? Visibility.Collapsed : Visibility.Visible;
     public string LengthLabel => _preview.LengthLabel;
     public Visibility LengthVisibility => _preview.LengthLabel.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility PinnedVisibility => Entry.Pinned ? Visibility.Visible : Visibility.Collapsed;
     public string PinLabel => Entry.Pinned ? "Lösen" : "Anheften";
 }
