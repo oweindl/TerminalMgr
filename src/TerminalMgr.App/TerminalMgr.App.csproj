@@ -17,11 +17,17 @@
     <Resource Include="Assets/TerminalMgr.png" />
     <Content Include="Terminal/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-  <!-- Whisper.net ships native libraries for every platform. Only Windows x64 (CPU and Vulkan) is ever loaded. -->
+  <!-- Whisper.net ships native libraries for every platform. Only those of the package's own Windows architecture are kept:
+       x64 with CPU and Vulkan, arm64 and x86 with CPU only (there is no Vulkan build for them). -->
+  <PropertyGroup>
+    <KeepNative Condition="'$(RuntimeIdentifier)' == 'win-arm64'">win-arm64</KeepNative>
+    <KeepNative Condition="'$(RuntimeIdentifier)' == 'win-x86'">win-x86</KeepNative>
+    <KeepNative Condition="'$(KeepNative)' == ''">win-x64|vulkan[\\/]win-x64</KeepNative>
+  </PropertyGroup>
   <Target Name="PruneForeignNativeRuntimes" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
       <ForeignRuntimeFile Include="@(ResolvedFileToPublish)"
-        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\\/](?!(win-x64|vulkan[\\/]win-x64)[\\/])'))" />
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\\/](?!($(KeepNative))[\\/])'))" />
       <ResolvedFileToPublish Remove="@(ForeignRuntimeFile)" />
     </ItemGroup>
   </Target>

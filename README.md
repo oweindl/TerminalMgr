@@ -18,6 +18,42 @@ Windows-Arbeitsplatz für mehrere SSH-Verbindungen mit tmux, schnellem Session-W
 - Clipboard mit Herkunft, Suche, Anheften, gezieltem Einfügen und Drag-and-drop.
 - Gewähltes Icon: Vorschlag 3 „Sessions“, in sieben Auflösungen von 16 bis 256 Pixeln.
 
+## Installation für Einsteiger
+
+TerminalMgr läuft unter Windows 10 und 11 und braucht keine Installation von .NET. Zwei Dinge müssen vorhanden sein, beide sind bei Windows 11 meist schon da: der **OpenSSH-Client** und die **Microsoft Edge WebView2 Runtime**.
+
+**1. Die richtige Datei wählen.** Auf der Seite [Releases](https://github.com/oweindl/TerminalMgr/releases/latest) stehen drei Pakete:
+
+| Ihr PC | Datei |
+|---|---|
+| Fast alle Windows-PCs (Intel oder AMD, 64 Bit) | `TerminalMgr-win-x64-<Version>.zip` |
+| PCs mit Snapdragon- oder anderem ARM-Prozessor (z. B. Surface Pro 11, Copilot+ PCs) | `TerminalMgr-win-arm64-<Version>.zip` |
+| Sehr alte 32-Bit-Windows-PCs | `TerminalMgr-win-x86-<Version>.zip` |
+
+Nicht sicher? **Windows-Einstellungen › System › Info › „Systemtyp“** zeigt es an („64-Bit-Betriebssystem, x64-basierter Prozessor“ → x64; „ARM-basierter Prozessor“ → arm64). Im Zweifel die x64-Datei nehmen.
+
+**2. Herunterladen und entpacken.** Die ZIP-Datei laden, mit der rechten Maustaste anklicken und **„Alle extrahieren …“** wählen.
+
+**3. In den richtigen Ordner legen.** Windows-Taste + R drücken, `%LOCALAPPDATA%\Programs` eingeben, Enter. Dort einen Ordner `TerminalMgr` anlegen und den **Inhalt** des entpackten Ordners hineinkopieren, sodass `TerminalMgr.App.exe` direkt in `...\Programs\TerminalMgr` liegt. In diesem Ordner kann sich TerminalMgr später selbst aktualisieren.
+
+**4. Verknüpfung anlegen.** Rechtsklick auf `TerminalMgr.App.exe` › **Senden an › Desktop (Verknüpfung erstellen)**.
+
+**5. Starten.** Beim ersten Start warnt Windows möglicherweise („Der Computer wurde durch Windows geschützt“), weil die Datei nicht signiert ist: **„Weitere Informationen“ › „Trotzdem ausführen“**. Danach SSH-Profile über **Import** (liest Ihre `~/.ssh/config`) oder **+ Profil** anlegen.
+
+**Es geht auch mit einem Befehl.** In einer PowerShell (Startmenü › „PowerShell“) einfügen und Enter drücken; das Skript erkennt den Prozessor, lädt das passende Paket, prüft die Prüfsumme und legt die Verknüpfungen an:
+
+```powershell
+irm https://raw.githubusercontent.com/oweindl/TerminalMgr/main/scripts/Install-TerminalMgr.ps1 -OutFile $env:TEMP\Install-TerminalMgr.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\Install-TerminalMgr.ps1 -Start
+```
+
+**Falls etwas fehlt:**
+- *OpenSSH-Client:* Einstellungen › System › Optionale Features › „Funktion hinzufügen“ › „OpenSSH-Client“.
+- *WebView2 Runtime:* [Download bei Microsoft](https://go.microsoft.com/fwlink/p/?LinkId=2124703) (Windows 11 hat sie schon).
+
+**Aktualisieren.** TerminalMgr sucht beim Start selbst nach einer neueren Version, fragt nach und lädt das Paket **für den eigenen Prozessor** herunter (die Prüfsumme wird kontrolliert, bei einem Fehler bleibt die alte Version erhalten). Einstellungen, angeheftete Clipboard-Einträge und Sprachmodelle liegen in `%LOCALAPPDATA%\TerminalMgr` und bleiben bei jeder Installation und jedem Update erhalten.
+
+**Hinweis zum Diktat auf ARM-PCs und 32-Bit:** Die Spracherkennung läuft dort auf dem Prozessor; die Grafikkarten-Beschleunigung (Vulkan) gibt es nur im x64-Paket. Das Diktat ist dort deutlich langsamer.
+
 ## Starten
 
 Windows 10 1809 oder neuer / Windows 11, Windows OpenSSH-Client und Microsoft Edge WebView2 Runtime werden benötigt.
@@ -176,9 +212,11 @@ Schalter: `-Force` (nicht nachfragen, eine nicht reagierende App beenden), `-Ski
 
 Beim Start fragt TerminalMgr anonym die öffentliche GitHub-Release-Liste ab (`/repos/oweindl/TerminalMgr/releases/latest`, Zeitlimit 5 s). Ohne Netz, ohne Release oder bei einem privaten Repository startet die App unverändert weiter, nur die Statuszeile meldet es. Gibt es eine neuere Version, fragt ein Dialog mit den Release-Notes: **Jetzt aktualisieren**, **Später** (fragt beim nächsten Start wieder) oder **Diese Version überspringen**. Die Prüfung läuft vor den Auto-Verbindungen; wartet der Dialog, starten sie erst danach.
 
-„Jetzt aktualisieren“ lädt `TerminalMgr-win-x64-<version>.zip` und die `.sha256`-Datei (nur von GitHub-Adressen, mit Fortschrittsanzeige), prüft die Prüfsumme und entpackt nach `%LOCALAPPDATA%\TerminalMgr\update\<version>`. Dann kopiert die App den kleinen Updater (`TerminalMgr.Updater.exe`, .NET Framework 4.8, auf jedem Windows 10/11 vorhanden) in den Temp-Ordner, startet ihn und beendet sich. Der Updater wartet auf das Ende der App, benennt den Installationsordner in `TerminalMgr.old` um, setzt die neue Version ein, startet sie und löscht die Sicherung erst, wenn ihr Fenster erschienen ist und sie noch läuft. Sonst spielt er die Sicherung zurück und startet die alte Version wieder; das Protokoll steht in `%LOCALAPPDATA%\TerminalMgr\update\updater.log`. Falsche Prüfsumme, abgebrochener oder unvollständiger Download lassen die installierte Version unverändert. Einstellungen, angeheftete Einträge und Modelle liegen außerhalb des Installationsordners und bleiben erhalten; Desktop- und Startmenü-Verknüpfung bleiben gültig.
+„Jetzt aktualisieren“ lädt das Paket **für den eigenen Prozessor** (`TerminalMgr-win-x64-<version>.zip`, `-arm64-` oder `-x86-`, gewählt nach der Architektur des laufenden Programms) und die `.sha256`-Datei (nur von GitHub-Adressen, mit Fortschrittsanzeige), prüft die Prüfsumme und entpackt nach `%LOCALAPPDATA%\TerminalMgr\update\<version>`. Dann kopiert die App den kleinen Updater (`TerminalMgr.Updater.exe`, .NET Framework 4.8, auf jedem Windows 10/11 vorhanden) in den Temp-Ordner, startet ihn und beendet sich. Der Updater wartet auf das Ende der App, benennt den Installationsordner in `TerminalMgr.old` um, setzt die neue Version ein, startet sie und löscht die Sicherung erst, wenn ihr Fenster erschienen ist und sie noch läuft. Sonst spielt er die Sicherung zurück und startet die alte Version wieder; das Protokoll steht in `%LOCALAPPDATA%\TerminalMgr\update\updater.log`. Falsche Prüfsumme, abgebrochener oder unvollständiger Download lassen die installierte Version unverändert. Einstellungen, angeheftete Einträge und Modelle liegen außerhalb des Installationsordners und bleiben erhalten; Desktop- und Startmenü-Verknüpfung bleiben gültig.
 
 Ausgetauscht wird nur die installierte Kopie unter `%LOCALAPPDATA%\Programs\TerminalMgr`; ein Entwicklungs-Build zeigt nur einen Hinweis. Unter *Einstellungen*: Prüfung beim Start ein/aus (Vorgabe ein), „Jetzt nach Updates suchen“, übersprungene Version zurücksetzen. Der Updater-Ablauf lässt sich mit `scripts\Test-UpdateFlow.ps1` real prüfen (alte Version, lokales Release, Dialog per UI-Automatisierung; Erfolg, kaputtes Paket mit Rückfall, falsche Prüfsumme). Für Tests leiten `TERMINALMGR_INSTALL_DIR`, `TERMINALMGR_DATA_DIR` und `TERMINALMGR_UPDATE_URL` Installationsordner, Datenordner und Update-Adresse um.
+
+Jedes Release enthält drei Pakete (x64, arm64, x86), jedes mit eigener Prüfsumme; hat ein Release für den eigenen Prozessor kein Paket (ältere Releases gibt es nur für x64), meldet die App das mit den vorhandenen Paketen und ändert nichts. Die Natives der Spracherkennung werden je Paket passend mitgeliefert (x64 mit Vulkan, arm64 und x86 nur CPU).
 
 ### Version und Release
 

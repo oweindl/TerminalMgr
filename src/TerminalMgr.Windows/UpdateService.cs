@@ -46,7 +46,7 @@ public sealed class UpdateService : IDisposable
             if (!response.IsSuccessStatusCode) return new(null, $"Update-Prüfung nicht möglich (HTTP {(int)response.StatusCode}).");
             string json = await response.Content.ReadAsStringAsync(limit.Token);
             var release = UpdateInfo.ParseLatestRelease(json, url => UpdateInfo.IsAllowedDownload(url, _allowLoopback));
-            return release is null ? new(null, "Das neueste Release enthält keine verwendbare Installationsdatei.") : new(release, null);
+            return release is null ? new(null, UpdateInfo.MissingArchitectureMessage(json) ?? "Das neueste Release enthält keine verwendbare Installationsdatei.") : new(release, null);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(null, "Update-Prüfung nicht möglich (Zeitüberschreitung)."); }
         catch (HttpRequestException) { return new(null, "Update-Prüfung nicht möglich (keine Verbindung)."); }
@@ -75,7 +75,7 @@ public sealed class UpdateService : IDisposable
             string extract = Path.Combine(work, "extract");
             await Task.Run(() => ZipFile.ExtractToDirectory(zip, extract), cancellationToken);
             string app = Path.Combine(work, "app");
-            // The release zip holds one folder (TerminalMgr-win-x64); a zip with the files at its root works as well.
+            // The release zip holds one folder (TerminalMgr-win-<architecture>); a zip with the files at its root works as well.
             var folders = Directory.GetDirectories(extract);
             string source = File.Exists(Path.Combine(extract, "TerminalMgr.App.exe")) ? extract
                 : folders.Length == 1 && File.Exists(Path.Combine(folders[0], "TerminalMgr.App.exe")) ? folders[0]

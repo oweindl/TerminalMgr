@@ -49,7 +49,12 @@ jobs:
         working-directory: web
       - name: Publish (branches and pull requests, only to prove that it works)
         if: github.ref != 'refs/heads/main' || github.event_name != 'push'
-        run: dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true -o artifacts/TerminalMgr-win-x64
+        shell: pwsh
+        run: |
+          foreach ($arch in 'x64', 'arm64', 'x86') {
+            dotnet publish src/TerminalMgr.App -c Release -r "win-$arch" --self-contained true -o "artifacts/TerminalMgr-win-$arch"
+            if ($LASTEXITCODE -ne 0) { throw "dotnet publish für $arch ist fehlgeschlagen." }
+          }
       - name: Release (push to main only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: pwsh
@@ -65,23 +70,41 @@ jobs:
           if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag existiert schon (erneuter Lauf); nichts zu tun."; $global:LASTEXITCODE = 0; return }
           $global:LASTEXITCODE = 0
 
-          $out = 'artifacts/TerminalMgr-win-x64'
-          dotnet publish src/TerminalMgr.App -c Release -r win-x64 --self-contained true "-p:Version=$version" -o $out
-          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish ist fehlgeschlagen.' }
-          $zip = "artifacts/TerminalMgr-win-x64-$version.zip"
-          Compress-Archive -Path $out -DestinationPath $zip -CompressionLevel Optimal
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+          # One package per processor architecture, each with its own checksum file. The updater picks the one that matches the running program.
+          $assets = @()
+          foreach ($arch in 'x64', 'arm64', 'x86') {
+            $out = "artifacts/TerminalMgr-win-$arch"
+            dotnet publish src/TerminalMgr.App -c Release -r "win-$arch" --self-contained true "-p:Version=$version" -o $out
+            if ($LASTEXITCODE -ne 0) { throw "dotnet publish für $arch ist fehlgeschlagen." }
+            $zip = "artifacts/TerminalMgr-win-$arch-$version.zip"
+            Compress-Archive -Path $out -DestinationPath $zip -CompressionLevel Optimal
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+            $assets += $zip, "$zip.sha256"
+          }
 
           # Notes: the commit subjects since the previous release.
           $previous = (gh release list --limit 1 --json tagName --jq '.[0].tagName') 2>$null
           $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
           $commits = @(git log $range --no-merges --pretty=format:'- %s')
-          $notes = @("## TerminalMgr $version", '', 'Änderungen:', '') + $commits + @('', "Entpacken und TerminalMgr.App.exe starten. Eine .NET-Installation ist nicht nötig; benötigt werden Windows OpenSSH und die Microsoft Edge WebView2 Runtime. Die Prüfsumme steht in der Datei .sha256.")
+          $download = @(
+            '### Welche Datei brauche ich?',
+            '',
+            '| Ihr PC | Datei |',
+            '|---|---|',
+            "| Fast alle Windows-PCs (Intel oder AMD, 64 Bit) | ``TerminalMgr-win-x64-$version.zip`` |",
+            "| PCs mit Snapdragon- oder anderem ARM-Prozessor (z. B. Surface Pro 11, Copilot+ PCs) | ``TerminalMgr-win-arm64-$version.zip`` |",
+            "| Sehr alte 32-Bit-Windows-PCs | ``TerminalMgr-win-x86-$version.zip`` |",
+            '',
+            'Nicht sicher? Windows-Einstellungen › System › Info › „Systemtyp“ zeigt es an. Im Zweifel die x64-Datei nehmen.',
+            '',
+            '**Installieren in fünf Schritten:** [Anleitung für Einsteiger](https://github.com/oweindl/TerminalMgr#installation-für-einsteiger). Eine .NET-Installation ist nicht nötig; benötigt werden Windows OpenSSH und die Microsoft Edge WebView2 Runtime. Die Prüfsumme steht in der Datei .sha256 neben jedem Paket. Die App sucht beim Start selbst nach neuen Versionen und lädt das Paket für den eigenen Prozessor.',
+            '')
+          $notes = @("## TerminalMgr $version", '') + $download + @('### Änderungen', '') + $commits
           $notes | Set-Content notes.md -Encoding utf8
           $global:LASTEXITCODE = 0
 
-          gh release create $tag $zip "$zip.sha256" --title "TerminalMgr $version" --notes-file notes.md --target ${{ github.sha }}
+          gh release create $tag @assets --title "TerminalMgr $version" --notes-file notes.md --target ${{ github.sha }}
           if ($LASTEXITCODE -ne 0) { throw 'Das Release konnte nicht angelegt werden.' }
       - uses: actions/upload-artifact@v4
         if: github.ref != 'refs/heads/main' || github.event_name != 'push'

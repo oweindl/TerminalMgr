@@ -823,10 +823,42 @@ try
             Check(!UpdateInfo.TryParseVersion(bad, out _), "Accepted '" + bad + "'");
         Check(UpdateInfo.IsNewer(new Version(0, 2, 9), new Version(0, 2, 10)) && !UpdateInfo.IsNewer(new Version(0, 2, 10), new Version(0, 2, 10)) && !UpdateInfo.IsNewer(new Version(0, 3, 0), new Version(0, 2, 99)), "Ordering");
     });
+    string MultiArchJson(string tag, params string[] architectures)
+    {
+        string ver = tag.TrimStart('v');
+        var assets = architectures.SelectMany(a => new[] { $"TerminalMgr-win-{a}-{ver}.zip", $"TerminalMgr-win-{a}-{ver}.zip.sha256" })
+            .Select(n => $"{{\"name\":\"{n}\",\"size\":1000,\"browser_download_url\":\"https://github.com/oweindl/TerminalMgr/releases/download/{tag}/{n}\"}}");
+        return $"{{\"tag_name\":\"{tag}\",\"draft\":false,\"prerelease\":false,\"body\":\"x\",\"assets\":[{string.Join(",", assets)}]}}";
+    }
+    Test("Update: a release with one package per processor architecture gives each program its own package", () =>
+    {
+        bool Allowed(Uri u) => UpdateInfo.IsAllowedDownload(u);
+        string json = MultiArchJson("v0.2.40", "x64", "arm64", "x86");
+        foreach (string arch in UpdateInfo.Architectures)
+        {
+            var release = UpdateInfo.ParseLatestRelease(json, Allowed, arch);
+            Check(release is not null && release.ZipName == $"TerminalMgr-win-{arch}-0.2.40.zip" && release.ZipUrl.AbsolutePath.EndsWith($"TerminalMgr-win-{arch}-0.2.40.zip") && release.ChecksumUrl.AbsolutePath.EndsWith($"win-{arch}-0.2.40.zip.sha256"), "Package for " + arch);
+            Check(UpdateInfo.MissingArchitectureMessage(json, arch) is null, "Nothing is missing for " + arch);
+        }
+        Check(UpdateInfo.FileName(new Version(0, 2, 40), "arm64") == "TerminalMgr-win-arm64-0.2.40.zip" && UpdateInfo.Architectures.SequenceEqual(["x64", "arm64", "x86"]), "File names");
+        Check(UpdateInfo.Architectures.Contains(UpdateInfo.CurrentArchitecture) && UpdateInfo.FileName(new Version(1, 0, 0)).Contains($"win-{UpdateInfo.CurrentArchitecture}-"), "The running program knows its own architecture: " + UpdateInfo.CurrentArchitecture);
+    });
+    Test("Update: an older release that only has the x64 package is fine for x64 and explained for the other processors", () =>
+    {
+        bool Allowed(Uri u) => UpdateInfo.IsAllowedDownload(u);
+        string old = MultiArchJson("v0.2.31", "x64");
+        Check(UpdateInfo.ParseLatestRelease(old, Allowed, "x64") is not null, "x64 still works with an old release");
+        Check(UpdateInfo.ParseLatestRelease(old, Allowed, "arm64") is null, "No arm64 package, nothing to install");
+        string message = UpdateInfo.MissingArchitectureMessage(old, "arm64") ?? "";
+        Check(message.Contains("arm64") && message.Contains("x64") && message.Contains("kein Paket"), "Message: " + message);
+        Check(UpdateInfo.MissingArchitectureMessage(MultiArchJson("v0.2.31"), "arm64") is null && UpdateInfo.MissingArchitectureMessage("not json", "x64") is null, "No message when nothing else exists or the JSON is junk");
+        // A package of another architecture is never taken by mistake (different name, same version).
+        Check(UpdateInfo.ParseLatestRelease(MultiArchJson("v0.2.40", "arm64", "x86"), Allowed, "x64") is null, "x64 must not take the arm64 or x86 package");
+    });
     Test("Update: latest release JSON gives version, notes and both download files; unusable releases give nothing", () =>
     {
         bool Allowed(Uri u) => UpdateInfo.IsAllowedDownload(u);
-        var release = UpdateInfo.ParseLatestRelease(ReleaseJson(), Allowed);
+        var release = UpdateInfo.ParseLatestRelease(ReleaseJson(), Allowed, "x64");
         Check(release is not null && release.Version.ToString() == "0.2.14" && release.Tag == "v0.2.14" && release.ZipName == "TerminalMgr-win-x64-0.2.14.zip" && release.ZipSize == 81748735, "Release: " + release);
         Check(release!.Notes.Contains("fix: Rechtsklick") && release.ZipUrl.AbsolutePath.EndsWith("/TerminalMgr-win-x64-0.2.14.zip") && release.ChecksumUrl.AbsolutePath.EndsWith(".zip.sha256"), "Notes or URLs");
         Check(UpdateInfo.ParseLatestRelease(ReleaseJson(draft: true), Allowed) is null && UpdateInfo.ParseLatestRelease(ReleaseJson(pre: true), Allowed) is null, "Draft or pre-release used");
@@ -948,14 +980,14 @@ try
     // A fake release on a local HTTP server: JSON for "latest", the ZIP (folder TerminalMgr-win-x64 with a fake app) and its checksum.
     (LocalServer Server, string Zip, string Sha) FakeRelease(string name, string version = "0.2.14", bool withExe = true)
     {
-        string source = Path.Combine(root, "rel-" + name, "TerminalMgr-win-x64");
+        string source = Path.Combine(root, "rel-" + name, $"TerminalMgr-win-{UpdateInfo.CurrentArchitecture}");
         Directory.CreateDirectory(Path.Combine(source, "Terminal"));
         if (withExe) File.WriteAllText(Path.Combine(source, "TerminalMgr.App.exe"), "MZ fake app " + version);
         File.WriteAllText(Path.Combine(source, "Terminal", "index.html"), "<html></html>");
         var filler = new byte[300_000];
         new Random(42).NextBytes(filler); // random data does not compress, so the zip stays large enough to see progress
         File.WriteAllBytes(Path.Combine(source, "filler.bin"), filler);
-        string zip = Path.Combine(root, "rel-" + name, $"TerminalMgr-win-x64-{version}.zip");
+        string zip = Path.Combine(root, "rel-" + name, $"TerminalMgr-win-{UpdateInfo.CurrentArchitecture}-{version}.zip");
         System.IO.Compression.ZipFile.CreateFromDirectory(source, zip, System.IO.Compression.CompressionLevel.Fastest, includeBaseDirectory: true);
         string sha = $"{UpdateInfo.ComputeSha256(zip)}  {Path.GetFileName(zip)}\n";
         var server = new LocalServer();
