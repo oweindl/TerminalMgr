@@ -501,6 +501,21 @@ try
         foreach (string bad in new[] { "window:p1|$0", "window:|$0|@4", "window:p1|0|@4", "window:p1|$0|4", "window:p1|$0|@4|x", "action:dictation", "window:p1|$0;rm|@4" })
             Check(!PaletteBuilder.TryParseWindowId(bad, out _, out _, out _), "Accepted: " + bad);
     });
+    Test("Theme: every text/background pair reaches a contrast of 4.5:1, the CSS variables carry every token and both fonts", () =>
+    {
+        foreach (var (foreground, background) in Theme.ReadablePairs)
+        {
+            double ratio = Theme.Contrast(Theme.Dark[foreground], Theme.Dark[background]);
+            Check(ratio >= 4.5, $"{foreground} on {background}: {ratio:0.00}:1");
+        }
+        Check(Math.Abs(Theme.Contrast("#000000", "#ffffff") - 21) < 1e-9 && Math.Abs(Theme.Contrast("#777777", "#777777") - 1) < 1e-9, "Contrast formula");
+        var css = Theme.Dark.CssVariables();
+        Check(Theme.Dark.Colors.All(c => css["--" + c.Key] == c.Value) && css["--font-ui"].StartsWith("\"IBM Plex Sans\"") && css["--font-mono"].StartsWith("\"JetBrains Mono\""), "CSS variables");
+        Check(Theme.Dark["bg"] == "#0e0f11" && Theme.Dark["accent"] == "#f5b041" && Theme.Dark["connected"] == "#5fd38d" && Theme.Dark["recording"] == "#ff6b6b" && Theme.Dark["text"] == "#e8e6e3", "Colors of direction C");
+        bool refused = false;
+        try { Theme.ParseHex("fff"); } catch (FormatException) { refused = true; }
+        Check(refused, "Short hex is refused");
+    });
     Test("Word error rate", () =>
     {
         Check(WordErrorRate.Compute("Starte den Server", "starte den server.") == 0, "Case and punctuation do not count");

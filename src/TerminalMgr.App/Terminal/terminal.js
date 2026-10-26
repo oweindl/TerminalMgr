@@ -5,6 +5,26 @@
   let active = null;
   let fontSize = 14;
   const send = message => window.chrome.webview.postMessage(message);
+  // Colors and fonts: the CSS variables (defaults in terminal.css, replaced by the host with Theme.Dark at start) also drive the terminal.
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const withAlpha = (hex, alpha) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`; };
+  const xtermTheme = () => ({ background:css('--bg'), foreground:css('--term-text'), cursor:css('--accent'), selectionBackground:withAlpha(css('--accent'), 0.3),
+    black:'#172129',red:'#f27886',green:'#63d6a0',yellow:'#dfc378',blue:'#76abef',magenta:'#c19aea',cyan:'#66cbd5',white:'#dce5ed' });
+  const monoFont = () => css('--font-mono');
+  // The terminal measures its cells with the font that is loaded; when the shipped font arrives later, measure again.
+  document.fonts.load('14px "JetBrains Mono"');
+  document.fonts.load('700 14px "JetBrains Mono"');
+  document.fonts.ready.then(() => { for (const s of sessions.values()) { s.term.options.fontFamily = monoFont(); } fitActive(); });
+  const toast = document.createElement('div');
+  toast.id = 'toast'; toast.hidden = true; toast.setAttribute('role', 'status');
+  document.body.append(toast);
+  let toastTimer;
+  function showToast(text) {
+    clearTimeout(toastTimer);
+    if (!text) { toast.hidden = true; return; }
+    toast.textContent = text; toast.hidden = false;
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 5000);
+  }
   // App shortcuts (for example dictation on Ctrl+Y) are taken here and never reach the session. The host sends the
   // configured ones as canonical text ("Ctrl+Shift+D"); key names match Shortcut.FromDomCode in TerminalMgr.Core.
   const keyNames = { Escape:'Esc', Comma:',', Period:'.', Minus:'-', Slash:'/', Semicolon:';', Quote:"'", BracketLeft:'[', BracketRight:']',
@@ -54,10 +74,9 @@
     element.className = 'session';
     container.append(element);
     const term = new Terminal({
-      cursorBlink:true, fontFamily:'Cascadia Mono, Consolas, monospace',
+      cursorBlink:true, fontFamily:monoFont(),
       fontSize, scrollback:10000, allowProposedApi:false,
-      theme:{ background:'#0b1014',foreground:'#dbe7ed',cursor:'#37d5b5',selectionBackground:'#28554f',
-        black:'#172129',red:'#f27886',green:'#63d6a0',yellow:'#dfc378',blue:'#76abef',magenta:'#c19aea',cyan:'#66cbd5',white:'#dce5ed' }
+      theme:xtermTheme()
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
@@ -153,6 +172,12 @@
     const s = sessions.get(m.id);
     switch(m.type) {
       case 'speech': speechCommand(m); break;
+      case 'theme':
+        for (const [name, value] of Object.entries(m.variables ?? {})) if (/^--[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(value));
+        for (const session of sessions.values()) { session.term.options.theme = xtermTheme(); session.term.options.fontFamily = monoFont(); }
+        fitActive();
+        break;
+      case 'toast': showToast(m.text ?? ''); break;
       case 'palette':
         if (m.cmd === 'open') { if (!palette.isOpen()) { palette.open(m.items ?? null); send({ type:'paletteOpened' }); } }
         else if (m.cmd === 'close') palette.close();

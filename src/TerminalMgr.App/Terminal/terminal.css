@@ -1,31 +1,50 @@
-html,body { width:100%;height:100%;margin:0;overflow:hidden;background:#0b1014;color:#dbe7ed;font:14px "Segoe UI",sans-serif; }
+/* Colors and fonts come from Theme.Dark in TerminalMgr.Core (the host also sends them as CSS variables at start).
+   The defaults below are the same values; a test keeps them identical. Fonts are shipped in ./fonts (no network). */
+@font-face { font-family:"IBM Plex Sans"; font-weight:400; src:url("fonts/IBMPlexSans-Regular.ttf") format("truetype"); }
+@font-face { font-family:"IBM Plex Sans"; font-weight:500; src:url("fonts/IBMPlexSans-Medium.ttf") format("truetype"); }
+@font-face { font-family:"IBM Plex Sans"; font-weight:600; src:url("fonts/IBMPlexSans-SemiBold.ttf") format("truetype"); }
+@font-face { font-family:"JetBrains Mono"; font-weight:400; src:url("fonts/JetBrainsMono-Regular.ttf") format("truetype"); }
+@font-face { font-family:"JetBrains Mono"; font-weight:700; src:url("fonts/JetBrainsMono-Bold.ttf") format("truetype"); }
+
+:root {
+  --bg:#0e0f11; --bar:#121316; --raised:#16171b; --overlay:#1a1c20; --line:#23262c; --line-strong:#353941;
+  --text:#e8e6e3; --term-text:#d6d3cd; --text-2:#a9adb5; --accent:#f5b041; --on-accent:#1a1205;
+  --accent-tint:#26221a; --active-tint:#1d1a13; --select:#2b2518; --connected:#5fd38d; --recording:#ff6b6b;
+  --font-ui:"IBM Plex Sans","Segoe UI",sans-serif; --font-mono:"JetBrains Mono","Cascadia Mono",Consolas,monospace;
+}
+html,body { width:100%;height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font:14px var(--font-ui); }
 #terminals { position:absolute;inset:10px 8px; }
 .session { width:100%;height:100%;display:none; }
 .session.active { display:block; }
 #empty { position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column; }
-#empty .mark { font:48px Consolas,monospace;color:#37d5b5; }
+#empty .mark { font:48px var(--font-mono);color:var(--accent); }
 #empty h1 { font-size:25px;font-weight:500; }
-#empty p { color:#91a5b4;text-align:center;line-height:1.8; }
-#empty small { color:#637d8b;margin-top:24px; }
+#empty p { color:var(--text-2);text-align:center;line-height:1.8; }
+#empty small { color:var(--text-2);margin-top:24px; }
 .xterm-viewport::-webkit-scrollbar { width:8px; }
-.xterm-viewport::-webkit-scrollbar-thumb { background:#34434e;border-radius:4px; }
+.xterm-viewport::-webkit-scrollbar-thumb { background:var(--line-strong);border-radius:4px; }
+
+/* Message at the bottom of the terminal (the app has no status bar; WPF cannot draw over the terminal) */
+#toast { position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:40;max-width:min(760px,90vw);padding:8px 14px;border-radius:10px;
+  background:var(--overlay);border:1px solid var(--line-strong);color:var(--text);font-size:13px;box-shadow:0 8px 28px rgba(0,0,0,.5);pointer-events:none; }
+#toast[hidden] { display:none; }
 
 /* Command palette */
-#palette { position:fixed;inset:0;z-index:50;display:flex;justify-content:center;align-items:flex-start;padding-top:11vh;background:rgba(5,9,12,.55); }
+#palette { position:fixed;inset:0;z-index:50;display:flex;justify-content:center;align-items:flex-start;padding-top:76px;background:rgba(5,6,8,.55); }
 #palette[hidden] { display:none; }
-.palette-box { width:min(680px,92vw);max-height:72vh;display:flex;flex-direction:column;background:#131a20;border:1px solid #2b3740;border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.55);overflow:hidden; }
-#palette-input { border:0;border-bottom:1px solid #2b3740;background:transparent;color:#e2e8ed;font:16px "Segoe UI",sans-serif;padding:14px 16px;outline:none; }
-#palette-input::placeholder { color:#637d8b; }
+.palette-box { width:min(600px,92vw);max-height:72vh;display:flex;flex-direction:column;background:var(--overlay);border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.6);overflow:hidden; }
+#palette-input { border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);font:16px var(--font-ui);padding:14px 16px;outline:none; }
+#palette-input::placeholder { color:var(--text-2); }
 #palette-list { list-style:none;margin:0;padding:6px;overflow-y:auto;min-height:0; }
 #palette-list::-webkit-scrollbar { width:8px; }
-#palette-list::-webkit-scrollbar-thumb { background:#34434e;border-radius:4px; }
-.palette-group { padding:8px 10px 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#7f93a1; }
-.palette-item { display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer; }
-.palette-item[aria-selected="true"] { background:#21453f;outline:1px solid #37d5b5; }
+#palette-list::-webkit-scrollbar-thumb { background:var(--line-strong);border-radius:4px; }
+.palette-group { padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-2); }
+.palette-item { display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer; }
+.palette-item[aria-selected="true"] { background:var(--select);outline:1px solid var(--accent); }
 .palette-text { flex:1;min-width:0;display:flex;flex-direction:column; }
 .palette-title { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-.palette-sub { font-size:12px;color:#91a5b4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-.palette-tag { font-size:11px;color:#7f93a1;border:1px solid #2b3740;border-radius:4px;padding:1px 6px;white-space:nowrap; }
-.palette-item kbd { font:12px Consolas,monospace;color:#bbd0db;background:#202a32;border:1px solid #34434e;border-radius:4px;padding:1px 6px;white-space:nowrap; }
-.palette-empty { padding:16px 12px;color:#91a5b4; }
-.palette-foot { display:flex;justify-content:space-between;gap:12px;padding:7px 14px;border-top:1px solid #2b3740;font-size:11px;color:#637d8b; }
+.palette-sub { font-size:12px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.palette-tag { font-size:11px;color:var(--text-2);border:1px solid var(--line-strong);border-radius:4px;padding:1px 6px;white-space:nowrap; }
+.palette-item kbd { font:12px var(--font-mono);color:var(--text);background:var(--raised);border:1px solid var(--line-strong);border-radius:4px;padding:1px 6px;white-space:nowrap; }
+.palette-empty { padding:16px 12px;color:var(--text-2); }
+.palette-foot { display:flex;justify-content:space-between;gap:12px;padding:7px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--text-2); }
