@@ -80,6 +80,9 @@
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
+    // Links in the output: Ctrl + left click opens them (a plain click stays with the program, e.g. tmux). The host checks the address
+    // again and opens only http(s) in the default browser.
+    term.loadAddon(new WebLinksAddon.WebLinksAddon((event, uri) => { if (event.ctrlKey || event.metaKey) send({ type:'openLink', url:uri }); }));
     term.open(element);
     // Clipboard is only changed through an explicit copy action.
     // OSC 52 ("set clipboard"): tmux forwards what Claude Code or copy-mode copies this way. Write requests go to the host,
