@@ -226,6 +226,8 @@ internal static class Program
     // The palette in the real WebView2: it is part of the page, so it covers the terminal (a WPF element would sit behind it).
     private static void TestPaletteInWebView()
     {
+        // On the GitHub runner the embedded browser hung the whole UI test run (no interactive desktop); this check runs on a developer machine.
+        if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") { Console.WriteLine("SKIP Command palette in the real WebView2: not run on the CI runner"); return; }
         var view = new Microsoft.Web.WebView2.Wpf.WebView2 { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x0B, 0x10, 0x14) };
         var window = new Window { Width = 900, Height = 600, Content = view, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = 60, Top = 60 };
         window.Show();
