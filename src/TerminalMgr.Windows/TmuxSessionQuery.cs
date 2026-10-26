@@ -24,7 +24,7 @@ public sealed class TmuxSessionQuery
     public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
-    /// <summary>State and last lines of every window of one session; <paramref name="sessionTarget"/> is a session ID ($1) or name.</summary>
+    /// <summary>One frame: the screen of every window of one session; <paramref name="sessionTarget"/> is a session ID ($1) or name.</summary>
     public async Task<WindowPoll> StripAsync(Profile profile, string sessionTarget, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         WindowStripParser.Parse(await RunAsync(SshCommand.TmuxStripArguments(profile, sessionTarget), timeout ?? TimeSpan.FromSeconds(8), cancellationToken));
 

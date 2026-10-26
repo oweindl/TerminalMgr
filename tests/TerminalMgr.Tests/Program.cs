@@ -849,48 +849,87 @@ try
             "https://", "ms-msdt:/id", "https://example.com/a b", "https://example.com/", "mailto:a@b.c", new string('a', 3000) })
             Check(!LinkRules.TryNormalize(bad, out _), "Must be refused: " + bad);
     });
-    Test("Window strip: parser reads windows, clock and previews and strips escape sequences", () =>
+    Test("Window strip: parser reads windows, clock and screens and strips escape sequences", () =>
     {
-        string output = "@@NOW 1000\n@1\t0\t0\t0\t900\t0\t\tbash\tshell\n@2\t1\t1\t0\t998\t0\t\tclaude\tclaude\n@3\t2\t0\t1\t100\t0\t\tterraform\tdeploy\n@4\t3\t0\t0\t900\t1\t0\tdotnet\tbuild\nmuell ohne Tabs\n"
-            + "@@W @1\n~ $ ls\nREADME.md\n@@W @2\n\u001b[32mlesen\u001b[0m 12/40\n@@W @3\nApply changes?\n@@W @4\nBuild succeeded.\n";
+        string output = "@@NOW 1000\n@1\t0\t0\t0\t0\t\tbash\tshell\n@2\t1\t1\t0\t0\t\tclaude\tclaude\n@3\t2\t0\t1\t0\t\tterraform\tdeploy\n@4\t3\t0\t0\t1\t0\tdotnet\tbuild\nmuell ohne Tabs\n"
+            + "@@W @1\n~ $ ls\nREADME.md\n@@W @2\n\u001b[32mlesen\u001b[0m 12/40\n\n> eingabe\n@@W @3\nApply changes?\n@@W @4\nBuild succeeded.\n@@END\n";
         var poll = WindowStripParser.Parse(output);
         Check(poll.ServerEpoch == 1000 && poll.Windows.Count == 4, "Clock and window count");
         Check(poll.Windows.Select(w => w.Name).SequenceEqual(["shell", "claude", "deploy", "build"]), "Names in index order");
         Check(poll.Windows[1].Active && poll.Windows[2].Bell && poll.Windows[3] is { Dead: true, ExitStatus: 0 }, "Flags");
-        Check(poll.Windows[1].Preview.SequenceEqual(["lesen 12/40"]), "Escape sequences removed: " + string.Join("|", poll.Windows[1].Preview));
-        Check(poll.Windows[0].Preview.SequenceEqual(["~ $ ls", "README.md"]), "Preview lines");
+        Check(poll.Windows[1].Screen.SequenceEqual(["lesen 12/40", "", "> eingabe"]), "Screen without escape sequences, rows kept: " + string.Join("|", poll.Windows[1].Screen));
+        Check(poll.Windows[0].Screen.SequenceEqual(["~ $ ls", "README.md"]), "Screen lines");
         Check(WindowStripParser.Parse("kaputt\n@x\t1\n").Windows.Count == 0, "Garbage ignored");
-        Check(WindowStripParser.Script("main").Contains("list-windows -t") && WindowStripParser.Script("main").Contains("capture-pane"), "Script");
+        Check(WindowStripParser.Script("main").Contains("list-windows -t") && WindowStripParser.Script("main").Contains("capture-pane") && !WindowStripParser.Script("main").Contains("while"), "One frame");
+        Check(WindowStripParser.Script("main", 1).StartsWith("while :; do ") && WindowStripParser.Script("main", 1).EndsWith("sleep 1; done"), "Frame loop");
         var profile = new Profile { Name = "x", Destination = "x" };
-        Check(SshCommand.TmuxStripArguments(profile, "main").Last().StartsWith("sh -c "), "Run through sh, whatever the login shell is");
+        Check(SshCommand.TmuxStripArguments(profile, "main", 1).Last().StartsWith("sh -c "), "Run through sh, whatever the login shell is");
         bool refused = false;
         try { SshCommand.TmuxStripArguments(profile, "a\nb"); } catch (ArgumentException) { refused = true; }
         Check(refused, "Control characters in the session name are refused");
     });
-    Test("Window strip: states running, done, asking, idle; looking at a window clears 'done'", () =>
+    Test("Window strip: new lines are what appeared, not what moved or stayed", () =>
     {
-        WindowSnapshot Win(string id, int index, string command, bool active, bool bell, long activity, bool dead = false, int? exit = null, params string[] preview) =>
-            new(id, index, id, command, active, bell, activity, dead, exit, preview);
+        string[] before = ["alte Zeile 1", "alte Zeile 2", "", "╭────────╮", "│ > eingabe", "╰────────╯", "? for shortcuts"];
+        // The text scrolled up by one line and a new line appeared; the input box and the footer did not move.
+        string[] after = ["alte Zeile 2", "neue Zeile", "", "╭────────╮", "│ > eingabe", "╰────────╯", "? for shortcuts"];
+        Check(WindowActivityTracker.NewLines(before, after).SequenceEqual(["neue Zeile"]), "Only the new line: " + string.Join("|", WindowActivityTracker.NewLines(before, after)));
+        Check(WindowActivityTracker.NewLines(before, before).Count == 0, "Nothing changed, nothing new");
+        Check(!WindowActivityTracker.HasContent("╭────────╮") && WindowActivityTracker.HasContent("a"), "Frames are no content");
+        Check(WindowActivityTracker.NewLines(["a b", "a b"], ["a b", "a b", "a b"]).Count == 1, "Repeated lines are counted");
+    });
+    Test("Window strip: running only while the screen changes, done when it stops, preview shows what moved", () =>
+    {
+        WindowSnapshot Win(string id, int index, string command, bool active, bool bell, IReadOnlyList<string> screen, bool dead = false, int? exit = null) =>
+            new(id, index, id, command, active, bell, dead, exit, screen);
         var tracker = new WindowActivityTracker();
         var t0 = new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
-        var first = tracker.Update(new WindowPoll(1000, [
-            Win("@1", 0, "bash", false, false, 900), Win("@2", 1, "claude", false, false, 998),
-            Win("@3", 2, "terraform", false, true, 100), Win("@4", 3, "dotnet", false, false, 900, true, 0)]), t0);
-        Check(first.Select(c => c.State).SequenceEqual([StripState.Idle, StripState.Running, StripState.Asking, StripState.Done]), "First states: " + string.Join(",", first.Select(c => c.State)));
-        Check(first[3].Detail.StartsWith("dotnet · exit 0"), "Exit status shown: " + first[3].Detail);
-        Check(first[1].Shortcut == "Ctrl 1" && new WindowCard("@9", 12, "x", "", false, StripState.Idle, "", "", [], []).Shortcut == "", "Ctrl number only for 0 to 9");
-        var later = tracker.Update(new WindowPoll(1060, [Win("@2", 1, "claude", false, false, 998)]), t0.AddSeconds(60));
-        Check(later[0].State == StripState.Done && later[0].Detail.StartsWith("claude · vor "), "Quiet after running is done: " + later[0].State + " " + later[0].Detail);
-        var seen = tracker.Update(new WindowPoll(1065, [Win("@2", 1, "claude", true, false, 998)]), t0.AddSeconds(65));
-        Check(seen[0].State == StripState.Idle, "Looked at: idle");
-        var busy = tracker.Update(new WindowPoll(1070, [Win("@2", 1, "claude", true, false, 1069)]), t0.AddSeconds(70));
-        var busy2 = tracker.Update(new WindowPoll(1075, [Win("@2", 1, "claude", true, false, 1074)]), t0.AddSeconds(75));
-        Check(busy2[0].State == StripState.Running && busy2[0].Detail == "claude · 0:05" && busy2[0].Spark.Count == 5 && busy2[0].Spark[4] > 0.5, "Running time and spark: " + busy2[0].Detail + " " + busy2[0].Spark.Count);
-        for (int i = 0; i < 12; i++) busy2 = tracker.Update(new WindowPoll(1080 + i * 5, [Win("@2", 1, "claude", true, false, 1079 + i * 5)]), t0.AddSeconds(80 + i * 5));
-        Check(busy2[0].Spark.Count == WindowActivityTracker.SparkBuckets, "Spark history is limited");
-        var question = tracker.Update(new WindowPoll(2000, [Win("@5", 4, "terraform", false, false, 1995, false, null, "Plan: 3 to add", "Apply changes?")]), t0.AddSeconds(900));
-        Check(question[0].State == StripState.Asking, "A question on the last line");
-        Check(WindowActivityTracker.LooksLikeQuestion("Continue [y/N]") && WindowActivityTracker.LooksLikeQuestion("Password for oli:") && !WindowActivityTracker.LooksLikeQuestion("~/projekt $ ls") && !WindowActivityTracker.LooksLikeQuestion(""), "Question heuristic");
+        string[] footer = ["", "╭────────╮", "│ > eingabe", "╰────────╯", "? for shortcuts"];
+        string[] Screen(params string[] top) => top.Concat(footer).ToArray();
+        WindowCard One(string[] screen, int second, bool active = false) =>
+            tracker.Update(new WindowPoll(1000 + second, [Win("@1", 1, "claude", active, false, screen)]), t0.AddSeconds(second))[0];
+
+        var baseline = One(Screen("Ausgabe 1", "Ausgabe 2"), 0);
+        Check(baseline.State == StripState.Idle, "A window nobody saw running is quiet, not done: " + baseline.State);
+        Check(baseline.Preview.SequenceEqual(["│ > eingabe", "? for shortcuts"]) || baseline.Preview.Count == 2, "Quiet window: last lines of the screen: " + string.Join("|", baseline.Preview));
+        var step1 = One(Screen("Ausgabe 2", "Ausgabe 3"), 1);           // scrolled, one new line
+        Check(step1.State == StripState.Running && step1.Preview.SequenceEqual(["Ausgabe 3"]), "Screen changed: running, preview is the moving line: " + step1.State + " " + string.Join("|", step1.Preview));
+        var step2 = One(Screen("Ausgabe 3", "Ausgabe 4", "✻ Denke nach (12s)"), 2);
+        Check(step2.State == StripState.Running && step2.Preview.SequenceEqual(["Ausgabe 4", "✻ Denke nach (12s)"]), "Two newest lines, the static box is never shown: " + string.Join("|", step2.Preview));
+        var step3 = One(Screen("Ausgabe 3", "Ausgabe 4", "✻ Denke nach (13s)"), 3);
+        Check(step3.Preview.SequenceEqual(["Ausgabe 4", "✻ Denke nach (13s)"]), "A counter line replaces its older self: " + string.Join("|", step3.Preview));
+        Check(!step3.Preview.Any(l => l.Contains("eingabe") || l.Contains("shortcuts")), "Input line and footer are not part of the preview");
+        Check(step3.Detail.StartsWith("claude · 0:0"), "Running time: " + step3.Detail);
+        var still = One(Screen("Ausgabe 3", "Ausgabe 4", "✻ Denke nach (13s)"), 5);   // unchanged for 2 s
+        Check(still.State == StripState.Running, "Still within the hold time");
+        var done = One(Screen("Ausgabe 3", "Ausgabe 4", "✻ Denke nach (13s)"), 8);    // unchanged for 5 s
+        Check(done.State == StripState.Done && done.Detail.StartsWith("claude · vor "), "Screen stopped changing after it ran: done: " + done.State + " " + done.Detail);
+        var later = One(Screen("Ausgabe 3", "Ausgabe 4", "✻ Denke nach (13s)"), 120);
+        Check(later.State == StripState.Done, "Done stays until the window is looked at");
+        var seen = One(Screen("Ausgabe 3", "Ausgabe 4", "✻ Denke nach (13s)"), 121, active: true);
+        Check(seen.State == StripState.Idle, "Switched to it: looked at, quiet");
+        var again = One(Screen("Ausgabe 5"), 122, active: true);
+        Check(again.State == StripState.Running && again.Spark.Count >= 1 && again.Spark.Max() > 0.3, "Changing again: running with activity in the bars");
+
+        // Asking: the window ran and stopped on a question, or tmux reports the bell.
+        var asker = new WindowActivityTracker();
+        WindowCard Ask(string[] screen, int second, bool bell = false) => asker.Update(new WindowPoll(2000 + second, [Win("@7", 3, "terraform", false, bell, screen)]), t0.AddSeconds(second))[0];
+        Ask(["Plan: 3 to add"], 0);
+        Ask(["Plan: 3 to add", "Apply changes?"], 1);
+        var asking = Ask(["Plan: 3 to add", "Apply changes?"], 6);
+        Check(asking.State == StripState.Asking && asking.Detail.StartsWith("terraform · wartet"), "Stopped on a question: " + asking.State + " " + asking.Detail);
+        var rung = new WindowActivityTracker().Update(new WindowPoll(1, [Win("@8", 4, "sh", false, true, ["fertig"])]), t0)[0];
+        Check(rung.State == StripState.Asking, "The bell asks for attention");
+        var dead = new WindowActivityTracker().Update(new WindowPoll(1, [Win("@9", 5, "dotnet", false, false, ["Build succeeded."], true, 0)]), t0)[0];
+        Check(dead.State == StripState.Done && dead.Detail.StartsWith("dotnet · exit 0"), "A finished program in a held window: " + dead.Detail);
+
+        // After a lost connection the next frame is a new baseline and does not count as a change.
+        tracker.Reset();
+        var afterReset = One(Screen("etwas ganz anderes"), 200);
+        Check(afterReset.State != StripState.Running, "Reset: no false running");
+        Check(WindowActivityTracker.LooksLikeQuestion("Continue [y/N]") && WindowActivityTracker.LooksLikeQuestion("Password for oli:") && WindowActivityTracker.LooksLikeQuestion("Do you want to proceed")
+            && !WindowActivityTracker.LooksLikeQuestion("~/projekt $ ls") && !WindowActivityTracker.LooksLikeQuestion(""), "Question heuristic");
+        Check(new WindowCard("@9", 12, "x", "", false, StripState.Idle, "", "", [], []).Shortcut == "" && new WindowCard("@9", 3, "x", "", false, StripState.Idle, "", "", [], []).Shortcut == "Ctrl 3", "Ctrl number only for 0 to 9");
         Check(WindowActivityTracker.Duration(252) == "4:12" && WindowActivityTracker.Ago(120) == "2 min" && WindowActivityTracker.Ago(10) == "gerade" && WindowActivityTracker.Ago(7200) == "2 h", "Time labels");
         var gone = tracker.Update(new WindowPoll(2005, []), t0.AddSeconds(905));
         Check(gone.Count == 0, "Closed windows disappear");
@@ -1824,20 +1863,28 @@ async Task<int> RealWindowStripScenario()
     }
     try
     {
-        await Remote("tmux kill-session -t tmgr-strip 2>/dev/null; tmux new-session -d -s tmgr-strip -n quiet 'sh' && tmux new-window -t tmgr-strip -n busy 'sh -c \"while true; do echo tick-$(date +%s); sleep 1; done\"' && tmux new-window -t tmgr-strip -n ask 'sh -c \"printf \\\"Apply changes? \\\"; sleep 600\"' && tmux select-window -t tmgr-strip:quiet");
-        await Task.Delay(TimeSpan.FromSeconds(WindowActivityTracker.RunningSeconds + 2));   // the quiet window must be older than the running limit
-        var query = new TmuxSessionQuery();
-        var poll = await query.StripAsync(profile, "tmgr-strip");
-        Check(poll.ServerEpoch > 1_700_000_000, "Server clock missing: " + poll.ServerEpoch);
-        Check(poll.Windows.Select(w => w.Name).SequenceEqual(["quiet", "busy", "ask"]), "Windows: " + string.Join(",", poll.Windows.Select(w => w.Name)));
-        Check(poll.Windows[0].Active && !poll.Windows[1].Active, "Active flag");
-        Check(poll.Windows[1].Preview.Any(l => l.StartsWith("tick-")), "Preview of the busy window: " + string.Join("|", poll.Windows[1].Preview));
+        await Remote("tmux kill-session -t tmgr-strip 2>/dev/null; tmux new-session -d -s tmgr-strip -n quiet 'sh' && tmux new-window -t tmgr-strip -n busy 'sh -c \"while true; do echo tick-$(date +%s); sleep 1; done\"' && tmux new-window -t tmgr-strip -n ask 'sh -c \"sleep 4; printf \\\"Apply changes? \\\"; sleep 600\"' && tmux select-window -t tmgr-strip:quiet");
+        // The long-lived connection of the strip: one frame per second. The busy window prints every second, the asking window
+        // stays silent for 4 s and then stops on a question, the quiet window never changes.
         var tracker = new WindowActivityTracker();
-        var cards = tracker.Update(poll, DateTimeOffset.Now);
-        Check(cards[1].State == StripState.Running, "Busy window runs: " + cards[1].State + " " + cards[1].Detail);
-        Check(cards[2].State == StripState.Asking, "A question on the last line: " + cards[2].State + " " + string.Join("|", poll.Windows[2].Preview));
-        Check(cards[0].State == StripState.Idle, "Active quiet window is idle: " + cards[0].State);
-        Console.WriteLine($"PASS Real tmux: the strip query returns clock, flags and previews; busy window runs, question is detected, active window idle ({cards[1].Detail})");
+        IReadOnlyList<WindowCard> cards = [];
+        WindowPoll? firstFrame = null;
+        int frames = 0;
+        var enough = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var stream = TmuxStripStream.Start(profile, "tmgr-strip",
+            poll => { lock (tracker) { firstFrame ??= poll; cards = tracker.Update(poll, DateTimeOffset.Now); if (++frames >= 14) enough.TrySetResult(); } },
+            reason => enough.TrySetException(new Exception("Stream ended: " + reason)));
+        await enough.Task.WaitAsync(TimeSpan.FromSeconds(40));
+        lock (tracker)
+        {
+            Check(firstFrame!.ServerEpoch > 1_700_000_000, "Server clock missing: " + firstFrame.ServerEpoch);
+            Check(cards.Select(c => c.Name).SequenceEqual(["quiet", "busy", "ask"]), "Windows: " + string.Join(",", cards.Select(c => c.Name)));
+            Check(cards[0].Current && !cards[1].Current, "Active flag");
+            Check(cards[1].State == StripState.Running && cards[1].Preview.Any(l => l.StartsWith("tick-")), "Busy window runs, preview is the tick line: " + cards[1].State + " " + string.Join("|", cards[1].Preview));
+            Check(cards[2].State == StripState.Asking, "Stopped on a question after it printed: " + cards[2].State + " " + cards[2].Detail + " " + string.Join("|", cards[2].Preview));
+            Check(cards[0].State == StripState.Idle, "A window that never changes is quiet: " + cards[0].State);
+            Console.WriteLine($"PASS Real tmux: one connection, a frame per second; busy window runs ({cards[1].Detail}), a question is detected, a static window stays quiet");
+        }
         return 1;
     }
     finally { await Remote("tmux kill-session -t tmgr-strip 2>/dev/null; true"); }

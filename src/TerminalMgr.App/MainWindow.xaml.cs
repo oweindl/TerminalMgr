@@ -382,6 +382,7 @@ public partial class MainWindow : Window
     private void ForgetTmux(string id)
     {
         _tmuxAttached.Remove(id);
+        StripSessionChanged(id, null);
         if (_tmuxLabel.Remove(id) && Selected?.Profile.Id == id) SessionTitle.Text = TitleFor(Selected);
     }
     private void UpdateDimensions(string id)
@@ -484,6 +485,7 @@ public partial class MainWindow : Window
             {
                 await TmuxClient.SwitchToWindowAsync(pty, window.SessionId, window.WindowId, _shutdown.Token);
                 _tmuxAttached[id] = (window.SessionId, null);
+                StripSessionChanged(id, window.SessionId);
             }
             else
             {
@@ -859,6 +861,7 @@ public partial class MainWindow : Window
         _closing = true;
         SaveSettings();
         _shutdown.Cancel();
+        StopStream();
         foreach (var wait in _reconnectWait.Values) wait.Cancel();
         DisposeDictation();
         StatusText.Text = "SSH-Sessions werden geschlossen …";

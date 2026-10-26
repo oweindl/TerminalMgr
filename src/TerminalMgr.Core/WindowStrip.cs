@@ -4,10 +4,10 @@ namespace TerminalMgr.Core;
 
 public enum StripState { Idle, Running, Done, Asking }
 
-/// <summary>What one poll of tmux says about one window.</summary>
+/// <summary>What one frame of tmux says about one window: its flags and everything visible on its screen.</summary>
 public sealed record WindowSnapshot(
-    string WindowId, int Index, string Name, string Command, bool Active, bool Bell, long ActivityEpoch, bool Dead, int? ExitStatus,
-    IReadOnlyList<string> Preview);
+    string WindowId, int Index, string Name, string Command, bool Active, bool Bell, bool Dead, int? ExitStatus,
+    IReadOnlyList<string> Screen);
 
 /// <summary>A window as the strip shows it.</summary>
 public sealed record WindowCard(
@@ -17,56 +17,62 @@ public sealed record WindowCard(
     public string Shortcut => Index <= 9 ? "Ctrl " + Index : "";
 }
 
-/// <summary>Output of one strip query: the server's clock and one snapshot per window.</summary>
+/// <summary>One frame: the server's clock and one snapshot per window.</summary>
 public sealed record WindowPoll(long ServerEpoch, IReadOnlyList<WindowSnapshot> Windows);
 
 public static class WindowStripParser
 {
-    public const string Format = "#{window_id}\t#{window_index}\t#{window_active}\t#{window_bell_flag}\t#{window_activity}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_current_command}\t#{window_name}";
+    public const string Format = "#{window_id}\t#{window_index}\t#{window_active}\t#{window_bell_flag}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_current_command}\t#{window_name}";
     public const string NowMarker = "@@NOW ";
-    public const string PreviewMarker = "@@W ";
-    public const int PreviewLines = 2;
-    public const int PreviewWidth = 90;
+    public const string ScreenMarker = "@@W ";
+    public const string EndMarker = "@@END";
+    public const int ScreenLines = 60;
+    public const int ScreenWidth = 200;
 
-    /// <summary>Shell script for the server: the clock, the windows of one session, then the last lines of each window. Plain sh, so it works whatever the login shell is.</summary>
-    public static string Script(string sessionTarget)
+    /// <summary>
+    /// Shell script for the server: the clock, the windows of one session, then the visible screen of each window, one frame per
+    /// <paramref name="loop"/> second (0 = a single frame). Plain sh, so it works whatever the login shell is. When the SSH connection
+    /// ends, the loop ends with it.
+    /// </summary>
+    public static string Script(string sessionTarget, int loop = 0)
     {
         string t = SshCommand.ShellQuote(sessionTarget);
-        return $"echo '{NowMarker}'$(date +%s); tmux list-windows -t {t} -F {SshCommand.ShellQuote(Format)}; " +
-               $"for w in $(tmux list-windows -t {t} -F '#{{window_id}}'); do echo '{PreviewMarker}'$w; " +
-               $"tmux capture-pane -p -t \"$w\" | grep -v '^[[:space:]]*$' | tail -n {PreviewLines} | cut -c1-{PreviewWidth}; done";
+        string frame = $"echo '{NowMarker}'$(date +%s); tmux list-windows -t {t} -F {SshCommand.ShellQuote(Format)} || exit 1; " +
+                       $"for w in $(tmux list-windows -t {t} -F '#{{window_id}}'); do echo '{ScreenMarker}'$w; " +
+                       $"tmux capture-pane -p -t \"$w\" | tail -n {ScreenLines} | cut -c1-{ScreenWidth}; done; echo '{EndMarker}'";
+        return loop <= 0 ? frame : $"while :; do {frame}; sleep {loop}; done";
     }
 
     public static WindowPoll Parse(string output)
     {
         long now = 0;
-        var records = new List<(string Id, int Index, string Name, string Command, bool Active, bool Bell, long Activity, bool Dead, int? Exit)>();
-        var previews = new Dictionary<string, List<string>>();
+        var records = new List<(string Id, int Index, string Name, string Command, bool Active, bool Bell, bool Dead, int? Exit)>();
+        var screens = new Dictionary<string, List<string>>();
         List<string>? current = null;
         foreach (string raw in output.Split('\n'))
         {
             string line = raw.TrimEnd('\r');
             if (line.StartsWith(NowMarker, StringComparison.Ordinal)) { long.TryParse(line[NowMarker.Length..].Trim(), out now); continue; }
-            if (line.StartsWith(PreviewMarker, StringComparison.Ordinal))
+            if (line.StartsWith(ScreenMarker, StringComparison.Ordinal))
             {
-                string id = line[PreviewMarker.Length..].Trim();
-                current = TmuxWindowParser.IsWindowId(id) ? previews[id] = [] : null;
+                string id = line[ScreenMarker.Length..].Trim();
+                current = TmuxWindowParser.IsWindowId(id) ? screens[id] = [] : null;
                 continue;
             }
+            if (line == EndMarker) { current = null; continue; }
             if (current is not null) { current.Add(Clean(line)); continue; }
             string[] f = line.Split('\t');
-            if (f.Length < 9 || !TmuxWindowParser.IsWindowId(f[0]) || !int.TryParse(f[1], out int index) || index < 0) continue;
-            long.TryParse(f[4], out long activity);
-            int? exit = f[6].Length > 0 && int.TryParse(f[6], out int code) ? code : null;
-            records.Add((f[0], index, string.Join('\t', f[8..]), f[7], f[2] == "1", f[3] == "1", activity, f[5] == "1", exit));
+            if (f.Length < 8 || !TmuxWindowParser.IsWindowId(f[0]) || !int.TryParse(f[1], out int index) || index < 0) continue;
+            int? exit = f[5].Length > 0 && int.TryParse(f[5], out int code) ? code : null;
+            records.Add((f[0], index, string.Join('\t', f[7..]), f[6], f[2] == "1", f[3] == "1", f[4] == "1", exit));
         }
         var windows = records.OrderBy(r => r.Index).Select(r => new WindowSnapshot(
-            r.Id, r.Index, r.Name, r.Command, r.Active, r.Bell, r.Activity, r.Dead, r.Exit,
-            previews.TryGetValue(r.Id, out var p) ? p : [])).ToList();
+            r.Id, r.Index, r.Name, r.Command, r.Active, r.Bell, r.Dead, r.Exit,
+            screens.TryGetValue(r.Id, out var s) ? s : [])).ToList();
         return new WindowPoll(now, windows);
     }
 
-    /// <summary>The preview is remote text: no control characters, no escape sequences, tabs as spaces.</summary>
+    /// <summary>The screen is remote text: no control characters, no escape sequences, tabs as spaces, no trailing blanks.</summary>
     private static string Clean(string line)
     {
         string text = Regex.Replace(line, "\u001b\\[[0-9;?]*[ -/]*[@-~]", "").Replace('\t', ' ');
@@ -75,66 +81,140 @@ public static class WindowStripParser
 }
 
 /// <summary>
-/// Turns polls into cards. The state is an estimate from the output: output within <see cref="RunningSeconds"/> is "running";
-/// a window that was running and has been quiet since is "done" until it is looked at; a bell or a question on the last line is "asking".
+/// Turns frames into cards. A window "runs" while its screen keeps changing and is "done" when it has stopped (after it ran);
+/// the preview is not the bottom of the screen but the lines that appeared most recently, so a static input line or status bar
+/// does not hide what is happening above it. Nothing here depends on the tmux activity timestamp, which also moves for a cursor or a clock.
 /// </summary>
 public sealed class WindowActivityTracker
 {
-    public const int RunningSeconds = 10;
+    /// <summary>A window stays "running" for this long after its last screen change (the frames come once a second).</summary>
+    public const int RunningHoldSeconds = 3;
     public const int SparkBuckets = 8;
+    public const int BucketSeconds = 5;
+    private const int RecentLines = 12;
+    private const int QuestionTail = 8;
     private static readonly Regex Question = new(
-        @"(\?\s*$)|(\[[yY]/[nN]\]\s*:?\s*$)|(\([yY](es)?/[nN](o)?\)\s*:?\s*$)|(yes/no\)?\s*:?\s*$)|(password[^:]*:\s*$)|(press enter)|(continue\?)",
+        @"(\?\s*$)|(\[[yY]/[nN]\]\s*:?\s*$)|(\([yY](es)?/[nN](o)?\)\s*:?\s*$)|(yes/no\)?\s*:?\s*$)|(password[^:]*:\s*$)|(press enter)|(continue\?)|(do you want to)|(❯\s*1\.)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex Digits = new("[0-9]+", RegexOptions.Compiled);
 
     private sealed class Memory
     {
-        public long LastActivity;
+        public List<string>? Previous;
+        public DateTimeOffset? LastChange;
         public DateTimeOffset? RunningSince;
         public DateTimeOffset? DoneAt;
         public DateTimeOffset? AskingSince;
+        public bool WasActive;
+        public readonly List<(string Key, string Text, DateTimeOffset At)> Recent = [];
         public readonly List<double> Spark = [];
+        public DateTimeOffset BucketStart;
+        public double BucketValue;
     }
 
     private readonly Dictionary<string, Memory> _memory = [];
 
-    public static bool LooksLikeQuestion(string? lastLine) => !string.IsNullOrWhiteSpace(lastLine) && Question.IsMatch(lastLine);
+    public static bool LooksLikeQuestion(string? line) => !string.IsNullOrWhiteSpace(line) && Question.IsMatch(line);
 
-    public IReadOnlyList<WindowCard> Update(WindowPoll poll, DateTimeOffset now, double pollSeconds = 5)
+    /// <summary>A line that says something: at least one letter or digit (not just a frame of box-drawing characters).</summary>
+    public static bool HasContent(string line) => line.Any(char.IsLetterOrDigit);
+
+    /// <summary>Forget the previous screens, e.g. after the connection to the server was lost: the next frame is a new baseline.</summary>
+    public void Reset() { foreach (var m in _memory.Values) m.Previous = null; }
+
+    /// <summary>
+    /// The lines of <paramref name="current"/> that were not on the screen before. Lines that only moved (the text scrolled)
+    /// are not new; lines that did not move at all (input box, status bar) are not new either.
+    /// </summary>
+    public static List<string> NewLines(IReadOnlyList<string> previous, IReadOnlyList<string> current)
+    {
+        var available = new Dictionary<string, int>();
+        foreach (string line in previous) if (HasContent(line)) available[line] = available.GetValueOrDefault(line) + 1;
+        var fresh = new List<string>();
+        foreach (string line in current)
+        {
+            if (!HasContent(line)) continue;
+            if (available.TryGetValue(line, out int n) && n > 0) available[line] = n - 1;
+            else fresh.Add(line);
+        }
+        return fresh;
+    }
+
+    public IReadOnlyList<WindowCard> Update(WindowPoll poll, DateTimeOffset now)
     {
         var live = poll.Windows.Select(w => w.WindowId).ToHashSet();
         foreach (string gone in _memory.Keys.Where(k => !live.Contains(k)).ToList()) _memory.Remove(gone);
         var cards = new List<WindowCard>();
         foreach (var w in poll.Windows)
         {
-            if (!_memory.TryGetValue(w.WindowId, out var m)) _memory[w.WindowId] = m = new Memory { LastActivity = w.ActivityEpoch };
-            long age = poll.ServerEpoch > 0 && w.ActivityEpoch > 0 ? Math.Max(0, poll.ServerEpoch - w.ActivityEpoch) : long.MaxValue / 4;
-            bool changed = w.ActivityEpoch > m.LastActivity;
-            m.LastActivity = Math.Max(m.LastActivity, w.ActivityEpoch);
-            double bucket = changed ? 0.3 + 0.7 * (1 - Math.Min(age, pollSeconds) / pollSeconds) : age <= RunningSeconds ? 0.25 : 0;
-            m.Spark.Add(Math.Clamp(bucket, 0, 1));
-            if (m.Spark.Count > SparkBuckets) m.Spark.RemoveAt(0);
+            if (!_memory.TryGetValue(w.WindowId, out var m)) _memory[w.WindowId] = m = new Memory { BucketStart = now };
+            var screen = w.Screen.ToList();
+            double intensity = 0;
+            if (m.Previous is not null && !screen.SequenceEqual(m.Previous))
+            {
+                m.LastChange = now;
+                var fresh = NewLines(m.Previous, screen);
+                foreach (string line in fresh)
+                {
+                    string key = Digits.Replace(line.Trim(), "#");   // a counter or timer line replaces its older self
+                    m.Recent.RemoveAll(r => r.Key == key);
+                    m.Recent.Add((key, line.Trim(), now));
+                }
+                if (m.Recent.Count > RecentLines) m.Recent.RemoveRange(0, m.Recent.Count - RecentLines);
+                intensity = Math.Min(1, 0.25 + fresh.Count / 3.0);
+            }
+            m.Previous = screen;
+            AddToSpark(m, intensity, now);
 
-            string last = w.Preview.LastOrDefault(l => l.Length > 0) ?? "";
-            bool running = !w.Dead && age <= RunningSeconds;
-            bool asking = !w.Dead && (w.Bell || (LooksLikeQuestion(last) && age <= 600 && !w.Active));
-            if (w.Active && !w.Bell) { m.DoneAt = null; m.AskingSince = null; }   // looked at: nothing left to report
+            bool running = !w.Dead && m.LastChange is { } last && (now - last).TotalSeconds <= RunningHoldSeconds;
+            if (w.Active && !m.WasActive) { m.DoneAt = null; m.AskingSince = null; }   // switched to the window: it has been looked at
+            m.WasActive = w.Active;
             StripState state;
-            if (asking) { m.AskingSince ??= now; m.RunningSince = null; state = StripState.Asking; }
-            else if (running) { m.RunningSince ??= now; m.DoneAt = null; m.AskingSince = null; state = StripState.Running; }
+            if (w.Dead) { m.RunningSince = null; m.DoneAt ??= now; state = StripState.Done; }
+            else if (w.Bell && !w.Active) { m.RunningSince = null; m.AskingSince ??= now; state = StripState.Asking; }
+            else if (running)
+            {
+                m.RunningSince ??= m.LastChange;
+                m.DoneAt = null; m.AskingSince = null;
+                state = StripState.Running;
+            }
             else
             {
-                m.AskingSince = null;
-                if (w.Dead) { m.DoneAt ??= now; m.RunningSince = null; state = StripState.Done; }
-                else
+                if (m.RunningSince is not null)
                 {
-                    if (m.RunningSince is not null) { m.DoneAt = w.Active ? null : now; m.RunningSince = null; }
-                    state = m.DoneAt is not null && !w.Active ? StripState.Done : StripState.Idle;
+                    // It was busy and has stopped: waiting for an answer, or finished.
+                    m.RunningSince = null;
+                    if (screen.Where(HasContent).TakeLast(QuestionTail).Any(LooksLikeQuestion)) m.AskingSince = now; else m.DoneAt = m.LastChange ?? now;
                 }
+                state = m.AskingSince is not null ? StripState.Asking : m.DoneAt is not null ? StripState.Done : StripState.Idle;
             }
-            cards.Add(new WindowCard(w.WindowId, w.Index, w.Name, w.Command, w.Active, state, Label(state), Detail(w, state, m, now, age),
-                w.Preview.Where(l => l.Length > 0).TakeLast(WindowStripParser.PreviewLines).ToList(), m.Spark.ToList()));
+            cards.Add(new WindowCard(w.WindowId, w.Index, w.Name, w.Command, w.Active, state, Label(state), Detail(w, state, m, now),
+                Preview(m, screen), SparkValues(m)));
         }
         return cards;
+    }
+
+    /// <summary>The two lines that appeared last (older first); a window that never changed shows the last two lines on its screen.</summary>
+    private static List<string> Preview(Memory m, List<string> screen)
+    {
+        var recent = m.Recent.TakeLast(2).Select(r => r.Text).ToList();
+        return recent.Count > 0 ? recent : screen.Where(HasContent).TakeLast(2).Select(l => l.Trim()).ToList();
+    }
+
+    private static void AddToSpark(Memory m, double intensity, DateTimeOffset now)
+    {
+        m.BucketValue = Math.Max(m.BucketValue, intensity);
+        if ((now - m.BucketStart).TotalSeconds < BucketSeconds) return;
+        m.Spark.Add(m.BucketValue);
+        if (m.Spark.Count > SparkBuckets) m.Spark.RemoveAt(0);
+        m.BucketStart = now;
+        m.BucketValue = 0;
+    }
+
+    private static List<double> SparkValues(Memory m)
+    {
+        var values = m.Spark.Concat([m.BucketValue]).TakeLast(SparkBuckets).ToList();
+        return values;
     }
 
     private static string Label(StripState state) => state switch
@@ -142,14 +222,14 @@ public sealed class WindowActivityTracker
         StripState.Running => "läuft", StripState.Done => "fertig", StripState.Asking => "fragt", _ => "ruhig"
     };
 
-    private static string Detail(WindowSnapshot w, StripState state, Memory m, DateTimeOffset now, long ageSeconds)
+    private static string Detail(WindowSnapshot w, StripState state, Memory m, DateTimeOffset now)
     {
         string time = state switch
         {
             StripState.Running => m.RunningSince is { } s ? Duration((long)(now - s).TotalSeconds) : "gerade",
             StripState.Asking => m.AskingSince is { } a ? "wartet " + Duration((long)(now - a).TotalSeconds) : "wartet",
             StripState.Done => (w.Dead && w.ExitStatus is { } code ? $"exit {code} · " : "") + (m.DoneAt is { } d ? "vor " + Ago((long)(now - d).TotalSeconds) : "vor kurzem"),
-            _ => ageSeconds >= long.MaxValue / 8 ? "" : Ago(ageSeconds)
+            _ => m.LastChange is { } c ? Ago((long)(now - c).TotalSeconds) : ""
         };
         return w.Command.Length > 0 && time.Length > 0 ? w.Command + " · " + time : w.Command + time;
     }
