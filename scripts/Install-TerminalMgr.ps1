@@ -98,7 +98,7 @@ try {
 
     Write-Step "Installieren nach $InstallDirectory"
     New-Item -ItemType Directory -Force $InstallDirectory | Out-Null
-    robocopy $source $InstallDirectory /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    robocopy $source $InstallDirectory /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Kopieren fehlgeschlagen (robocopy Exit $LASTEXITCODE)." }
     $global:LASTEXITCODE = 0
 

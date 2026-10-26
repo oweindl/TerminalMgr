@@ -118,7 +118,7 @@ try {
     # Der Pfad ist fest; die Prüfung verhindert, dass ein Fehler in $env:LOCALAPPDATA etwas anderes spiegelt.
     if ($installDir -notmatch '\\Programs\\TerminalMgr$') { throw "Unerwarteter Installationspfad: $installDir" }
     New-Item -ItemType Directory -Force $installDir | Out-Null
-    robocopy $publishDir $installDir /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    robocopy $publishDir $installDir /MIR /R:2 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Kopieren fehlgeschlagen (robocopy Exit $LASTEXITCODE)." }
     $global:LASTEXITCODE = 0
 
