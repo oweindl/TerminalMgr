@@ -286,6 +286,23 @@ test('Plain shell selection: copied on mouse up with copy on select, otherwise o
   expect((await messages(page, 'copy'))[0].text).toMatch(/Hallo/);
 });
 
+test('Ctrl+click on a link in the output opens it through the host; a plain click does not', async ({page}) => {
+  await output(page, 'Docs: https://example.com/hilfe?x=1 ende\r\n');
+  await expect(page.locator('.xterm-rows')).toContainText('https://example.com/hilfe');
+  const box = await page.locator('.xterm-rows > div').first().boundingBox();
+  const x = box.x + 'Docs: https://example.com/'.length * (box.width / 80) * 0.5 + 60;
+  await page.mouse.move(x, box.y + box.height / 2);
+  await page.mouse.click(x, box.y + box.height / 2);
+  await page.waitForTimeout(150);
+  expect(await messages(page, 'openLink')).toHaveLength(0);
+  await page.keyboard.down('Control');
+  await page.mouse.move(x + 1, box.y + box.height / 2);
+  await page.mouse.click(x + 1, box.y + box.height / 2);
+  await page.keyboard.up('Control');
+  await expect.poll(async () => (await messages(page, 'openLink')).length).toBe(1);
+  expect((await messages(page, 'openLink'))[0].url).toBe('https://example.com/hilfe?x=1');
+});
+
 test('Debug mode reports selection and mouse tracking mode of a right click', async ({page}) => {
   await page.evaluate(() => window.__hostMessage({type:'terminalSettings', osc52:true, debug:true}));
   await output(page, '\x1b[?1002h\x1b[?1006hzeile\r\n');

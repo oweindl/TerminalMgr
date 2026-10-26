@@ -37,6 +37,15 @@ public partial class MainWindow
         Post(new { type = "focus", id });
     }
 
+    /// <summary>Opens a link from the terminal output in the default browser. Only http(s); anything else is refused.</summary>
+    private void OpenLink(string? address)
+    {
+        if (!LinkRules.TryNormalize(address, out var uri)) { StatusText.Text = "Dieser Link wird nicht geöffnet (nur http und https)."; return; }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        { StatusText.Text = "Der Link konnte nicht geöffnet werden: " + ex.Message; }
+    }
+
     private bool ServerPanelOpen => ServerColumn.Width.Value > 0;
     private bool ClipboardOpen => ClipboardColumn.Width.Value > 0;
 

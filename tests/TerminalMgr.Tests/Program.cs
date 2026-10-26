@@ -841,6 +841,14 @@ try
         new SettingsStore(directory).Save(new() { FontSize = 14 });
         Check(Directory.GetFiles(directory, "settings.*.bak").Length == 5, "Only five kept");
     });
+    Test("Links from the terminal: only plain http(s) addresses open", () =>
+    {
+        foreach (var good in new[] { "https://github.com/oweindl/TerminalMgr", "http://localhost:8080/a?b=c#d", "https://example.com/pfad%20mit" })
+            Check(LinkRules.TryNormalize(good, out _), "Should open: " + good);
+        foreach (var bad in new[] { null, "", "   ", "file:///C:/Windows/System32/cmd.exe", "javascript:alert(1)", "ftp://example.com", @"\\server\share", @"C:\Windows\notepad.exe",
+            "https://", "ms-msdt:/id", "https://example.com/a b", "https://example.com/", "mailto:a@b.c", new string('a', 3000) })
+            Check(!LinkRules.TryNormalize(bad, out _), "Must be refused: " + bad);
+    });
     Test("Copy on select is off by default, survives a round trip and an export", () =>
     {
         Check(!new AppSettings().CopyOnSelect, "Default on");

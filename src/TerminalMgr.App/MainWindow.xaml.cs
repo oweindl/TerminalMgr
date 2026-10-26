@@ -172,6 +172,9 @@ public partial class MainWindow : Window
                     int index = m.GetProperty("index").GetInt32();
                     if (index >= 0 && index < _profiles.Count) { ProfilesList.SelectedIndex = index; FocusTerminal(Selected?.Profile.Id); }
                     break;
+                case "openLink":
+                    OpenLink(m.GetProperty("url").GetString());
+                    break;
                 case "copy":
                     string text = ClipboardText.TrimTrailingSpaces(m.GetProperty("text").GetString() ?? "");
                     if (text.Length > 0)
