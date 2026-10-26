@@ -51,7 +51,7 @@
   }
   const parseModifier = text => { const s = parseShortcut(text + '+X'); return { ctrl:s.ctrl, alt:s.alt, shift:s.shift }; };
   // Defaults until the host sends the configured ones: dictation, copy, paste, and Alt+1..9 for switching sessions.
-  const terminalSettings = { osc52:true, debug:false };
+  const terminalSettings = { osc52:true, copyOnSelect:false, debug:false };
   let shortcuts = [parseShortcut('Ctrl+Y', 'dictation'), parseShortcut('Ctrl+Shift+C', 'copy'), parseShortcut('Ctrl+Shift+V', 'paste')];
   let sessionModifier = parseModifier('Alt');
   // Terminals pad lines with spaces up to the window width; copied text must not carry them.
@@ -84,8 +84,18 @@
     // Clipboard is only changed through an explicit copy action.
     // OSC 52 ("set clipboard"): tmux forwards what Claude Code or copy-mode copies this way. Write requests go to the host,
     // which decodes and validates them; read requests ("?") are never answered, so a program can not read the clipboard.
+    // A copy that arrives right after the left button was used is a mouse selection made inside tmux or Claude Code. With
+    // "copy on select" it is taken at once; otherwise it waits for a right click, like a selection in a plain shell.
+    // Copies without the mouse (tmux copy mode with y, a script) are explicit and always go through.
+    let leftDown = false, leftUpAt = 0, pending = null;
+    const mouseDriven = () => leftDown || Date.now() - leftUpAt < 1500;
     term.parser.registerOscHandler(52, data => {
-      if (terminalSettings.osc52 && data.length <= 4_000_000) send({ type:'osc52', id, data });
+      if (!terminalSettings.osc52 || data.length > 4_000_000) return true;
+      if (!terminalSettings.copyOnSelect && !data.endsWith('?') && mouseDriven()) {
+        pending = { data, at:Date.now() };
+        showToast('Markiert. Rechtsklick kopiert in die Zwischenablage.');
+      }
+      else send({ type:'osc52', id, data });
       return true;
     });
     term.onData(data => send({ type:'input',id,data }));
@@ -119,6 +129,16 @@
     // The selection is taken when the right button goes down: later output (tmux status line, redraws) may clear it
     // before the contextmenu event arrives.
     let rightSelection = '';
+    element.addEventListener('mousedown', e => { if (e.button === 0) { leftDown = true; pending = null; } }, true);
+    window.addEventListener('mouseup', e => {
+      if (e.button !== 0 || !leftDown) return;
+      leftDown = false; leftUpAt = Date.now();
+      // Plain shell (or Shift+drag in tmux): the selection is local. With "copy on select" it is copied now and stays marked.
+      if (terminalSettings.copyOnSelect && term.hasSelection()) {
+        const text = trimTrailingSpaces(term.getSelection());
+        if (text) send({ type:'copy',id,text });
+      }
+    }, true);
     for (const type of ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'auxclick'])
       element.addEventListener(type, e => {
         if (e.button !== 2) return;
@@ -132,7 +152,8 @@
       rightSelection = '';
       if (terminalSettings.debug)
         send({ type:'diag', id, text:`Rechtsklick: Markierung ${text.length} Zeichen, Maus-Tracking ${term.modes.mouseTrackingMode}` });
-      if (text) { term.clearSelection(); send({ type:'copy',id,text }); }
+      if (text) { pending = null; term.clearSelection(); send({ type:'copy',id,text }); }
+      else if (pending && Date.now() - pending.at < 30000) { send({ type:'osc52', id, data:pending.data }); pending = null; showToast('Kopiert.'); }
       else send({ type:'contextPaste',id });
     }, true);
     element.addEventListener('dragover', e => e.preventDefault());
@@ -194,6 +215,7 @@
         break;
       case 'terminalSettings':
         terminalSettings.osc52 = m.osc52 !== false;
+        terminalSettings.copyOnSelect = m.copyOnSelect === true;
         terminalSettings.debug = m.debug === true;
         break;
       case 'shortcuts':

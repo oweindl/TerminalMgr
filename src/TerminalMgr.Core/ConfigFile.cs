@@ -25,6 +25,7 @@ public sealed record ExportedSettings
     public int FontSize { get; init; } = 14;
     public int ClipHistoryLimit { get; init; } = 100;
     public bool AcceptOsc52 { get; init; } = true;
+    public bool CopyOnSelect { get; init; }
     public bool CheckForUpdates { get; init; } = true;
     public ShortcutOptions Shortcuts { get; init; } = new();
     public ExportedDictation Dictation { get; init; } = new();
@@ -90,7 +91,7 @@ public static class ConfigFile
             Profiles = selection.Profiles ? settings.Profiles.ToList() : null,
             Settings = selection.Settings ? new ExportedSettings
             {
-                FontSize = settings.FontSize, ClipHistoryLimit = settings.ClipHistoryLimit, AcceptOsc52 = settings.AcceptOsc52,
+                FontSize = settings.FontSize, ClipHistoryLimit = settings.ClipHistoryLimit, AcceptOsc52 = settings.AcceptOsc52, CopyOnSelect = settings.CopyOnSelect,
                 CheckForUpdates = settings.Update.CheckOnStart, Shortcuts = settings.Shortcuts.Normalized(), Favorites = settings.Favorites.ToList(),
                 Dictation = new ExportedDictation { Shortcut = dictation.Shortcut, Language = dictation.Language, InitialPrompt = dictation.InitialPrompt,
                     SilenceSeconds = dictation.SilenceSeconds, LevelThreshold = dictation.LevelThreshold }

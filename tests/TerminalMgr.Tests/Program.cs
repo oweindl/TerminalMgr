@@ -806,6 +806,13 @@ try
         store.Save(new() { AcceptOsc52 = false });
         Check(!store.Load().AcceptOsc52, "Round trip");
     });
+    Test("Copy on select is off by default, survives a round trip and an export", () =>
+    {
+        Check(!new AppSettings().CopyOnSelect, "Default on");
+        var store = new SettingsStore(Path.Combine(root, "copyonselect"));
+        store.Save(new() { CopyOnSelect = true });
+        Check(store.Load().CopyOnSelect, "Round trip");
+    });
 
     string ReleaseJson(string tag = "v0.2.14", bool draft = false, bool pre = false, string host = "https://github.com", bool withSha = true, string? zipName = null)
     {

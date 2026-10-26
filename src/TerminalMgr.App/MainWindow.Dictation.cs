@@ -23,7 +23,7 @@ public partial class MainWindow
 
     /// <summary>Switches of the terminal page: OSC 52 clipboard writes, and diagnostics for right clicks (TERMINALMGR_DEBUG=1).</summary>
     private void PostTerminalSettings() =>
-        Post(new { type = "terminalSettings", osc52 = _settings.AcceptOsc52, debug = Environment.GetEnvironmentVariable("TERMINALMGR_DEBUG") == "1" });
+        Post(new { type = "terminalSettings", osc52 = _settings.AcceptOsc52, copyOnSelect = _settings.CopyOnSelect, debug = Environment.GetEnvironmentVariable("TERMINALMGR_DEBUG") == "1" });
 
     /// <summary>Hands the configured shortcuts to the terminal page, which takes them before the session sees them.</summary>
     private void PostShortcuts()

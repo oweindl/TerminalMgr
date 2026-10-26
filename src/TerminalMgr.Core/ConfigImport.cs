@@ -78,7 +78,7 @@ public static class ConfigImporter
         var result = current with { Profiles = profiles };
         if (takeSettings && incoming.Settings is { } s)
             result = result with {
-                FontSize = Math.Clamp(s.FontSize, 10, 28), ClipHistoryLimit = Math.Clamp(s.ClipHistoryLimit, 1, 1000), AcceptOsc52 = s.AcceptOsc52,
+                FontSize = Math.Clamp(s.FontSize, 10, 28), ClipHistoryLimit = Math.Clamp(s.ClipHistoryLimit, 1, 1000), AcceptOsc52 = s.AcceptOsc52, CopyOnSelect = s.CopyOnSelect,
                 Shortcuts = s.Shortcuts.Normalized(),
                 // Favorites: replaced entirely in "replace all", otherwise the incoming ones are added (an entry with the same ID is replaced).
                 Favorites = plan.Mode == ImportMode.ReplaceAll ? s.Favorites.ToList()
