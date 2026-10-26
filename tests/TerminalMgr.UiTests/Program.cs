@@ -466,6 +466,8 @@ internal static class Program
     {
         try
         {
+            // These tests open real MainWindow instances, which load and save settings.json. Never in the user's own data folder.
+            Environment.SetEnvironmentVariable("TERMINALMGR_DATA_DIR", Path.Combine(Path.GetTempPath(), "TerminalMgr-uitest-" + Guid.NewGuid().ToString("N")));
 
             var app = new App();
             app.InitializeComponent();
