@@ -828,6 +828,19 @@ try
         Check(back is { Left: 10, Width: 1000, Maximized: true, ServerOpen: false, ClipboardOpen: true, ClipboardWidth: 350 }, "Round trip");
         Check(new SettingsStore(Path.Combine(root, "osc52")).Load().Window is null, "Old file has no layout");
     });
+    Test("Saving settings keeps a backup of the previous file once per run, five at most", () =>
+    {
+        var directory = Path.Combine(root, "backup");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "settings.json"), "{\"FontSize\":17}");
+        var store = new SettingsStore(directory);
+        store.Save(new() { FontSize = 12 }); store.Save(new() { FontSize = 13 });
+        var backups = Directory.GetFiles(directory, "settings.*.bak");
+        Check(backups.Length == 1 && File.ReadAllText(backups[0]).Contains("17"), "One backup with the old content, got " + backups.Length);
+        for (int i = 0; i < 8; i++) File.WriteAllText(Path.Combine(directory, $"settings.2020010{i}-000000.bak"), "x");
+        new SettingsStore(directory).Save(new() { FontSize = 14 });
+        Check(Directory.GetFiles(directory, "settings.*.bak").Length == 5, "Only five kept");
+    });
     Test("Copy on select is off by default, survives a round trip and an export", () =>
     {
         Check(!new AppSettings().CopyOnSelect, "Default on");
