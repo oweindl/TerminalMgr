@@ -806,6 +806,28 @@ try
         store.Save(new() { AcceptOsc52 = false });
         Check(!store.Load().AcceptOsc52, "Round trip");
     });
+    Test("Window layout: kept on a screen, rescued when the monitor is gone, sane sizes, round trip", () =>
+    {
+        var main = new DesktopArea(0, 0, 1920, 1040);
+        var second = new DesktopArea(1920, 0, 1920, 1040);
+        var saved = new WindowLayout { Left = 100, Top = 50, Width = 1400, Height = 900 };
+        Check(saved.Fit([main]) == new DesktopArea(100, 50, 1400, 900), "On screen stays unchanged");
+        var onSecond = new WindowLayout { Left = 2100, Top = 40, Width = 1200, Height = 800 };
+        Check(onSecond.Fit([main, second]) == new DesktopArea(2100, 40, 1200, 800), "Second monitor stays");
+        var gone = onSecond.Fit([main]);
+        Check(gone == new DesktopArea(360, 120, 1200, 800), "Monitor gone: centered on the first screen, got " + gone);
+        Check(new WindowLayout { Left = 0, Top = 0, Width = 300, Height = 200 }.Fit([main]) is { Width: 880, Height: 540 }, "Minimum size");
+        Check(new WindowLayout { Left = 0, Top = 0, Width = 9000, Height = 9000 }.Fit([main]) is { Width: 1920, Height: 1040 }, "Not bigger than the screen");
+        Check(new WindowLayout { Left = 50, Top = -2000, Width = 1200, Height = 800 }.Fit([main]) is { Y: > 0 }, "Title bar above the screen is rescued");
+        Check(new WindowLayout().Fit([main]) is null, "Nothing saved");
+        Check(new WindowLayout { Left = double.NaN, Top = 0, Width = 1200, Height = 800 }.Fit([main]) is null, "NaN refused");
+        Check(WindowLayout.PanelWidth(0, 260, 180) == 260 && WindowLayout.PanelWidth(300, 260, 180) == 300 && WindowLayout.PanelWidth(double.NaN, 260, 180) == 260, "Panel width");
+        var store = new SettingsStore(Path.Combine(root, "windowlayout"));
+        store.Save(new() { Window = new WindowLayout { Left = 10, Top = 20, Width = 1000, Height = 700, Maximized = true, ServerOpen = false, ServerWidth = 300, ClipboardOpen = true, ClipboardWidth = 350 } });
+        var back = store.Load().Window;
+        Check(back is { Left: 10, Width: 1000, Maximized: true, ServerOpen: false, ClipboardOpen: true, ClipboardWidth: 350 }, "Round trip");
+        Check(new SettingsStore(Path.Combine(root, "osc52")).Load().Window is null, "Old file has no layout");
+    });
     Test("Copy on select is off by default, survives a round trip and an export", () =>
     {
         Check(!new AppSettings().CopyOnSelect, "Default on");

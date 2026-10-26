@@ -143,6 +143,10 @@ Farben und Schriften stehen an einer Stelle (`Theme.Dark` in `TerminalMgr.Core`)
 
 Vorher/Nachher (Demodaten, erzeugt mit `tools/Screenshot`): [vorher](docs/design/redesign-before.png) · [nachher](docs/design/redesign-after.png) · [mit Befehlspalette](docs/design/redesign-palette.png)
 
+TerminalMgr **merkt sich beim Beenden** Position und Größe des Fensters, ob es maximiert war, und ob Serverliste und Clipboard-Spalte offen oder zu waren, samt ihrer Breite (in `settings.json`, Eintrag `Window`). Ist der Bildschirm von früher nicht mehr da (zweiter Monitor abgesteckt, andere Auflösung), erscheint das Fenster mittig auf dem ersten Bildschirm. Der Fokusmodus selbst wird nicht gemerkt; gespeichert wird der Zustand davor.
+
+**Fokus:** Nach jedem Wechsel per Tastatur (Alt+Ziffer, Navigation durch tmux-Fenster, Palette, Favoriten) und nach einem Klick auf einen Session-Tab liegt der Fokus im Terminal, nicht in Serverliste oder Tab-Leiste.
+
 ### Tastenkürzel, Wiederverbindung, Start mit Windows
 
 - **Tastenkürzel** (*Einstellungen*): Diktat (Vorgabe Ctrl+Y), Markierung kopieren (Ctrl+Shift+C), Zwischenablage einfügen (Ctrl+Shift+V) und der Modifikator für den Sessionwechsel mit 1 bis 9 (Vorgabe Alt; alternativ Ctrl+Alt, Alt+Shift, Ctrl+Shift). Die Kürzel gelten, bevor die Session die Taste sieht. Eine Kombination braucht Ctrl oder Alt (nur F1 bis F12 gehen allein). Ctrl+B bleibt für tmux reserviert, doppelte Belegungen werden beim Speichern abgelehnt. Ein Hinweis erscheint, wenn eine Kombination in bash/readline etwas bedeutet (Ctrl+Y ist „yank“).
