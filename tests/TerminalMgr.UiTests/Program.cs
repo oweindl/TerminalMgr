@@ -91,6 +91,61 @@ internal static class Program
         }
         Console.WriteLine($"PASS Compact clipboard: header {header.ActualHeight:F0}px, one-line row {first.ActualHeight:F0}px, menu actions retain full text");
     }
+    private static void TestWindowStrip()
+    {
+        var main = new MainWindow();
+        var strip = (ListBox)main.FindName("WindowStrip");
+        var tabs = (ListBox)main.FindName("SessionTabs");
+        var profiles = (ListBox)main.FindName("ProfilesList");
+        var show = typeof(MainWindow).GetMethod("ShowCards", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var root = (FrameworkElement)main.Content;
+        root.Measure(new Size(1300, 800)); root.Arrange(new Rect(0, 0, 1300, 800)); root.UpdateLayout();
+        Check(strip.Visibility == Visibility.Collapsed && tabs.Visibility == Visibility.Visible, "Without windows the server tabs stay");
+
+        WindowCard Card(int index, string name, string command, bool current, StripState state, string detail, string[] preview, double[] spark) =>
+            new($"@{index + 1}", index, name, command, current, state, state switch { StripState.Running => "läuft", StripState.Done => "fertig", StripState.Asking => "fragt", _ => "ruhig" }, detail, preview, spark);
+        var cards = new List<WindowCard>
+        {
+            Card(0, "shell", "bash", false, StripState.Idle, "bash · 1 h", ["~ $ ls", "README.md  src"], [0.2, 0.1, 0, 0, 0, 0, 0, 0]),
+            Card(1, "claude", "claude", true, StripState.Running, "claude · 4:12", ["Dateien lesen (12/40)", "Konfiguration ändern …"], [0.3, 0.6, 0.45, 0.8, 0.55, 0.9, 0.7, 1]),
+            Card(2, "build", "dotnet", false, StripState.Done, "dotnet · exit 0 · vor 2 min", ["Build succeeded.", "117 passed, 0 failed"], [0.9, 1, 0.7, 0.4, 0.15, 0, 0, 0]),
+            Card(3, "deploy", "terraform", false, StripState.Asking, "terraform · wartet 0:40", ["Plan: 3 to add", "Apply changes?"], [0.6, 0.8, 0.3, 0, 0, 0, 0, 0]),
+            Card(12, "logs", "tail", false, StripState.Running, "tail · gerade", ["GET /api/health 200", "POST /login 500"], [0.2, 0.35, 0.25, 0.5, 0.3, 0.4, 0.2, 0.45])
+        };
+        show.Invoke(main, [cards]);
+        root.Measure(new Size(1300, 800)); root.Arrange(new Rect(0, 0, 1300, 800)); root.UpdateLayout();
+        Check(strip.Visibility == Visibility.Visible && tabs.Visibility == Visibility.Collapsed, "With windows the strip replaces the tabs");
+        Check(strip.Items.Count == 5, "One card per window");
+        var first = (ListBoxItem)strip.ItemContainerGenerator.ContainerFromIndex(0);
+        Check(first.ActualHeight is > 60 and <= 130, "Card height: " + first.ActualHeight);
+        var model = (StripCard)strip.Items[1];
+        Check(model.Shortcut == "Ctrl 1" && model.Current && model.Preview1 == "Dateien lesen (12/40)" && model.SparkHeights.Count == WindowActivityTracker.SparkBuckets && model.SparkHeights.All(h => h is >= 1.5 and <= 12), "Card model");
+        Check(((StripCard)strip.Items[4]).Shortcut == "", "No Ctrl number beyond 9");
+        Check(!ReferenceEquals(model.StateBrush, ((StripCard)strip.Items[2]).StateBrush) && !ReferenceEquals(((StripCard)strip.Items[3]).StateBrush, ((StripCard)strip.Items[0]).StateBrush), "Each state has its own color");
+
+        // Alt numbers appear in the server list, beyond the ninth server there is none.
+        var items = (System.Collections.IList)profiles.ItemsSource;
+        for (int i = 0; i < 11; i++) items.Add(new ProfileItem(new Profile { Name = "s" + i, Destination = "s" + i }));
+        Check(((ProfileItem)items[0]!).AltLabel == "Alt 1" && ((ProfileItem)items[8]!).AltLabel == "Alt 9" && ((ProfileItem)items[9]!).AltLabel == "" && ((ProfileItem)items[9]!).AltVisibility == Visibility.Collapsed, "Alt labels in the server list");
+
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") is { Length: > 0 } directory)
+        {
+            var host = (FrameworkElement)strip.Parent;
+            int width = 1100;
+            host.Measure(new Size(width, 200)); host.Arrange(new Rect(0, 0, width, host.DesiredSize.Height)); host.UpdateLayout();
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(width, (int)Math.Ceiling(host.DesiredSize.Height), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(host);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            Directory.CreateDirectory(directory);
+            using var png = File.Create(Path.Combine(directory, "window-strip.png"));
+            encoder.Save(png);
+        }
+        show.Invoke(main, [new List<WindowCard>()]);
+        Check(strip.Visibility == Visibility.Collapsed && tabs.Visibility == Visibility.Visible, "Empty again: tabs back");
+        Console.WriteLine($"PASS Window strip: cards for tmux windows with state, preview and activity; replaces the tabs; Alt numbers in the server list (card {first.ActualHeight:F0}px)");
+    }
+
     private static void TestClipboardFullText()
     {
         var shortItem = new ClipItem(new ClipboardEntry("kurz", "dev", DateTimeOffset.Now));
@@ -557,6 +612,7 @@ internal static class Program
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
             TestClipboardCompactDesign();
+            TestWindowStrip();
             TestClipboardFullText();
             TestUpdateDialog();
             TestConfigDialogs();

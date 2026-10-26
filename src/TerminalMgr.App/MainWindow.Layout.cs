@@ -25,6 +25,7 @@ public partial class MainWindow
         // Messages that used to go to the status bar appear as a toast in the terminal page.
         DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock)).AddValueChanged(StatusText, (_, _) => ShowToast(StatusText.Text));
         ApplyPaletteHint();
+        InitializeStrip();
     }
 
     /// <summary>
@@ -110,6 +111,7 @@ public partial class MainWindow
     /// <summary>One tab per connected server, plus the selected one (so the terminal always has its tab). The number is the Alt number.</summary>
     private void RefreshTabs()
     {
+        for (int i = 0; i < _profiles.Count; i++) _profiles[i].AltLabel = i < 9 ? "Alt " + (i + 1) : "";
         if (_updatingTabs || SessionTabs is null) return;
         _updatingTabs = true;
         try

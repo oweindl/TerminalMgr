@@ -849,6 +849,52 @@ try
             "https://", "ms-msdt:/id", "https://example.com/a b", "https://example.com/", "mailto:a@b.c", new string('a', 3000) })
             Check(!LinkRules.TryNormalize(bad, out _), "Must be refused: " + bad);
     });
+    Test("Window strip: parser reads windows, clock and previews and strips escape sequences", () =>
+    {
+        string output = "@@NOW 1000\n@1\t0\t0\t0\t900\t0\t\tbash\tshell\n@2\t1\t1\t0\t998\t0\t\tclaude\tclaude\n@3\t2\t0\t1\t100\t0\t\tterraform\tdeploy\n@4\t3\t0\t0\t900\t1\t0\tdotnet\tbuild\nmuell ohne Tabs\n"
+            + "@@W @1\n~ $ ls\nREADME.md\n@@W @2\n\u001b[32mlesen\u001b[0m 12/40\n@@W @3\nApply changes?\n@@W @4\nBuild succeeded.\n";
+        var poll = WindowStripParser.Parse(output);
+        Check(poll.ServerEpoch == 1000 && poll.Windows.Count == 4, "Clock and window count");
+        Check(poll.Windows.Select(w => w.Name).SequenceEqual(["shell", "claude", "deploy", "build"]), "Names in index order");
+        Check(poll.Windows[1].Active && poll.Windows[2].Bell && poll.Windows[3] is { Dead: true, ExitStatus: 0 }, "Flags");
+        Check(poll.Windows[1].Preview.SequenceEqual(["lesen 12/40"]), "Escape sequences removed: " + string.Join("|", poll.Windows[1].Preview));
+        Check(poll.Windows[0].Preview.SequenceEqual(["~ $ ls", "README.md"]), "Preview lines");
+        Check(WindowStripParser.Parse("kaputt\n@x\t1\n").Windows.Count == 0, "Garbage ignored");
+        Check(WindowStripParser.Script("main").Contains("list-windows -t") && WindowStripParser.Script("main").Contains("capture-pane"), "Script");
+        var profile = new Profile { Name = "x", Destination = "x" };
+        Check(SshCommand.TmuxStripArguments(profile, "main").Last().StartsWith("sh -c "), "Run through sh, whatever the login shell is");
+        bool refused = false;
+        try { SshCommand.TmuxStripArguments(profile, "a\nb"); } catch (ArgumentException) { refused = true; }
+        Check(refused, "Control characters in the session name are refused");
+    });
+    Test("Window strip: states running, done, asking, idle; looking at a window clears 'done'", () =>
+    {
+        WindowSnapshot Win(string id, int index, string command, bool active, bool bell, long activity, bool dead = false, int? exit = null, params string[] preview) =>
+            new(id, index, id, command, active, bell, activity, dead, exit, preview);
+        var tracker = new WindowActivityTracker();
+        var t0 = new DateTimeOffset(2026, 10, 26, 12, 0, 0, TimeSpan.Zero);
+        var first = tracker.Update(new WindowPoll(1000, [
+            Win("@1", 0, "bash", false, false, 900), Win("@2", 1, "claude", false, false, 998),
+            Win("@3", 2, "terraform", false, true, 100), Win("@4", 3, "dotnet", false, false, 900, true, 0)]), t0);
+        Check(first.Select(c => c.State).SequenceEqual([StripState.Idle, StripState.Running, StripState.Asking, StripState.Done]), "First states: " + string.Join(",", first.Select(c => c.State)));
+        Check(first[3].Detail.StartsWith("dotnet · exit 0"), "Exit status shown: " + first[3].Detail);
+        Check(first[1].Shortcut == "Ctrl 1" && new WindowCard("@9", 12, "x", "", false, StripState.Idle, "", "", [], []).Shortcut == "", "Ctrl number only for 0 to 9");
+        var later = tracker.Update(new WindowPoll(1060, [Win("@2", 1, "claude", false, false, 998)]), t0.AddSeconds(60));
+        Check(later[0].State == StripState.Done && later[0].Detail.StartsWith("claude · vor "), "Quiet after running is done: " + later[0].State + " " + later[0].Detail);
+        var seen = tracker.Update(new WindowPoll(1065, [Win("@2", 1, "claude", true, false, 998)]), t0.AddSeconds(65));
+        Check(seen[0].State == StripState.Idle, "Looked at: idle");
+        var busy = tracker.Update(new WindowPoll(1070, [Win("@2", 1, "claude", true, false, 1069)]), t0.AddSeconds(70));
+        var busy2 = tracker.Update(new WindowPoll(1075, [Win("@2", 1, "claude", true, false, 1074)]), t0.AddSeconds(75));
+        Check(busy2[0].State == StripState.Running && busy2[0].Detail == "claude · 0:05" && busy2[0].Spark.Count == 5 && busy2[0].Spark[4] > 0.5, "Running time and spark: " + busy2[0].Detail + " " + busy2[0].Spark.Count);
+        for (int i = 0; i < 12; i++) busy2 = tracker.Update(new WindowPoll(1080 + i * 5, [Win("@2", 1, "claude", true, false, 1079 + i * 5)]), t0.AddSeconds(80 + i * 5));
+        Check(busy2[0].Spark.Count == WindowActivityTracker.SparkBuckets, "Spark history is limited");
+        var question = tracker.Update(new WindowPoll(2000, [Win("@5", 4, "terraform", false, false, 1995, false, null, "Plan: 3 to add", "Apply changes?")]), t0.AddSeconds(900));
+        Check(question[0].State == StripState.Asking, "A question on the last line");
+        Check(WindowActivityTracker.LooksLikeQuestion("Continue [y/N]") && WindowActivityTracker.LooksLikeQuestion("Password for oli:") && !WindowActivityTracker.LooksLikeQuestion("~/projekt $ ls") && !WindowActivityTracker.LooksLikeQuestion(""), "Question heuristic");
+        Check(WindowActivityTracker.Duration(252) == "4:12" && WindowActivityTracker.Ago(120) == "2 min" && WindowActivityTracker.Ago(10) == "gerade" && WindowActivityTracker.Ago(7200) == "2 h", "Time labels");
+        var gone = tracker.Update(new WindowPoll(2005, []), t0.AddSeconds(905));
+        Check(gone.Count == 0, "Closed windows disappear");
+    });
     Test("Copy on select is off by default, survives a round trip and an export", () =>
     {
         Check(!new AppSettings().CopyOnSelect, "Default on");
@@ -1536,6 +1582,7 @@ else if (args.Contains("--ssh-smoke"))
         passed += await RealExitCodeScenario();
         passed += await RealOsc52Scenario();
         passed += await RealNavigationScenario();
+        passed += await RealWindowStripScenario();
     }
     catch (Exception ex) { failures.Add("SSH smoke: " + ex.Message); Console.WriteLine("FAIL " + ex.Message); }
     finally { await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)); }
@@ -1758,6 +1805,42 @@ async Task<int> RealOsc52Scenario()
         if (client is not null) await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
         await Remote("tmux kill-session -t tmgr-osc 2>/dev/null; true");
     }
+}
+
+// The window strip: one SSH call with the script from WindowStripParser. A throw-away session with a busy, a questioning and a quiet window.
+async Task<int> RealWindowStripScenario()
+{
+    string ssh = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "OpenSSH", "ssh.exe");
+    var profile = new Profile { Name = "testhost", Destination = sshHost };
+    async Task<string> Remote(string command)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string a in new[] { "-T", "-o", "RemoteCommand=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", sshHost, command }) start.ArgumentList.Add(a);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        return await stdout + await stderr;
+    }
+    try
+    {
+        await Remote("tmux kill-session -t tmgr-strip 2>/dev/null; tmux new-session -d -s tmgr-strip -n quiet 'sh' && tmux new-window -t tmgr-strip -n busy 'sh -c \"while true; do echo tick-$(date +%s); sleep 1; done\"' && tmux new-window -t tmgr-strip -n ask 'sh -c \"printf \\\"Apply changes? \\\"; sleep 600\"' && tmux select-window -t tmgr-strip:quiet");
+        await Task.Delay(TimeSpan.FromSeconds(WindowActivityTracker.RunningSeconds + 2));   // the quiet window must be older than the running limit
+        var query = new TmuxSessionQuery();
+        var poll = await query.StripAsync(profile, "tmgr-strip");
+        Check(poll.ServerEpoch > 1_700_000_000, "Server clock missing: " + poll.ServerEpoch);
+        Check(poll.Windows.Select(w => w.Name).SequenceEqual(["quiet", "busy", "ask"]), "Windows: " + string.Join(",", poll.Windows.Select(w => w.Name)));
+        Check(poll.Windows[0].Active && !poll.Windows[1].Active, "Active flag");
+        Check(poll.Windows[1].Preview.Any(l => l.StartsWith("tick-")), "Preview of the busy window: " + string.Join("|", poll.Windows[1].Preview));
+        var tracker = new WindowActivityTracker();
+        var cards = tracker.Update(poll, DateTimeOffset.Now);
+        Check(cards[1].State == StripState.Running, "Busy window runs: " + cards[1].State + " " + cards[1].Detail);
+        Check(cards[2].State == StripState.Asking, "A question on the last line: " + cards[2].State + " " + string.Join("|", poll.Windows[2].Preview));
+        Check(cards[0].State == StripState.Idle, "Active quiet window is idle: " + cards[0].State);
+        Console.WriteLine($"PASS Real tmux: the strip query returns clock, flags and previews; busy window runs, question is detected, active window idle ({cards[1].Detail})");
+        return 1;
+    }
+    finally { await Remote("tmux kill-session -t tmgr-strip 2>/dev/null; true"); }
 }
 
 // The navigation shortcuts switch the tmux window through the command prompt of the own client. While a program runs in the window

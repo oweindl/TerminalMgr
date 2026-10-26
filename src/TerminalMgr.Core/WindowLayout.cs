@@ -29,6 +29,8 @@ public sealed record WindowLayout
     public double ServerWidth { get; init; }
     public bool? ClipboardOpen { get; init; }
     public double ClipboardWidth { get; init; }
+    /// <summary>The strip of tmux windows below the title bar; null (never saved) means on.</summary>
+    public bool? StripOpen { get; init; }
 
     public const double MinWidth = 880, MinHeight = 540;
     private const double VisibleWidth = 160, VisibleHeight = 60;

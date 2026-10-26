@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Media;
 using TerminalMgr.Core;
 namespace TerminalMgr.App;
 
@@ -12,6 +13,30 @@ public sealed class TabModel(ProfileItem item, string number)
     public string Tooltip => $"{Item.Name} · {Item.Profile.Destination}{Environment.NewLine}{Item.Status}" + (Number.Length > 0 ? $"{Environment.NewLine}Alt+{Number}" : "");
 }
 
+/// <summary>One card of the window strip: a tmux window with its state, the last lines and the activity history.</summary>
+public sealed class StripCard(WindowCard card)
+{
+    public WindowCard Card { get; } = card;
+    public string WindowId => Card.WindowId;
+    public int Index => Card.Index;
+    public string Shortcut => Card.Shortcut;
+    public string Name => Card.Name;
+    public string StateLabel => Card.StateLabel;
+    public string Detail => Card.Detail;
+    public bool Current => Card.Current;
+    public StripState State => Card.State;
+    public string Preview1 => Card.Preview.Count > 1 ? Card.Preview[^2] : Card.Preview.Count == 1 ? Card.Preview[0] : "";
+    public string Preview2 => Card.Preview.Count > 1 ? Card.Preview[^1] : "";
+    public Brush StateBrush => (Brush)Application.Current.FindResource(State switch
+    {
+        StripState.Running => "AccentBrush", StripState.Done => "ConnectedBrush", StripState.Asking => "RecordingBrush", _ => "LineStrongBrush"
+    });
+    /// <summary>Heights in pixels (at most 12) of the activity bars, oldest first; always <see cref="WindowActivityTracker.SparkBuckets"/> of them.</summary>
+    public IReadOnlyList<double> SparkHeights => Enumerable.Repeat(0.0, Math.Max(0, WindowActivityTracker.SparkBuckets - Card.Spark.Count))
+        .Concat(Card.Spark).Select(v => Math.Max(1.5, v * 12)).ToList();
+    public string Tooltip => $"{Name} ({(Shortcut.Length > 0 ? Shortcut + " · " : "")}{StateLabel}){Environment.NewLine}{Detail}";
+}
+
 public enum ConnectionState { Disconnected, Connecting, Connected }
 
 public sealed class ProfileItem(Profile profile) : INotifyPropertyChanged
@@ -19,6 +44,10 @@ public sealed class ProfileItem(Profile profile) : INotifyPropertyChanged
     public Profile Profile { get; set; } = profile;
     public string Name => Profile.Name;
     private string _status = profile.AutoConnect ? "Autostart · getrennt" : "Getrennt";
+    /// <summary>The Alt number of this server in the list ("Alt 1" to "Alt 9"), empty beyond the ninth.</summary>
+    private string _altLabel = "";
+    public string AltLabel { get => _altLabel; set { if (_altLabel == value) return; _altLabel = value; Changed(); Changed(nameof(AltVisibility)); } }
+    public Visibility AltVisibility => _altLabel.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public string Status { get => _status; set { _status = value; Changed(); Changed(nameof(Connection)); } }
     /// <summary>What the tab shows as a dot: green when connected, an amber ring while connecting, nothing otherwise.</summary>
     public ConnectionState Connection => _status.StartsWith('●') ? ConnectionState.Connected

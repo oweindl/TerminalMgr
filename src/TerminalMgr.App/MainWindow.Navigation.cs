@@ -41,6 +41,7 @@ public partial class MainWindow
             {
                 "windowNext" => TmuxNavigation.Next,
                 "windowPrevious" => TmuxNavigation.Previous,
+                _ when action.StartsWith("windowId:", StringComparison.Ordinal) && TmuxWindowParser.IsWindowId(action["windowId:".Length..]) => TmuxNavigation.SelectWindowId(action["windowId:".Length..]),
                 _ when action.Length == 7 && action.StartsWith("window") && char.IsAsciiDigit(action[6]) => TmuxNavigation.SelectIndex(action[6] - '0'),
                 _ => null
             };
@@ -70,6 +71,7 @@ public partial class MainWindow
     {
         await Task.Delay(350);
         await RecordPositionAsync(item, TimeSpan.FromSeconds(5));
+        _ = PollStripAsync(force: true);
     }
 
     /// <summary>Asks the server which window the attached session shows now and puts it at the front of the history.</summary>
