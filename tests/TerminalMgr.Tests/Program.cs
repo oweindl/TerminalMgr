@@ -377,7 +377,7 @@ try
         Check(Shortcut.TryParse("Ctrl+<", out var back) && back.Key == "<" && Shortcut.FromDomCode("IntlBackslash") == "<", "Ctrl+< must parse and map from the ISO key");
         var defaults = new AppSettings();
         var navigation = ShortcutRules.NavigationShortcuts(defaults);
-        Check(navigation.Count == 13 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
+        Check(navigation.Count == 14 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
             && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Shift+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+<"), "Default navigation shortcuts");
         Check(ShortcutRules.FindConflict(defaults) is null, "Defaults must not conflict: " + ShortcutRules.FindConflict(defaults));
         Check((new ShortcutOptions { WindowModifier = "Ctrl+Alt" }).Normalized().WindowModifier == "Ctrl", "Ctrl+Alt is AltGr on German keyboards and not offered");
@@ -463,6 +463,43 @@ try
         Check(merged.Favorites.Select(f => f.Id).OrderBy(i => i).SequenceEqual(["f1", "f2"]), "Merge keeps both");
         var replaced = ConfigImporter.Apply(target, content, ConfigImporter.BuildPlan(target, content, [], ImportMode.ReplaceAll), new Dictionary<string, ConflictChoice>(), false, true, false, false).Settings;
         Check(replaced.Favorites.Single().Id == "f1", "Replace all takes the file's favorites");
+    });
+    Test("Palette items: favorites, windows of connected servers only, shortcut hints, clipboard, actions, recent windows only for the empty input", () =>
+    {
+        TmuxWindowRecord Win(string sid, string session, string wid, int index, string name, bool active = false) => new(sid, session, wid, index, name, "bash", active);
+        var settings = new AppSettings
+        {
+            Profiles = [new Profile { Id = "p1", Name = "devbox", Destination = "devbox" }, new Profile { Id = "p2", Name = "server1", Destination = "server1" }],
+            Favorites = [new Favorite { Id = "f1", Name = "Archyx", ProfileId = "p1", SessionName = "main", WindowName = "archyx", Shortcut = "Ctrl+Alt+A" }]
+        };
+        var servers = new[]
+        {
+            new PaletteServer("p1", "devbox", true, "$0", [Win("$0", "main", "@1", 0, "shell", true), Win("$0", "main", "@4", 2, "archyx"), Win("$1", "work", "@9", 0, "logs")]),
+            new PaletteServer("p2", "server1", false, null, [Win("$0", "x", "@1", 0, "never shown")])
+        };
+        var recent = new[] { new NavigationPosition("p1", "$0", "main", "@1", "shell"), new NavigationPosition("p2", "$0", "x", "@5", "old") };
+        var items = PaletteBuilder.Build(settings, servers, recent, ["erste Zeile\nzweite", "", "kurz"], [new PaletteAction("dictation", "Diktat starten", "Ctrl+Y")]);
+
+        var favorite = items.Single(i => i.Group == PaletteBuilder.FavoritesGroup);
+        Check(favorite.Id == "favorite:f1" && favorite.Title == "Archyx" && favorite.Subtitle == "devbox › main › archyx" && favorite.Shortcut == "Ctrl+Alt+A" && favorite.ShowWhenEmpty && favorite.Searchable, "Favorite item");
+        var windows = items.Where(i => i.Group == PaletteBuilder.WindowsGroup).ToList();
+        Check(windows.Count == 3 && windows.All(w => w.Title.StartsWith("devbox › ")), "Only the connected server's windows: " + string.Join(" | ", windows.Select(w => w.Title)));
+        Check(windows.Single(w => w.Title.EndsWith("2: archyx (bash)") || w.Title.EndsWith("2: archyx")).Shortcut == "Ctrl+2", "Window 2 of the shown session has its shortcut");
+        Check(windows.Single(w => w.Title.Contains("work ›")).Shortcut == "", "Another session has no shortcut hint");
+        Check(windows.Single(w => w.Title.Contains("0: shell")).Subtitle == "aktives Fenster", "Active window marked");
+        var recentItems = items.Where(i => i.Group == PaletteBuilder.RecentGroup).ToList();
+        Check(recentItems.Count == 1 && recentItems[0].Title == "server1 › x › old" && recentItems[0].ShowWhenEmpty && !recentItems[0].Searchable, "The current window is not 'recent'; recent ones are not searchable");
+        var clips = items.Where(i => i.Group == PaletteBuilder.ClipboardGroup).ToList();
+        Check(clips.Count == 2 && clips[0].Id == "clip:0" && clips[0].Title == "erste Zeile" && clips[0].Subtitle.Contains("2 Zeilen") && clips[1].Id == "clip:2", "Clipboard entries keep their list index, empty ones are skipped");
+        Check(items.Last() is { Id: "action:dictation", Shortcut: "Ctrl+Y", Group: "Aktionen" }, "Action");
+        Check(PaletteBuilder.GroupOrder.SequenceEqual(["Favoriten", "Zuletzt benutzt", "tmux-Fenster", "Clipboard", "Aktionen"]), "Group order");
+    });
+    Test("Palette window ids: only well-formed ones are accepted", () =>
+    {
+        string id = PaletteBuilder.WindowId("p1", "$0", "@4");
+        Check(PaletteBuilder.TryParseWindowId(id, out var p, out var s, out var w) && p == "p1" && s == "$0" && w == "@4", "Round trip");
+        foreach (string bad in new[] { "window:p1|$0", "window:|$0|@4", "window:p1|0|@4", "window:p1|$0|4", "window:p1|$0|@4|x", "action:dictation", "window:p1|$0;rm|@4" })
+            Check(!PaletteBuilder.TryParseWindowId(bad, out _, out _, out _), "Accepted: " + bad);
     });
     Test("Word error rate", () =>
     {

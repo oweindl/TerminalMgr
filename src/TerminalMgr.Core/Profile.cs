@@ -77,12 +77,15 @@ public sealed record ShortcutOptions
     public string PreviousWindow { get; init; } = "Ctrl+Shift+Tab";
     /// <summary>Back to the window used before, across servers.</summary>
     public string Back { get; init; } = "Ctrl+<";
+    /// <summary>Opens the command palette. Not Ctrl+K: that is "kill to end of line" in bash/readline.</summary>
+    public string Palette { get; init; } = "Ctrl+Shift+K";
 
     public ShortcutOptions Normalized() => this with {
         WindowModifier = ShortcutRules.WindowModifiers.Contains(WindowModifier) ? WindowModifier : "Ctrl",
         NextWindow = Shortcut.TryParse(NextWindow, out var next) ? next.ToString() : "Ctrl+Tab",
         PreviousWindow = Shortcut.TryParse(PreviousWindow, out var previous) ? previous.ToString() : "Ctrl+Shift+Tab",
         Back = Shortcut.TryParse(Back, out var back) ? back.ToString() : "Ctrl+<",
+        Palette = Shortcut.TryParse(Palette, out var palette) ? palette.ToString() : "Ctrl+Shift+K",
         Copy = Shortcut.TryParse(Copy, out var copy) ? copy.ToString() : "Ctrl+Shift+C",
         Paste = Shortcut.TryParse(Paste, out var paste) ? paste.ToString() : "Ctrl+Shift+V",
         SessionModifier = ShortcutRules.SessionModifiers.Contains(SessionModifier) ? SessionModifier : "Alt"

@@ -22,6 +22,13 @@
     for (const p of parts.slice(0, -1)) { const l = p.toLowerCase(); if (l === 'ctrl') s.ctrl = true; else if (l === 'alt') s.alt = true; else if (l === 'shift') s.shift = true; }
     return s;
   }
+  // Command palette: opens at once with the last list the host sent; the host answers "paletteOpened" with a fresh one.
+  const palette = window.TerminalPalette.create({ send, onClosed: () => sessions.get(active)?.term.focus() });
+  function togglePalette() {
+    if (palette.isOpen()) { palette.close(); return; }
+    palette.open(null);
+    send({ type:'paletteOpened' });
+  }
   const parseModifier = text => { const s = parseShortcut(text + '+X'); return { ctrl:s.ctrl, alt:s.alt, shift:s.shift }; };
   // Defaults until the host sends the configured ones: dictation, copy, paste, and Alt+1..9 for switching sessions.
   const terminalSettings = { osc52:true, debug:false };
@@ -81,6 +88,7 @@
         if (hit) {
           if (hit.action === 'copy') return fire(copySelection);
           if (hit.action === 'paste') return fire(() => send({ type:'pasteRequest', id }));
+          if (hit.action === 'palette') return fire(togglePalette);
           return fire(() => send({ type:'shortcut', action:hit.action, id }));
         }
       }
@@ -145,6 +153,11 @@
     const s = sessions.get(m.id);
     switch(m.type) {
       case 'speech': speechCommand(m); break;
+      case 'palette':
+        if (m.cmd === 'open') { if (!palette.isOpen()) { palette.open(m.items ?? null); send({ type:'paletteOpened' }); } }
+        else if (m.cmd === 'close') palette.close();
+        break;
+      case 'paletteItems': palette.update(m.items ?? []); break;
       case 'create': create(m.id); break;
       case 'select': select(m.id); break;
       case 'output': s?.term.write(m.data); break;

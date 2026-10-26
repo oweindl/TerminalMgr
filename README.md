@@ -89,6 +89,15 @@ Einstellungen › Tastenkürzel: Modifier für 0 bis 9 (Ctrl, Alt+Shift, Ctrl+Sh
 
 Favoriten sind an Server, Session-Namen und Fenster-Namen gebunden, nicht an tmux-IDs (die ändern sich nach einem tmux-Neustart); bei gleichnamigen Fenstern gilt das erste. Fehlt das Fenster, erscheint ein Hinweis in der Statuszeile. Die Favoriten gehören zum Konfigurationsexport.
 
+### Befehlspalette (Ctrl+Shift+K)
+
+Ein Overlay über dem Terminal, in HTML und CSS in der Terminalseite (ein WPF-Element läge hinter dem WebView2). Eingabefeld mit unscharfer Suche (Groß-/Kleinschreibung und Umlaute egal, alle Wörter müssen passen), ↑/↓ wählen, Enter führt aus, Esc schließt. Alle Tasten gehen in das Eingabefeld, keine ins Terminal; Ctrl+K erreicht außerhalb der Palette weiter die Shell.
+
+- Gruppen: **Favoriten**, **tmux-Fenster** aller verbundenen Server (Server › Session › Fenster), **Clipboard** (Enter fügt ein), **Aktionen** (Diktat, Verbinden/Trennen, Profil anlegen, Einstellungen, Export/Import, Updates, Zurück/Nächstes/Voriges).
+- Neben jedem Treffer steht das Tastenkürzel (Ctrl+2, Ctrl+Alt+A …). Leere Eingabe zeigt Favoriten und die zuletzt benutzten Fenster.
+- Die Palette erscheint sofort mit der zuletzt bekannten Liste; die tmux-Fenster werden beim Öffnen frisch abgefragt (`list-windows -a`) und ersetzen die Liste, ohne dass Eingabe oder Auswahl verloren gehen.
+- **Ctrl+D** speichert das markierte Fenster als Favorit (Name und Kürzel in einem kleinen Dialog; Doppelbelegungen werden abgelehnt).
+
 ### Tastenkürzel, Wiederverbindung, Start mit Windows
 
 - **Tastenkürzel** (*Einstellungen*): Diktat (Vorgabe Ctrl+Y), Markierung kopieren (Ctrl+Shift+C), Zwischenablage einfügen (Ctrl+Shift+V) und der Modifikator für den Sessionwechsel mit 1 bis 9 (Vorgabe Alt; alternativ Ctrl+Alt, Alt+Shift, Ctrl+Shift). Die Kürzel gelten, bevor die Session die Taste sieht. Eine Kombination braucht Ctrl oder Alt (nur F1 bis F12 gehen allein). Ctrl+B bleibt für tmux reserviert, doppelte Belegungen werden beim Speichern abgelehnt. Ein Hinweis erscheint, wenn eine Kombination in bash/readline etwas bedeutet (Ctrl+Y ist „yank“).
