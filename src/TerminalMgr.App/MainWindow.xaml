@@ -232,9 +232,12 @@
          <TextBlock Text="{Binding Time}" Foreground="{DynamicResource Text2Brush}" FontSize="10"/>
         </StackPanel>
        </Grid>
+       <!-- Visible frame while the pointer is over the entry; the active entry keeps its accent strip and tint, so the two stay apart. -->
+       <Border x:Name="HoverFrame" Grid.RowSpan="2" Margin="-9,-7,-11,-7" BorderThickness="1" CornerRadius="3" BorderBrush="Transparent" IsHitTestVisible="False"/>
       </Grid>
      </Border>
      <DataTemplate.Triggers>
+      <Trigger SourceName="Card" Property="IsMouseOver" Value="True"><Setter TargetName="HoverFrame" Property="BorderBrush" Value="{DynamicResource Text2Brush}"/></Trigger>
       <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></DataTrigger>
       <Trigger SourceName="Card" Property="IsMouseOver" Value="True"><Setter TargetName="ClipActions" Property="Opacity" Value="1"/><Setter TargetName="ClipActions" Property="IsHitTestVisible" Value="True"/></Trigger>
       <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="ClipActions" Property="Opacity" Value="1"/><Setter TargetName="ClipActions" Property="IsHitTestVisible" Value="True"/></DataTrigger>

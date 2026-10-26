@@ -24,6 +24,17 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T found) return found;
+            if (FindDescendant<T>(child) is { } deeper) return deeper;
+        }
+        return null;
+    }
+
     private static void TestClipboardCompactDesign()
     {
         var main = new MainWindow();
@@ -47,6 +58,12 @@ internal static class Program
         Check(header.ActualHeight <= 100, "Clipboard header wastes space: " + header.ActualHeight);
         var first = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(0);
         Check(first.ActualHeight <= 72, "A one-line clipboard entry is too tall: " + first.ActualHeight);
+        // The hover frame: a visible, click-through border in the entry, switched on by the pointer being over the card.
+        var presenter = FindDescendant<ContentPresenter>(first)!;
+        var frame = presenter.ContentTemplate.FindName("HoverFrame", presenter) as Border;
+        Check(frame is { IsHitTestVisible: false, BorderThickness.Left: >= 1 }, "Hover frame is missing or blocks the mouse");
+        Check(list.ItemTemplate.Triggers.OfType<Trigger>().Any(t => t.SourceName == "Card" && t.Property == UIElement.IsMouseOverProperty
+            && t.Setters.OfType<Setter>().Any(s => s.TargetName == "HoverFrame" && s.Property == Border.BorderBrushProperty)), "Hover does not switch the frame on");
         Check(rows[0].PinnedVisibility == Visibility.Visible && rows[1].PinnedVisibility == Visibility.Collapsed, "Pinned marker");
 
         string? copied = null;
