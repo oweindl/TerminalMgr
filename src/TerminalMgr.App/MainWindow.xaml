@@ -47,6 +47,9 @@
      <ToggleButton x:Name="DictationButton" Style="{StaticResource IconBarButton}" Click="DictationButtonClick" ToolTip="Diktat starten (Ctrl+Y)" AutomationProperties.Name="Diktat">
       <Path Style="{StaticResource IconPath}" Data="{StaticResource IconMic}"/>
      </ToggleButton>
+     <ToggleButton x:Name="StripButton" Style="{StaticResource IconBarButton}" Click="ToggleStrip" ToolTip="Fensterleiste: tmux-Fenster mit Status ein- und ausblenden" AutomationProperties.Name="Fensterleiste" IsChecked="True">
+      <Path Style="{StaticResource IconPath}" Data="{StaticResource IconStrip}"/>
+     </ToggleButton>
     </StackPanel>
    </DockPanel>
   </Border>
@@ -72,7 +75,10 @@
    <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
     <ListBox.ItemTemplate><DataTemplate>
      <Grid>
-      <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Border Grid.Column="2" Visibility="{Binding AltVisibility}" BorderBrush="{DynamicResource LineStrongBrush}" BorderThickness="1" CornerRadius="4" Padding="5,0" VerticalAlignment="Top" Margin="6,2,0,0" ToolTip="Mit dieser Taste zu diesem Server wechseln">
+       <TextBlock Text="{Binding AltLabel}" FontFamily="{DynamicResource MonoFont}" FontSize="11" Foreground="{DynamicResource Text2Brush}"/>
+      </Border>
       <Ellipse x:Name="Dot" Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,6,0,0" Fill="Transparent" Stroke="{DynamicResource LineStrongBrush}" StrokeThickness="1.5"/>
       <StackPanel Grid.Column="1">
        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
@@ -90,7 +96,7 @@
 
   <!-- Session tabs and terminal -->
   <Grid Grid.Column="3">
-   <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
    <Border Background="{DynamicResource BarBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
     <DockPanel>
      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
@@ -101,6 +107,44 @@
        <Path Style="{StaticResource IconPath}" Data="{StaticResource IconFocus}" Width="16" Height="16"/>
       </Button>
      </StackPanel>
+     <Grid>
+     <ListBox x:Name="WindowStrip" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="8,7,8,7" Focusable="False" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden" AutomationProperties.Name="tmux-Fenster">
+      <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
+      <ListBox.ItemContainerStyle>
+       <Style TargetType="ListBoxItem"><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0"/><Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate></Setter.Value></Setter>
+       </Style>
+      </ListBox.ItemContainerStyle>
+      <ListBox.ItemTemplate><DataTemplate>
+       <Border x:Name="Card" Width="176" Margin="0,0,6,0" Padding="9,6,9,6" CornerRadius="7" BorderThickness="1" BorderBrush="{DynamicResource LineBrush}" Background="{DynamicResource RaisedBrush}" Cursor="Hand" ToolTip="{Binding Tooltip}" Tag="{Binding}" MouseLeftButtonUp="StripCardClick">
+        <StackPanel>
+         <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Border BorderBrush="{DynamicResource LineStrongBrush}" BorderThickness="1" CornerRadius="4" Padding="4,0" Margin="0,0,6,0" VerticalAlignment="Center"><TextBlock Text="{Binding Shortcut}" FontFamily="{DynamicResource MonoFont}" FontSize="10" Foreground="{DynamicResource Text2Brush}"/></Border>
+          <TextBlock Grid.Column="1" Text="{Binding Name}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+           <Ellipse x:Name="StateDot" Width="7" Height="7" Fill="{Binding StateBrush}" Margin="6,0,4,0"/>
+           <TextBlock Text="{Binding StateLabel}" FontSize="10" Foreground="{DynamicResource Text2Brush}"/>
+          </StackPanel>
+         </Grid>
+         <StackPanel Margin="0,5,0,0" Height="28">
+          <TextBlock Text="{Binding Preview1}" FontFamily="{DynamicResource MonoFont}" FontSize="9.5" Foreground="{DynamicResource Text2Brush}" TextTrimming="CharacterEllipsis"/>
+          <TextBlock Text="{Binding Preview2}" FontFamily="{DynamicResource MonoFont}" FontSize="9.5" Foreground="{DynamicResource Text2Brush}" TextTrimming="CharacterEllipsis"/>
+         </StackPanel>
+         <ItemsControl ItemsSource="{Binding SparkHeights}" Height="12" Margin="0,4,0,0">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate><DataTemplate><Border Height="{Binding}" Margin="0.75,0" VerticalAlignment="Bottom" CornerRadius="1" Background="{Binding DataContext.StateBrush, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Opacity="0.85"/></DataTemplate></ItemsControl.ItemTemplate>
+         </ItemsControl>
+         <TextBlock Text="{Binding Detail}" FontSize="10" Foreground="{DynamicResource Text2Brush}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+        </StackPanel>
+       </Border>
+       <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding Current}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Card" Property="Background" Value="{DynamicResource ActiveTintBrush}"/></DataTrigger>
+        <Trigger SourceName="Card" Property="IsMouseOver" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Text2Brush}"/></Trigger>
+        <DataTrigger Binding="{Binding State}" Value="Running"><DataTrigger.EnterActions><BeginStoryboard x:Name="Pulse"><Storyboard RepeatBehavior="Forever" AutoReverse="True"><DoubleAnimation Storyboard.TargetName="StateDot" Storyboard.TargetProperty="Opacity" From="1" To="0.3" Duration="0:0:0.7"/></Storyboard></BeginStoryboard></DataTrigger.EnterActions><DataTrigger.ExitActions><StopStoryboard BeginStoryboardName="Pulse"/></DataTrigger.ExitActions></DataTrigger>
+       </DataTemplate.Triggers>
+      </DataTemplate></ListBox.ItemTemplate>
+     </ListBox>
      <ListBox x:Name="SessionTabs" SelectionChanged="TabSelected" PreviewMouseRightButtonUp="TabRightClick" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Hidden" AutomationProperties.Name="Sessions">
       <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
       <ListBox.ItemContainerStyle>
@@ -134,6 +178,7 @@
        </DataTemplate.Triggers>
       </DataTemplate></ListBox.ItemTemplate>
      </ListBox>
+     </Grid>
     </DockPanel>
    </Border>
    <wv:WebView2 x:Name="TerminalView" Grid.Row="1" DefaultBackgroundColor="#0E0F11"/>

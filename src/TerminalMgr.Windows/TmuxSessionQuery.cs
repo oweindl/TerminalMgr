@@ -24,6 +24,10 @@ public sealed class TmuxSessionQuery
     public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
+    /// <summary>State and last lines of every window of one session; <paramref name="sessionTarget"/> is a session ID ($1) or name.</summary>
+    public async Task<WindowPoll> StripAsync(Profile profile, string sessionTarget, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
+        WindowStripParser.Parse(await RunAsync(SshCommand.TmuxStripArguments(profile, sessionTarget), timeout ?? TimeSpan.FromSeconds(8), cancellationToken));
+
     /// <summary>Output of "ssh -G" (the effective settings, no connection is made), or null when ssh does not answer within 5 s.</summary>
     public async Task<string?> EffectiveConfigAsync(Profile profile, CancellationToken cancellationToken = default)
     {

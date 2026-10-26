@@ -373,6 +373,7 @@ public partial class MainWindow : Window
         if (Selected is not { } item) return;
         SessionTitle.Text = TitleFor(item);
         Post(new { type = "select", id = item.Profile.Id });
+        StripSelectionChanged();
         UpdateDimensions(item.Profile.Id);
         RefreshTabs();
     }

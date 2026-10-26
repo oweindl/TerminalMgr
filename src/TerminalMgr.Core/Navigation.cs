@@ -80,6 +80,10 @@ public static class TmuxNavigation
     public static string SelectIndex(int index) =>
         index is >= 0 and <= 9 ? "select-window -t :" + index : throw new ArgumentOutOfRangeException(nameof(index));
 
+    /// <summary>A window by its stable ID (@12), for windows beyond index 9 and for clicks in the strip.</summary>
+    public static string SelectWindowId(string windowId) =>
+        TmuxWindowParser.IsWindowId(windowId) ? "select-window -t " + windowId : throw new ArgumentException("Ungültige tmux-Fenster-ID.");
+
     public const string Next = "next-window";
     public const string Previous = "previous-window";
 
