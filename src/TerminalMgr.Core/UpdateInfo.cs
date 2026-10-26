@@ -25,13 +25,25 @@ public static partial class UpdateInfo
         return true;
     }
 
-    public static string FileName(Version version) => $"TerminalMgr-win-x64-{version}.zip";
+    /// <summary>The processor architectures a release holds a package for.</summary>
+    public static readonly string[] Architectures = ["x64", "arm64", "x86"];
+
+    /// <summary>The architecture of this running program ("x64", "arm64" or "x86"). A program started under emulation is updated with its own kind of package.</summary>
+    public static string CurrentArchitecture => System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+    {
+        System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+        System.Runtime.InteropServices.Architecture.X86 => "x86",
+        _ => "x64"
+    };
+
+    /// <summary>"TerminalMgr-win-x64-0.2.34.zip": one package per architecture (older releases only have x64).</summary>
+    public static string FileName(Version version, string? architecture = null) => $"TerminalMgr-win-{architecture ?? CurrentArchitecture}-{version}.zip";
 
     /// <summary>
     /// The release from GitHub's "latest release" JSON, or null when it is not usable: draft, pre-release, no version tag,
     /// or the ZIP and its .sha256 are not both attached under a download address that passes <paramref name="isAllowedUrl"/>.
     /// </summary>
-    public static UpdateRelease? ParseLatestRelease(string json, Func<Uri, bool> isAllowedUrl)
+    public static UpdateRelease? ParseLatestRelease(string json, Func<Uri, bool> isAllowedUrl, string? architecture = null)
     {
         try
         {
@@ -42,7 +54,7 @@ public static partial class UpdateInfo
             if (root.TryGetProperty("prerelease", out var pre) && pre.ValueKind == JsonValueKind.True) return null;
             string tag = root.TryGetProperty("tag_name", out var t) ? t.GetString() ?? "" : "";
             if (!TryParseVersion(tag, out var version)) return null;
-            string zipName = FileName(version);
+            string zipName = FileName(version, architecture);
             Uri? zip = null, sha = null;
             long size = 0;
             if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
@@ -56,6 +68,26 @@ public static partial class UpdateInfo
             if (zip is null || sha is null) return null;
             string notes = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
             return new(version, tag, notes, zip, sha, zipName, size);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// When the latest release is fine but holds no package for <paramref name="architecture"/>: a message that says so (and which packages exist);
+    /// null when the release is unusable for other reasons or does have the package.
+    /// </summary>
+    public static string? MissingArchitectureMessage(string json, string? architecture = null)
+    {
+        architecture ??= CurrentArchitecture;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) return null;
+            var names = assets.EnumerateArray().Select(a => a.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "").ToList();
+            if (names.Any(n => n.StartsWith($"TerminalMgr-win-{architecture}-", StringComparison.Ordinal) && n.EndsWith(".zip", StringComparison.Ordinal))) return null;
+            var others = Architectures.Where(a => a != architecture && names.Any(n => n.StartsWith($"TerminalMgr-win-{a}-", StringComparison.Ordinal))).ToList();
+            return others.Count == 0 ? null : $"Das neueste Release hat kein Paket für Ihren Prozessor ({architecture}); vorhanden: {string.Join(", ", others)}.";
         }
         catch (JsonException) { return null; }
     }
