@@ -122,9 +122,6 @@ Alle Wechsel laufen über den tmux-Befehlsweg des eigenen Clients (Präfix und `
 | Ctrl+0 … Ctrl+9 | tmux-Fenster mit diesem Index in der angezeigten tmux-Session |
 | Ctrl+Tab / Ctrl+Shift+Tab | nächstes / voriges Fenster der Session (springt am Ende herum) |
 | Ctrl+< | zurück zum zuletzt benutzten Fenster, auch auf einem anderen Server (eigener Verlauf der App; nochmal drücken wechselt wieder zurück) |
-| Ctrl+↑ / Ctrl+↓ | tmux-Verlauf 3 Zeilen hoch / runter (über den tmux-Kopiermodus; bei gehaltener Taste addieren sich die Zeilen). Unten angekommen verlässt tmux den Kopiermodus von selbst |
-| Ctrl+Bild↑ / Ctrl+Bild↓ | tmux-Verlauf eine Seite hoch / runter |
-| Ctrl+Ende | sofort nach unten springen und den Kopiermodus verlassen (tmux zeigt oben rechts `[Zeile/Gesamt]`, solange man im Verlauf ist) |
 | Alt+1 … Alt+9 | Server wechseln (wie bisher) |
 | Favoriten | eigenes Kürzel je Favorit, z. B. Ctrl+Alt+A; bei getrenntem Server wird verbunden |
 

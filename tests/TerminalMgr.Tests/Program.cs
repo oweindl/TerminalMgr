@@ -387,7 +387,7 @@ try
         Check(Shortcut.TryParse("Ctrl+<", out var back) && back.Key == "<" && Shortcut.FromDomCode("IntlBackslash") == "<", "Ctrl+< must parse and map from the ISO key");
         var defaults = new AppSettings();
         var navigation = ShortcutRules.NavigationShortcuts(defaults);
-        Check(navigation.Count == 19 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
+        Check(navigation.Count == 14 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
             && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Shift+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+<"), "Default navigation shortcuts");
         Check(ShortcutRules.FindConflict(defaults) is null, "Defaults must not conflict: " + ShortcutRules.FindConflict(defaults));
         Check((new ShortcutOptions { WindowModifier = "Ctrl+Alt" }).Normalized().WindowModifier == "Ctrl", "Ctrl+Alt is AltGr on German keyboards and not offered");
@@ -741,19 +741,6 @@ try
         ReconnectDecision last = waits[^1];
         for (int i = 0; i < 500; i++) last = t.Lost(true, 255, now);
         Check(last.Retry && last.Delay == TimeSpan.FromSeconds(30) && last.Attempt == 507, "A long outage must keep retrying every 30 s: " + last);
-    });
-    Test("Scroll shortcuts: defaults, no clash, tmux commands for lines, pages and the jump to the end", () =>
-    {
-        var settings = new AppSettings();
-        var scroll = ShortcutRules.NavigationShortcuts(settings).Where(a => a.Action.StartsWith("scroll")).ToDictionary(a => a.Action, a => a.Shortcut.ToString());
-        Check(scroll["scrollUp"] == "Ctrl+Up" && scroll["scrollDown"] == "Ctrl+Down" && scroll["scrollPageUp"] == "Ctrl+PageUp" && scroll["scrollPageDown"] == "Ctrl+PageDown" && scroll["scrollEnd"] == "Ctrl+End", "Default scroll shortcuts");
-        Check(ShortcutRules.FindConflict(settings) is null, "Defaults must not clash");
-        Check(ShortcutRules.FindConflict(new AppSettings { Shortcuts = new ShortcutOptions { ScrollEnd = "Ctrl+Up" } }) is { } clash && clash.Contains("doppelt"), "Doubled scroll shortcut");
-        Check(new ShortcutOptions { ScrollUp = "Up" }.Normalized().ScrollUp == "Ctrl+Up", "A plain key falls back to the default");
-        Check(TmuxNavigation.ScrollUp(1) == "copy-mode ; send-keys -X -N 3 scroll-up" && TmuxNavigation.ScrollUp(4).Contains("-N 12"), "Scroll up enters the copy mode, presses add up");
-        Check(TmuxNavigation.ScrollDown(2).Contains("scroll-down-and-cancel") && TmuxNavigation.ScrollDown(2).StartsWith("if-shell -F \"#{pane_in_mode}\""), "Scroll down only inside the copy mode and leaves at the bottom");
-        Check(TmuxNavigation.ScrollEnd.Contains("send-keys -X cancel") && TmuxNavigation.PageDown.Contains("page-down-and-cancel") && TmuxNavigation.PageUp.Contains("page-up"), "Pages and end");
-        Check(TmuxNavigation.ScrollUp(1000).Contains("-N 300"), "Presses are capped");
     });
     Test("SSH arguments: keepalive notices a silent network loss within about 45 s, connect attempts time out", () =>
     {

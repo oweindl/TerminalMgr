@@ -84,21 +84,6 @@ public static class TmuxNavigation
     public static string SelectWindowId(string windowId) =>
         TmuxWindowParser.IsWindowId(windowId) ? "select-window -t " + windowId : throw new ArgumentException("Ungültige tmux-Fenster-ID.");
 
-    /// <summary>Lines per key press when scrolling the history of the pane.</summary>
-    public const int ScrollLines = 3;
-
-    // Scrolling goes through the tmux copy mode. "copy-mode" while already in it changes nothing; the "-and-cancel" scroll commands
-    // leave the copy mode by themselves once the bottom is reached, so the user never has to press q.
-    /// <summary>Scrolls up <paramref name="presses"/> × <see cref="ScrollLines"/> lines; enters the copy mode if needed.</summary>
-    public static string ScrollUp(int presses) => "copy-mode ; send-keys -X -N " + Lines(presses) + " scroll-up";
-    public static string ScrollDown(int presses) => InMode("send-keys -X -N " + Lines(presses) + " scroll-down-and-cancel");
-    public const string PageUp = "copy-mode ; send-keys -X page-up";
-    public static readonly string PageDown = InMode("send-keys -X page-down-and-cancel");
-    /// <summary>Jump to the end: leaves the copy mode and shows the live screen again.</summary>
-    public static readonly string ScrollEnd = InMode("send-keys -X cancel");
-
-    private static int Lines(int presses) => Math.Clamp(presses, 1, 100) * ScrollLines;
-    private static string InMode(string command) => "if-shell -F \"#{pane_in_mode}\" \"" + command + "\"";
 
     public const string Next = "next-window";
     public const string Previous = "previous-window";

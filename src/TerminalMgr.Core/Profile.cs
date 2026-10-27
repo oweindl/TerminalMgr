@@ -79,12 +79,6 @@ public sealed record ShortcutOptions
     public string Back { get; init; } = "Ctrl+<";
     /// <summary>Opens the command palette. Not Ctrl+K: that is "kill to end of line" in bash/readline.</summary>
     public string Palette { get; init; } = "Ctrl+Shift+K";
-    /// <summary>Scroll the tmux history of the pane: lines, pages, and back to the live screen.</summary>
-    public string ScrollUp { get; init; } = "Ctrl+Up";
-    public string ScrollDown { get; init; } = "Ctrl+Down";
-    public string ScrollPageUp { get; init; } = "Ctrl+PageUp";
-    public string ScrollPageDown { get; init; } = "Ctrl+PageDown";
-    public string ScrollEnd { get; init; } = "Ctrl+End";
 
     public ShortcutOptions Normalized() => this with {
         WindowModifier = ShortcutRules.WindowModifiers.Contains(WindowModifier) ? WindowModifier : "Ctrl",
@@ -92,11 +86,6 @@ public sealed record ShortcutOptions
         PreviousWindow = Shortcut.TryParse(PreviousWindow, out var previous) ? previous.ToString() : "Ctrl+Shift+Tab",
         Back = Shortcut.TryParse(Back, out var back) ? back.ToString() : "Ctrl+<",
         Palette = Shortcut.TryParse(Palette, out var palette) ? palette.ToString() : "Ctrl+Shift+K",
-        ScrollUp = Shortcut.TryParse(ScrollUp, out var scrollUp) ? scrollUp.ToString() : "Ctrl+Up",
-        ScrollDown = Shortcut.TryParse(ScrollDown, out var scrollDown) ? scrollDown.ToString() : "Ctrl+Down",
-        ScrollPageUp = Shortcut.TryParse(ScrollPageUp, out var scrollPageUp) ? scrollPageUp.ToString() : "Ctrl+PageUp",
-        ScrollPageDown = Shortcut.TryParse(ScrollPageDown, out var scrollPageDown) ? scrollPageDown.ToString() : "Ctrl+PageDown",
-        ScrollEnd = Shortcut.TryParse(ScrollEnd, out var scrollEnd) ? scrollEnd.ToString() : "Ctrl+End",
         Copy = Shortcut.TryParse(Copy, out var copy) ? copy.ToString() : "Ctrl+Shift+C",
         Paste = Shortcut.TryParse(Paste, out var paste) ? paste.ToString() : "Ctrl+Shift+V",
         SessionModifier = ShortcutRules.SessionModifiers.Contains(SessionModifier) ? SessionModifier : "Alt"
