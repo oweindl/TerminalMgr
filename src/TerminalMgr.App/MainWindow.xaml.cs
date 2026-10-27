@@ -74,6 +74,7 @@ public partial class MainWindow : Window
             _clipList.LoadPinned(settings.PinnedClips);
             ApplySettingsToUi();
             BeginStartupUpdateCheck();
+            PrepareDictationAtStart();
             if (_profiles.Count == 0)
             {
                 var config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");

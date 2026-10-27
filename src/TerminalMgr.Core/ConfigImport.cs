@@ -86,7 +86,8 @@ public static class ConfigImporter
                 Update = result.Update with { CheckOnStart = s.CheckForUpdates },
                 // The model, the microphone and the Windows start stay as they are on this machine.
                 Dictation = (result.Dictation with { Shortcut = s.Dictation.Shortcut, Language = s.Dictation.Language, InitialPrompt = s.Dictation.InitialPrompt,
-                    SilenceSeconds = s.Dictation.SilenceSeconds, LevelThreshold = s.Dictation.LevelThreshold }).Normalized()
+                    SilenceSeconds = s.Dictation.SilenceSeconds, LevelThreshold = s.Dictation.LevelThreshold,
+                    PingStart = s.Dictation.PingStart, PingEnd = s.Dictation.PingEnd, PingVolume = s.Dictation.PingVolume, PrepareAtStart = s.Dictation.PrepareAtStart }).Normalized()
             };
         if (takePinned && incoming.PinnedClips is { } pinned)
         {

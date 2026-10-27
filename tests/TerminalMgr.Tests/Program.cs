@@ -358,7 +358,7 @@ try
     {
         var source = new FakeSource();
         var transcriber = new FakeTranscriber { Responder = samples => samples > 3.2 * 16000 ? "Das ist der endgültige Text" : "Das ist" };
-        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions(), partialSeconds: 1.0));
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions { PingStart = false }, partialSeconds: 1.0));
         o.Session.Start();
         FeedSeconds(source, 2.0, 0.2);
         Check(WaitUntil(() => { lock (o.Partials) return o.Partials.Count > 0; }), "No provisional text while speaking");
@@ -369,6 +369,47 @@ try
         Check(transcriber.Calls.Last() >= 3.4 * 16000, "Final run must see the whole segment, saw " + transcriber.Calls.Last());
         Check(o.States.SequenceEqual([DictationState.Recording, DictationState.Processing, DictationState.Idle]), "States: " + string.Join(",", o.States));
         Check(WaitUntil(() => source.Disposed), "Microphone not released");
+    });
+    Test("Dictation tones: start rises, end falls, volume scales, soft edges, off at 0 %; options are clamped and exported", () =>
+    {
+        var start = DictationTones.Generate(true, 35);
+        var end = DictationTones.Generate(false, 35);
+        short[] Pcm(byte[] bytes) { var s = new short[bytes.Length / 2]; Buffer.BlockCopy(bytes, 0, s, 0, bytes.Length); return s; }
+        var a = Pcm(start); var b = Pcm(end);
+        Check(a.Length == (int)(0.06 * 44100) + (int)(0.08 * 44100) && b.Length == (int)(0.06 * 44100) + (int)(0.09 * 44100), "Short tones: " + a.Length + " / " + b.Length);
+        Check(a.Max(s => Math.Abs((int)s)) is > 5000 and <= (int)(0.8 * 0.35 * short.MaxValue) + 1, "Peak follows the volume: " + a.Max(s => Math.Abs((int)s)));
+        Check(Math.Abs(a[0]) < 200 && Math.Abs(a[^1]) < 200, "Soft attack and release, no click");
+        Check(!start.SequenceEqual(end), "Start and end tone differ");
+        Check(Pcm(DictationTones.Generate(true, 70)).Max(s => Math.Abs((int)s)) > a.Max(s => Math.Abs((int)s)), "Louder at 70 %");
+        Check(Pcm(DictationTones.Generate(true, 0)).All(s => s == 0), "0 % is silent");
+        var defaults = new DictationOptions();
+        Check(defaults.PingStart && defaults.PingEnd && defaults.PingVolume == 35 && defaults.PrepareAtStart, "Defaults");
+        Check((defaults with { PingVolume = 900 }).Normalized().PingVolume == 100 && (defaults with { PingVolume = -4 }).Normalized().PingVolume == 0, "Volume clamped");
+        var settings = new AppSettings { Dictation = new DictationOptions { PingStart = false, PingEnd = false, PingVolume = 80, PrepareAtStart = false } };
+        var exported = ConfigFile.Build(settings, new ExportSelection(false, true, false, false), []);
+        Check(exported.Settings?.Dictation is { PingStart: false, PingEnd: false, PingVolume: 80, PrepareAtStart: false }, "Exported");
+    });
+    Test("Dictation: Ready when the microphone delivers audio; with the start tone the first quarter second is dropped, without it nothing", () =>
+    {
+        foreach (bool tone in new[] { true, false })
+        {
+            var source = new FakeSource();
+            var transcriber = new FakeTranscriber();
+            var session = new DictationSession(() => source, transcriber, new DictationOptions { PingStart = tone });
+            int ready = 0;
+            session.Ready += () => Interlocked.Increment(ref ready);
+            var cards = Observe(session);
+            session.Start();
+            Check(ready == 0, "Not ready before audio");
+            FeedSeconds(source, 1.0, 0.2);
+            Check(ready == 1, "Ready exactly once, got " + ready);
+            Check(session.Metrics.AudioReadyMilliseconds is { } ms && ms >= 0 && ms < 2000, "Metrics: time to the first audio");
+            FeedSeconds(source, 1.7, 0);
+            Check(WaitUntil(() => { lock (cards.Results) return cards.Results.Count > 0; }), "No result");
+            int heard = transcriber.Calls.Last();
+            double expected = tone ? 2.7 - 0.25 : 2.7;
+            Check(Math.Abs(heard / 16000.0 - expected) < 0.35, $"Audio kept (tone={tone}): {heard / 16000.0:0.00} s, expected about {expected:0.00} s");
+        }
     });
     TimedWord W(string text, double start, double end) => new(text, TimeSpan.FromSeconds(start), TimeSpan.FromSeconds(end));
     Test("Word agreement: words are confirmed when two results agree, never recomputed, tentative words may change", () =>
@@ -571,7 +612,7 @@ try
             4 => [W("gamma", .3, .7), W("delta", .7, 1.1)],
             _ => []
         };
-        var session = new DictationSession(() => source, final, new DictationOptions { InterimCycleSeconds = 0.5 }, interim: words);
+        var session = new DictationSession(() => source, final, new DictationOptions { PingStart = false, InterimCycleSeconds = 0.5 }, interim: words);
         var events = new List<(string Confirmed, string Tentative)>();
         session.Interim += (c, t) => { lock (events) events.Add((c, t)); };
         var results = new List<DictationResult>();
@@ -602,7 +643,7 @@ try
         var words = new FakeWordTranscriber();
         int n = 0;
         words.Responder = (call, window) => [W("wort" + Interlocked.Increment(ref n), 0, .3)]; // every result differs, nothing is ever confirmed
-        var session = new DictationSession(() => source, new FakeTranscriber(), new DictationOptions { InterimCycleSeconds = 0.4, InterimWindowSeconds = 2 }, interim: words);
+        var session = new DictationSession(() => source, new FakeTranscriber(), new DictationOptions { PingStart = false, InterimCycleSeconds = 0.4, InterimWindowSeconds = 2 }, interim: words);
         session.Start();
         for (int i = 0; i < 70; i++) { source.Feed(Tone(0.1, 0.2)); Thread.Sleep(12); }
         session.Cancel();
@@ -624,7 +665,7 @@ try
     Test("Dictation: no speech for 5 s ends without calling the recognizer", () =>
     {
         var source = new FakeSource(); var transcriber = new FakeTranscriber();
-        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions()));
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions { PingStart = false }));
         o.Session.Start();
         FeedSeconds(source, 5.2, 0);
         Check(WaitUntil(() => { lock (o.Results) return o.Results.Count > 0; }), "No result");
@@ -633,13 +674,13 @@ try
     Test("Dictation: manual stop transcribes what was said; cancel reports nothing and allows a new round", () =>
     {
         var source = new FakeSource(); var transcriber = new FakeTranscriber { Responder = _ => "fertig" };
-        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions()));
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions { PingStart = false }));
         o.Session.Start();
         FeedSeconds(source, 1.0, 0.2);
         o.Session.Stop();
         Check(WaitUntil(() => { lock (o.Results) return o.Results.Count > 0; }) && o.Results[0] is { Text: "fertig", Manual: true }, "Manual stop");
         var second = new FakeSource();
-        var o2 = Observe(new DictationSession(() => second, transcriber, new DictationOptions()));
+        var o2 = Observe(new DictationSession(() => second, transcriber, new DictationOptions { PingStart = false }));
         o2.Session.Start();
         FeedSeconds(second, 1.0, 0.2);
         o2.Session.Cancel();
@@ -651,19 +692,19 @@ try
     Test("Dictation: recognizer errors and a missing microphone are reported and leave the session usable", () =>
     {
         var source = new FakeSource(); var transcriber = new FakeTranscriber { Error = new InvalidOperationException("Modell kaputt") };
-        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions()));
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions { PingStart = false }));
         o.Session.Start();
         FeedSeconds(source, 1.0, 0.2);
         o.Session.Stop();
         Check(WaitUntil(() => o.Errors.Count > 0) && o.Errors[0].Message == "Modell kaputt" && o.Session.State == DictationState.Idle && o.Results.Count == 0, "Recognizer error");
         var broken = new FakeSource { StartError = new InvalidOperationException("Es ist kein Mikrofon vorhanden.") };
-        var o2 = Observe(new DictationSession(() => broken, new FakeTranscriber(), new DictationOptions()));
+        var o2 = Observe(new DictationSession(() => broken, new FakeTranscriber(), new DictationOptions { PingStart = false }));
         o2.Session.Start();
         Check(WaitUntil(() => o2.Errors.Count > 0) && o2.Session.State == DictationState.Idle, "Microphone error");
         o2.Session.Start();
         Check(o2.Errors.Count == 2, "Session unusable after an error");
         var unplugged = new FakeSource();
-        var o3 = Observe(new DictationSession(() => unplugged, new FakeTranscriber(), new DictationOptions()));
+        var o3 = Observe(new DictationSession(() => unplugged, new FakeTranscriber(), new DictationOptions { PingStart = false }));
         o3.Session.Start();
         FeedSeconds(unplugged, 0.5, 0.2);
         unplugged.Break(new IOException("Mikrofon getrennt"));
@@ -672,7 +713,7 @@ try
     Test("Dictation: provisional recognition never runs twice at the same time", () =>
     {
         var source = new FakeSource(); var transcriber = new FakeTranscriber { Delay = 150, Responder = _ => "x" };
-        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions(), partialSeconds: 0.3));
+        var o = Observe(new DictationSession(() => source, transcriber, new DictationOptions { PingStart = false }, partialSeconds: 0.3));
         o.Session.Start();
         FeedSeconds(source, 3.0, 0.2);
         Check(WaitUntil(() => transcriber.Calls.Count > 0), "No provisional run");
@@ -1719,12 +1760,28 @@ if (args.Any(a => a.StartsWith("--whisper-smoke")))
     }
     catch (Exception ex) { failures.Add("Whisper smoke: " + ex.Message); Console.WriteLine("FAIL " + ex); }
 }
+if (args.Contains("--probe-mic"))
+{
+    // How long does the microphone need from the start request to the first audio? (Ctrl+Y to the start of the dictation.)
+    for (int round = 1; round <= 4; round++)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var first = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var source = new MicrophoneSource();
+        long created = clock.ElapsedMilliseconds;
+        source.Samples += _ => first.TrySetResult(clock.ElapsedMilliseconds);
+        source.Start();
+        long started = clock.ElapsedMilliseconds;
+        long firstAudio = await first.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Console.WriteLine($"  Runde {round}: Quelle anlegen {created} ms, Start() {started - created} ms, erstes Audio nach {firstAudio} ms");
+    }
+}
 if (args.Contains("--engine-smoke"))
 {
     // Does the Windows speech recognizer work at all on this machine? It records from the default microphone on its own.
     try
     {
-        var options = new DictationOptions { Language = "de" }.Normalized();
+        var options = new DictationOptions { Language = "de", PingStart = false }.Normalized();
         Console.WriteLine("Windows-Spracherkennung, Sprache vorbereiten: " + (await WindowsSpeechEngine.CheckAsync(options) ?? "ok"));
         using var engine = new WindowsSpeechEngine(options);
         var outcome = new TaskCompletionSource<string>();
@@ -1746,7 +1803,7 @@ if (args.Any(a => a.StartsWith("--dictation-bench")))
     // (the whole segment transcribed again with the final model). Models come from the normal model folder; missing ones are downloaded.
     try
     {
-        var options = new DictationOptions { Language = "de" }.Normalized();
+        var options = new DictationOptions { Language = "de", PingStart = false }.Normalized();
         foreach (string modelName in new[] { options.Model, options.InterimModel }.Distinct())
         {
             var model = WhisperModels.Get(modelName);

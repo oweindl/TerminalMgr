@@ -50,8 +50,11 @@ public sealed class DictationMetrics
     /// <summary>From the end of the recording to the final text.</summary>
     public double? FinalMilliseconds { get; private set; }
     public double FinalAudioSeconds { get; private set; }
+    /// <summary>From the start request to the first audio of the microphone: from then on it listens.</summary>
+    public double? AudioReadyMilliseconds { get; private set; }
     private double? _speechAt, _stopAt;
 
+    public void AudioReady(double milliseconds) { lock (_lock) AudioReadyMilliseconds ??= milliseconds; }
     public void SpeechStarted() { lock (_lock) _speechAt ??= _clock.Elapsed.TotalMilliseconds; }
     public void Cycle(InterimCycle cycle)
     {
@@ -73,6 +76,7 @@ public sealed class DictationMetrics
     {
         string first = FirstInterimMilliseconds is { } f ? $"{f:0} ms" : "–";
         string final = FinalMilliseconds is { } n ? $"{n:0} ms" : "–";
-        return $"erstes Zwischenergebnis {first} · {Cycles.Count} Zyklen, Ø {AverageCycleMilliseconds:0} ms, max {MaxCycleMilliseconds:0} ms · Endtext {final} nach Ende ({FinalAudioSeconds:0.0} s Audio)";
+        string ready = AudioReadyMilliseconds is { } r ? $"Mikrofon bereit nach {r:0} ms · " : "";
+        return $"{ready}erstes Zwischenergebnis {first} · {Cycles.Count} Zyklen, Ø {AverageCycleMilliseconds:0} ms, max {MaxCycleMilliseconds:0} ms · Endtext {final} nach Ende ({FinalAudioSeconds:0.0} s Audio)";
     }
 }
