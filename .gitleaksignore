@@ -1,2 +1,3 @@
-# False positive in prose: "token counts, duration/API duration" is a description of metrics, not a credential.
+# Exact historical false positives in descriptive prose and its explanatory comment; no credentials.
 15622c57963b13b398e2d932794924f9b351430c:docs/ai-subscriptions-proposal.md:generic-api-key:32
+3e04e5a28a9322147893c80aa405ed96046222f7:.gitleaksignore:generic-api-key:1
