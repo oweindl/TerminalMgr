@@ -154,6 +154,8 @@ TerminalMgr **merkt sich beim Beenden** Position und Größe des Fensters, ob es
 
 **Fokus:** Nach jedem Wechsel per Tastatur (Alt+Ziffer, Navigation durch tmux-Fenster, Palette, Favoriten) und nach einem Klick auf einen Session-Tab liegt der Fokus im Terminal, nicht in Serverliste oder Tab-Leiste.
 
+**Diktat, Wiederholungen und Zeiten:** Wiederholt Whisper ein Wort oder eine Wortgruppe immer wieder („Linux, Linux, Linux, Linux“, auch mit Kommas dazwischen), steht sie nur einmal im Text, im Zwischenstand und im Endtext. Die Zeiten jeder Diktatrunde (erstes Zwischenergebnis, Dauer der Zyklen, Zeit bis zum Endtext) schreibt TerminalMgr in `%LOCALAPPDATA%\TerminalMgr\speech-metrics.log` (die letzten 300 Zeilen); daran sieht man, wenn es einmal langsam war.
+
 ### Tastenkürzel, Wiederverbindung, Start mit Windows
 
 - **Tastenkürzel** (*Einstellungen*): Diktat (Vorgabe Ctrl+Y), Markierung kopieren (Ctrl+Shift+C), Zwischenablage einfügen (Ctrl+Shift+V) und der Modifikator für den Sessionwechsel mit 1 bis 9 (Vorgabe Alt; alternativ Ctrl+Alt, Alt+Shift, Ctrl+Shift). Die Kürzel gelten, bevor die Session die Taste sieht. Eine Kombination braucht Ctrl oder Alt (nur F1 bis F12 gehen allein). Ctrl+B bleibt für tmux reserviert, doppelte Belegungen werden beim Speichern abgelehnt. Ein Hinweis erscheint, wenn eine Kombination in bash/readline etwas bedeutet (Ctrl+Y ist „yank“).

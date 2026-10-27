@@ -279,6 +279,21 @@ try
         Check(DictationText.RemoveArtifacts(echoed, echoPrompt).Count == 3, "Three prompt words are below the limit");
         echoed.Insert(0, new("PowerShell,", TimeSpan.Zero, TimeSpan.Zero));
         Check(DictationText.RemoveArtifacts(echoed, echoPrompt).Count == 0, "Four prompt words in a row are dropped from timed words");
+        // The loop the user saw under the input box: commas as separate entries between the repeats must not hide the repetition.
+        Check(DictationText.CollapseRepeats("Linux, Linux, Linux, Linux") == "Linux,", "Comma-separated loop: " + DictationText.CollapseRepeats("Linux, Linux, Linux, Linux"));
+        Check(DictationText.CollapseRepeats("Starte Linux Linux Linux Linux Linux jetzt") == "Starte Linux jetzt", "Loop inside speech");
+        Check(DictationText.CollapseRepeats("der Server der Server der Server der Server läuft") == "der Server läuft", "A repeated phrase is kept once");
+        Check(DictationText.CollapseRepeats("Ja ja ja okay") == "Ja ja ja okay" && DictationText.CollapseRepeats("") == "" && DictationText.CollapseRepeats("ein Satz ohne Schleife") == "ein Satz ohne Schleife", "Speech stays");
+        var looped = new List<TimedWord>();
+        foreach (string w in new[] { "Linux", ",", "Linux", ",", "Linux", ",", "Linux", "," })
+            looped.Add(new(w, TimeSpan.FromSeconds(looped.Count), TimeSpan.FromSeconds(looped.Count + 1)));
+        var cleaned = DictationText.RemoveArtifacts(looped, "");
+        Check(cleaned.Count <= 2 && cleaned[0].Text == "Linux", "Separate comma entries between the repeats: " + string.Join("|", cleaned.Select(c => c.Text)));
+        var agreement2 = new WordAgreement();
+        var loopHypothesis = new List<TimedWord>();
+        foreach (string w in new[] { "Linux", "Linux", "Linux", "Linux", "Linux" }) loopHypothesis.Add(new(w, TimeSpan.FromSeconds(loopHypothesis.Count), TimeSpan.FromSeconds(loopHypothesis.Count + 1)));
+        agreement2.Feed(loopHypothesis); agreement2.Feed(loopHypothesis);
+        Check(agreement2.ConfirmedText == "Linux" && (agreement2.ConfirmedText + " " + agreement2.TentativeText).Trim() == "Linux", "Confirmed loops are collapsed in the shown text: " + agreement2.FullText);
         Check(DictationText.InsertAtCaret("", 0, "Hallo") == ("Hallo", 5), "Empty");
         Check(DictationText.InsertAtCaret("Hallo", 5, "Welt") == ("Hallo Welt", 10), "Append needs a space");
         Check(DictationText.InsertAtCaret("Hallo Welt", 5, "liebe") == ("Hallo liebe Welt", 11), "Middle needs spaces on both sides");

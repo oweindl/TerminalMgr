@@ -17,9 +17,19 @@ public sealed class WordAgreement
     public IReadOnlyList<TimedWord> Confirmed => _confirmed;
     public IReadOnlyList<TimedWord> Tentative => _tentative;
     public TimeSpan ConfirmedEnd => _confirmed.Count == 0 ? TimeSpan.Zero : _confirmed[^1].End;
-    public string ConfirmedText => Join(_confirmed);
-    public string TentativeText => Join(_tentative);
-    public string FullText => (ConfirmedText + " " + TentativeText).Trim();
+    /// <summary>The texts shown to the user. A word or phrase that comes back over and over (a decoding loop of the small model, even
+    /// when it is confirmed by two cycles) is collapsed: "Linux, Linux, Linux, Linux" shows as "Linux,".</summary>
+    public string ConfirmedText => DictationText.CollapseRepeats(Join(_confirmed));
+    public string TentativeText
+    {
+        get
+        {
+            string confirmed = Join(_confirmed), tentative = Join(_tentative);
+            string all = DictationText.CollapseRepeats((confirmed + " " + tentative).Trim()), head = DictationText.CollapseRepeats(confirmed);
+            return all.StartsWith(head, StringComparison.Ordinal) ? all[head.Length..].Trim() : DictationText.CollapseRepeats(tentative);
+        }
+    }
+    public string FullText => DictationText.CollapseRepeats((Join(_confirmed) + " " + Join(_tentative)).Trim());
 
     /// <summary>Takes the result for the current window (word times already absolute) and returns the words that became confirmed by it.</summary>
     public IReadOnlyList<TimedWord> Feed(IReadOnlyList<TimedWord> hypothesis)
