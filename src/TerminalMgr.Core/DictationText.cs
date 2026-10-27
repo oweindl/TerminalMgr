@@ -20,8 +20,12 @@ public static partial class DictationText
 
     /// <summary>Shortest run of the initial prompt, in words, that counts as Whisper writing the prompt instead of what was said.</summary>
     public const int MinEchoWords = 4;
-    /// <summary>The same word this often in a row is a decoding loop ("Linux Linux Linux …"), not speech.</summary>
-    public const int MinLoopWords = 4;
+    /// <summary>The same word this often in a row is a decoding loop ("Linux, Linux, Linux, Linux"), not speech ("ja ja ja" is).</summary>
+    public const int MinWordRepeats = 4;
+    /// <summary>A phrase of two to <see cref="MaxLoopPhrase"/> words this often in a row is a loop as well.</summary>
+    public const int MinLoopRepeats = 3;
+    /// <summary>Longest phrase (in words) that is checked for loops.</summary>
+    public const int MaxLoopPhrase = 4;
 
     /// <summary>
     /// Whisper sometimes answers with its initial prompt (the list of technical terms) or with one word repeated over and over,
@@ -59,14 +63,54 @@ public static partial class DictationText
                 for (int k = 0; k < best; k++) drop[i + k] = true;
                 i += best - 1;
             }
+        MarkLoops(normalized, drop);
+        return drop;
+    }
+
+    /// <summary>
+    /// Marks the repeats of a word (<see cref="MinWordRepeats"/> times in a row) or short phrase (<see cref="MinLoopRepeats"/> times); the first occurrence stays.
+    /// Punctuation on its own ("," between two repeats) does not break a run and goes with the repeats it sits between.
+    /// </summary>
+    private static void MarkLoops(string[] normalized, bool[] drop)
+    {
+        var content = Enumerable.Range(0, normalized.Length).Where(i => normalized[i].Length > 0).ToArray();
+        var dropped = new bool[content.Length];
+        for (int n = 1; n <= MaxLoopPhrase; n++)
+        {
+            int needed = n == 1 ? MinWordRepeats : MinLoopRepeats;
+            for (int i = 0; i + n * needed <= content.Length; i++)
+            {
+                int repeats = 1;
+                while (i + (repeats + 1) * n <= content.Length && PhraseEquals(normalized, content, i, i + repeats * n, n)) repeats++;
+                if (repeats < needed) continue;
+                for (int k = i + n; k < i + repeats * n; k++) dropped[k] = true;
+                i += repeats * n - 1;
+            }
+        }
+        for (int c = 0; c < content.Length; c++) if (dropped[c]) drop[content[c]] = true;
+        // Punctuation-only entries: they follow the content word before them (dropped with it) or sit between two dropped words.
         for (int i = 0; i < normalized.Length; i++)
         {
-            int run = 1;
-            while (i + run < normalized.Length && normalized[i].Length > 0 && normalized[i + run] == normalized[i]) run++;
-            if (run >= MinLoopWords) for (int k = 1; k < run; k++) drop[i + k] = true;
-            i += run - 1;
+            if (normalized[i].Length > 0) continue;
+            int before = i - 1; while (before >= 0 && normalized[before].Length == 0) before--;
+            int after = i + 1; while (after < normalized.Length && normalized[after].Length == 0) after++;
+            if (before >= 0 && drop[before]) drop[i] = true;
         }
-        return drop;
+    }
+
+    private static bool PhraseEquals(string[] normalized, int[] content, int a, int b, int length)
+    {
+        for (int k = 0; k < length; k++) if (normalized[content[a + k]] != normalized[content[b + k]]) return false;
+        return true;
+    }
+
+    /// <summary>The text without decoding loops: "Linux, Linux, Linux, Linux" becomes "Linux,"; a phrase repeated over and over is kept once.</summary>
+    public static string CollapseRepeats(string text)
+    {
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var drop = new bool[words.Length];
+        MarkLoops(words.Select(WordAgreement.Normalize).ToArray(), drop);
+        return drop.Any(d => d) ? string.Join(' ', words.Where((_, i) => !drop[i])) : text;
     }
 
     /// <summary>Inserts text at the caret of an edited dictation: a space is added only where words would otherwise touch.</summary>

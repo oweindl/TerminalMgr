@@ -234,14 +234,23 @@ public partial class MainWindow
         if (IsActive) DictationBox.Focus();
     }
 
-    /// <summary>Measuring mode in the app (TERMINALMGR_SPEECH_METRICS=1): timings of each round go to the status line and to speech-metrics.log.</summary>
+    /// <summary>
+    /// The timings of every dictation round go to speech-metrics.log in the data folder (always, one line per round, the last 300 are kept),
+    /// so a slow dictation can be looked at afterwards. TERMINALMGR_SPEECH_METRICS=1 also shows the line in the status area.
+    /// </summary>
     private void LogSpeechMetrics(DictationResult result)
     {
-        if (Environment.GetEnvironmentVariable("TERMINALMGR_SPEECH_METRICS") != "1" || _dictation is not { } engine) return;
+        if (_dictation is not { } engine) return;
         string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {engine.Id}: {engine.Metrics.Summary()} · {result.Text.Length} Zeichen";
-        StatusText.Text = "Diktat: " + line;
-        try { System.IO.File.AppendAllText(System.IO.Path.Combine(_dataDirectory, "speech-metrics.log"), line + Environment.NewLine); }
-        catch (System.IO.IOException) { /* diagnostics only */ }
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_SPEECH_METRICS") == "1") StatusText.Text = "Diktat: " + line;
+        try
+        {
+            string path = System.IO.Path.Combine(_dataDirectory, "speech-metrics.log");
+            System.IO.File.AppendAllText(path, line + Environment.NewLine);
+            if (new System.IO.FileInfo(path).Length > 60_000)
+                System.IO.File.WriteAllLines(path, System.IO.File.ReadLines(path).TakeLast(300));
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { /* diagnostics only */ }
     }
 
     private void DictationBoxKeyDown(object sender, KeyEventArgs e)
