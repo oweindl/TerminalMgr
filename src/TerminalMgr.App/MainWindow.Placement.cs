@@ -43,7 +43,8 @@ public partial class MainWindow
             ServerWidth = ServerPanelOpen ? ServerColumn.ActualWidth : _serverWidth,
             ClipboardOpen = _focusMode ? _focusRestoreClipboard : ClipboardOpen,
             ClipboardWidth = ClipboardOpen ? ClipboardColumn.ActualWidth : _clipWidth,
-            StripOpen = _stripOpen
+            StripOpen = _stripOpen,
+            AiPanelHeight = _aiHeight, AiPanelCollapsed = _aiCollapsed
         };
     }
 
@@ -57,5 +58,9 @@ public partial class MainWindow
         if (layout?.ClipboardOpen is { } clipboard) SetClipboard(clipboard);
         SetStrip(layout?.StripOpen ?? true);
         _layoutReady = true;
+        _aiHeight = WindowLayout.PanelWidth(layout?.AiPanelHeight ?? 0, 220, 80);
+        _aiCollapsed = layout?.AiPanelCollapsed ?? false;
+        ApplyAiHeight();
+        ChangeAiSource();
     }
 }

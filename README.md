@@ -16,6 +16,7 @@ Windows-Arbeitsplatz für mehrere SSH-Verbindungen mit tmux, schnellem Session-W
 - Rechtsklick zeigt darunter **alle tmux-Sessions des Servers mit ihren Fenstern** („Index: Name“, bei abweichendem Programm mit „(vim)“; ● markiert das aktive Fenster, „verbunden“ die Session, an der TerminalMgr hängt). Das Menü öffnet sofort, die Liste kommt per separater SSH-Abfrage (Key/Agent, kein Passwortdialog, 10 s Zeitlimit) und funktioniert auch bei nicht verbundenem Server. Bei mehr als etwa 25 Einträgen gibt es ein Untermenü je Session.
 - Klick auf ein Fenster wechselt den eigenen tmux-Client dorthin (auch in eine andere Session, die bisherige läuft weiter). Ist der Server nicht verbunden, wird verbunden und direkt an dieses Fenster angehängt. Es werden Session- und Fenster-IDs verwendet, nicht Namen.
 - Clipboard mit Herkunft, Suche, Anheften, gezieltem Einfügen und Drag-and-drop.
+- Kompakte KI-Abos unter der Serverliste: Claude-/Codex-Limits je Maschine, Details und Einrichtung über **Einstellungen → KI-Anbieter**. OpenRouter-Key-Verbrauch unter **Dieser PC**; Zugang geschützt in Windows gespeichert. [Einrichtung und Grenzen](docs/ai-subscriptions.md).
 - Gewähltes Icon: Vorschlag 3 „Sessions“, in sieben Auflösungen von 16 bis 256 Pixeln.
 
 ## Installation für Einsteiger

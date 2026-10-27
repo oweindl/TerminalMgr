@@ -47,8 +47,11 @@ public partial class MainWindow : Window
     private int _fontSize = 14;
     private double _serverWidth = 260, _clipWidth = 312;
 
-    public MainWindow()
+    public MainWindow() : this(new AiAccountSource()) { }
+
+    public MainWindow(IAiAccountSource aiSource)
     {
+        _aiSource = aiSource;
         InitializeComponent();
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
         SystemEvents.PowerModeChanged += PowerModeChanged;
@@ -58,6 +61,7 @@ public partial class MainWindow : Window
         _store = new SettingsStore(_dataDirectory);
         ProfilesList.ItemsSource = _profiles;
         InitializeLayout();
+        InitializeSubscriptions();
         RestoreWindowPlacement();
         _flush = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => FlushOutput(), Dispatcher);
         _flush.Start();
@@ -393,6 +397,7 @@ public partial class MainWindow : Window
 
     private void ProfileSelected(object sender, SelectionChangedEventArgs e)
     {
+        ChangeAiSource();
         if (Selected is not { } item) return;
         SessionTitle.Text = TitleFor(item);
         Post(new { type = "select", id = item.Profile.Id });
@@ -624,6 +629,9 @@ public partial class MainWindow : Window
         else if (dialog.Result is { } profile)
         {
             item.Profile = profile; item.Refresh();
+            _aiCache.Remove(profile.Id);
+            _aiRetry.Remove(profile.Id);
+            ChangeAiSource();
             SessionTitle.Text = TitleFor(item);
             StatusText.Text = "Profil gespeichert. Änderungen gelten ab der nächsten Verbindung.";
         }
@@ -801,6 +809,7 @@ public partial class MainWindow : Window
     private void OpenSettings(object sender, RoutedEventArgs e)
     {
         var dialog = new SettingsDialog(_settings, RecentWindows) { Owner = this };
+        dialog.AiSetupRequested += () => OpenAiSetup(dialog);
         if (dialog.ShowDialog() != true || dialog.Result is not { } result) return;
         _settings = result;
         _clipList.MaxUnpinned = result.ClipHistoryLimit;
@@ -884,6 +893,8 @@ public partial class MainWindow : Window
         _closing = true;
         SaveSettings();
         _shutdown.Cancel();
+        CancelAiRead();
+        _aiTimer?.Stop();
         StopStream();
         foreach (var wait in _reconnectWait.Values) wait.Cancel();
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
@@ -896,7 +907,9 @@ public partial class MainWindow : Window
         if (_hwndSource is not null) { ClipboardNative.RemoveListener(_hwndSource.Handle); _hwndSource.RemoveHook(WindowMessageHook); }
         _closed = true;
         TerminalView.Dispose();
-        Close();
+        // With no live SSH sessions the await above can complete synchronously inside Closing.
+        // Finish that event before starting the final close.
+        _ = Dispatcher.BeginInvoke(new Action(Close));
     }
     private void ShowError(string context, Exception ex)
     {

@@ -18,7 +18,16 @@ if (args.Contains("--pty-child"))
     }
 }
 
+if (args.Contains("--ai-smoke"))
+{
+    var readings = await new AiAccountSource().ReadAsync(null, CancellationToken.None);
+    foreach (var reading in readings) Console.WriteLine($"{reading.Provider}: observed={reading.ObservedAt is not null}, windows={reading.Quotas.Count}, fields={reading.Facts.Count}, error={reading.Error is not null}");
+    Environment.ExitCode = readings.Any(r => r.Error is not null) ? 1 : 0;
+    return;
+}
+
 var passed = 0;
+AiAccountTests.Run((value, message) => { if (!value) throw new Exception(message); });
 var failures = new List<string>();
 void Check(bool value, string message) { if (!value) throw new Exception(message); }
 bool benchOnly = args.Any(a => a.StartsWith("--dictation-bench") || a == "--engine-smoke"); // the measuring mode runs on its own

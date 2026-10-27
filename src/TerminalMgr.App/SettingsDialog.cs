@@ -22,6 +22,7 @@ public sealed class SettingsDialog : Window
     public bool CheckForUpdatesNow { get; private set; }
     /// <summary>"Exportieren" or "Importieren" was pressed: the settings are saved and the caller opens the matching dialog.</summary>
     public ConfigAction ConfigAction { get; private set; }
+    public event Action? AiSetupRequested;
     private readonly TextBox _pingVolume;
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine, _windowModifier;
@@ -43,6 +44,12 @@ public sealed class SettingsDialog : Window
         Heading("Allgemein");
         _startWithWindows = new CheckBox { Content = "TerminalMgr bei der Windows-Anmeldung starten", IsChecked = settings.StartWithWindows };
         _panel.Children.Add(_startWithWindows);
+
+        Heading("KI-Anbieter");
+        _panel.Children.Add(new TextBlock { Text = "Claude, ChatGPT/Codex und OpenRouter verbinden. Verfügbare Kontodaten, Limits und API-Budgets erscheinen unter der Serverliste.", TextWrapping = TextWrapping.Wrap });
+        var aiSetup = new Button { Content = "KI-Anbieter einrichten …", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) };
+        aiSetup.Click += (_, _) => AiSetupRequested?.Invoke();
+        _panel.Children.Add(aiSetup);
 
         Heading("Updates");
         _skippedVersion = settings.Update.SkippedVersion;

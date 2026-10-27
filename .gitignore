@@ -7,6 +7,8 @@ artifacts/
 *.log
 .tools/
 *.stackdump
+__pycache__/
+*.pyc
 
 # Eigene Daten und Geheimnisse gehören nie ins Repository
 settings.json

@@ -31,6 +31,8 @@ public sealed record WindowLayout
     public double ClipboardWidth { get; init; }
     /// <summary>The strip of tmux windows below the title bar; null (never saved) means on.</summary>
     public bool? StripOpen { get; init; }
+    public double AiPanelHeight { get; init; } = 220;
+    public bool AiPanelCollapsed { get; init; }
 
     public const double MinWidth = 880, MinHeight = 540;
     private const double VisibleWidth = 160, VisibleHeight = 60;

@@ -24,6 +24,60 @@ internal static class Program
 
     private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
 
+    private sealed class DelayedAiSource : IAiAccountSource
+    {
+        public readonly Dictionary<string, TaskCompletionSource<IReadOnlyList<AiAccountSnapshot>>> Pending = [];
+        public Task<IReadOnlyList<AiAccountSnapshot>> ReadAsync(Profile? profile, CancellationToken token)
+        {
+            var pending = new TaskCompletionSource<IReadOnlyList<AiAccountSnapshot>>();
+            Pending[profile!.Id] = pending;
+            return pending.Task; // Deliberately ignores cancellation to exercise late completions.
+        }
+    }
+
+    private static void TestAiSubscriptions()
+    {
+        var now = DateTimeOffset.UtcNow;
+        AiAccountSnapshot Example(string provider) => new(provider, "Pro", "Kontoweite Nutzung", now,
+            [new("Account", "5h", 38, now.AddHours(2)), new("Account", "7d", 64, now.AddDays(3))], [new("Quelle", "Test")]);
+        var panel = new AiAccountPanel();
+        panel.Render([Example("Claude Code"), Example("Codex")], now);
+        panel.Measure(new Size(260, double.PositiveInfinity));
+        Check(panel.DesiredSize.Height <= 190, "Two subscription summaries are too tall: " + panel.DesiredSize.Height);
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_AI_RENDER_DIR") is { Length: > 0 } renderDirectory)
+        {
+            panel.Arrange(new Rect(0, 0, 260, panel.DesiredSize.Height)); panel.UpdateLayout();
+            var background = new Border { Width = 260, Height = panel.ActualHeight, Child = panel };
+            background.SetResourceReference(Border.BackgroundProperty, "BarBrush"); background.Measure(new Size(260, panel.ActualHeight)); background.Arrange(new Rect(0, 0, 260, panel.ActualHeight)); background.UpdateLayout();
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(260, (int)Math.Ceiling(panel.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(background); var png = new System.Windows.Media.Imaging.PngBitmapEncoder(); png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            Directory.CreateDirectory(renderDirectory); using var file = File.Create(Path.Combine(renderDirectory, "ai-subscriptions.png")); png.Save(file);
+        }
+        var detail = new AiAccountDetailsWindow(Example("Codex"), "test");
+        detail.Measure(new Size(610, 650));
+        var setup = new AiProvidersDialog([], null); setup.Measure(new Size(640, 730));
+        var source = new DelayedAiSource();
+        var main = new MainWindow(source);
+        var list = (ListBox)main.FindName("ProfilesList");
+        var first = new ProfileItem(new Profile { Name = "first", Destination = "first" });
+        var second = new ProfileItem(new Profile { Name = "second", Destination = "second" });
+        ((IList)list.ItemsSource).Add(first); ((IList)list.ItemsSource).Add(second);
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(MainWindow).GetField("_canSave", flags)!.SetValue(main, false);
+        Task Refresh() => (Task)typeof(MainWindow).GetMethod("RefreshAiAsync", flags)!.Invoke(main, [true])!;
+        list.SelectedItem = first; var oldRead = Refresh();
+        list.SelectedItem = second; var newRead = Refresh();
+        source.Pending[first.Profile.Id].SetResult([Example("Old account")]); Pump(() => oldRead.IsCompleted);
+        var count = (TextBlock)main.FindName("AiCount");
+        Check(!((IReadOnlyList<AiAccountSnapshot>)typeof(MainWindow).GetField("_aiAccounts", flags)!.GetValue(main)!).Any(a => a.Provider == "Old account"), "Late response crossed machine boundary");
+        source.Pending[second.Profile.Id].SetResult([Example("New account")]); Pump(() => newRead.IsCompleted);
+        Check(newRead.IsCompletedSuccessfully && count.Text == "1 Anbieter", "New source did not render");
+        typeof(MainWindow).GetMethod("ToggleAiPanel", flags)!.Invoke(main, [main, new RoutedEventArgs()]);
+        Check(((FrameworkElement)main.FindName("AiPanelBody")).Visibility == Visibility.Collapsed, "Subscription collapse failed");
+        // Like the other fixture windows, leave this unshown instance alive until the test host exits.
+        Console.WriteLine("PASS AI subscriptions: compact WPF layout, setup/details, late-result isolation and collapse");
+    }
+
     private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
     {
         for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
@@ -593,6 +647,7 @@ internal static class Program
 
             var app = new App();
             app.InitializeComponent();
+            if (args.Contains("--ai-only")) { TestAiSubscriptions(); return 0; }
             if (args.Contains("--clipboard-only")) { TestClipboardCompactDesign(); TestClipboardFullText(); return 0; }
             var main = new MainWindow();
             var list = (ListBox)main.FindName("ProfilesList");
@@ -612,6 +667,7 @@ internal static class Program
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
             TestClipboardCompactDesign();
+            TestAiSubscriptions();
             TestWindowStrip();
             TestClipboardFullText();
             TestUpdateDialog();
@@ -620,7 +676,8 @@ internal static class Program
             TestThemeSources();
             TestCommanderLayout();
             TestWebSpeechEngine();
-            RunInsideDispatcherLoop(TestPaletteInWebView);
+            if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") Console.WriteLine("SKIP Command palette in the real WebView2: not run on the CI runner");
+            else RunInsideDispatcherLoop(TestPaletteInWebView);
             TestVersionIsShown();
             TestShortcutKeys();
             TestTmuxMenu();
