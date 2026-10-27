@@ -1,0 +1,2 @@
+# False positive in prose: "token counts, duration/API duration" is a description of metrics, not a credential.
+15622c57963b13b398e2d932794924f9b351430c:docs/ai-subscriptions-proposal.md:generic-api-key:32
