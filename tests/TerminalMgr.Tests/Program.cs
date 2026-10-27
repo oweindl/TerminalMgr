@@ -387,7 +387,7 @@ try
         Check(Shortcut.TryParse("Ctrl+<", out var back) && back.Key == "<" && Shortcut.FromDomCode("IntlBackslash") == "<", "Ctrl+< must parse and map from the ISO key");
         var defaults = new AppSettings();
         var navigation = ShortcutRules.NavigationShortcuts(defaults);
-        Check(navigation.Count == 14 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
+        Check(navigation.Count == 19 && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+0") && navigation.Select(a => a.Shortcut.ToString()).Contains("Ctrl+9")
             && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+Shift+Tab") && navigation.Any(a => a.Shortcut.ToString() == "Ctrl+<"), "Default navigation shortcuts");
         Check(ShortcutRules.FindConflict(defaults) is null, "Defaults must not conflict: " + ShortcutRules.FindConflict(defaults));
         Check((new ShortcutOptions { WindowModifier = "Ctrl+Alt" }).Normalized().WindowModifier == "Ctrl", "Ctrl+Alt is AltGr on German keyboards and not offered");
