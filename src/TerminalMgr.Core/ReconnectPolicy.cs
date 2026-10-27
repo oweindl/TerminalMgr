@@ -8,7 +8,8 @@ public sealed record ReconnectDecision(bool Retry, TimeSpan Delay, int Attempt, 
 
 /// <summary>
 /// Decides what happens when an SSH connection ends on its own. Only a lost connection is retried; leaving the shell,
-/// detaching from tmux or a failing remote command are normal ends. Waits grow from 2 s to 30 s.
+/// detaching from tmux or a failing remote command are normal ends. Waits grow from 2 s to 30 s; there is no attempt limit,
+/// a long outage (router restart, weekend) is simply waited out until the user disconnects.
 /// </summary>
 public sealed class ReconnectTracker
 {
@@ -17,7 +18,6 @@ public sealed class ReconnectTracker
     /// <summary>Windows OpenSSH 9.5 reports "connection closed by remote host" as -1 (0xFFFFFFFF).</summary>
     public const int ConnectionClosedExitCode = -1;
     public static bool IsConnectionLost(int exitCode) => exitCode is ConnectionLostExitCode or ConnectionClosedExitCode;
-    public const int MaxAttempts = 10;
     public static readonly TimeSpan StableAfter = TimeSpan.FromSeconds(60);
     private int _attempts;
     private DateTimeOffset? _connectedSince;
@@ -36,8 +36,7 @@ public sealed class ReconnectTracker
         if (!IsConnectionLost(exitCode)) return new(false, TimeSpan.Zero, 0, "Die Sitzung wurde regulär beendet.");
         // A connection that held for a while was healthy: the next drop is a new incident, not another failed attempt.
         if (_connectedSince is { } since && now - since >= StableAfter) _attempts = 0;
-        if (_attempts >= MaxAttempts) return new(false, TimeSpan.Zero, _attempts, $"Aufgegeben nach {MaxAttempts} Versuchen.");
-        _attempts++;
+        if (_attempts < int.MaxValue) _attempts++;
         return new(true, DelayFor(_attempts), _attempts);
     }
 }

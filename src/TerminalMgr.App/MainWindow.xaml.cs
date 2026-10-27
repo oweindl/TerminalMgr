@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _tmuxLabel = [];
     private readonly Dictionary<string, ReconnectTracker> _reconnect = [];
     private readonly Dictionary<string, CancellationTokenSource> _reconnectWait = [];
+    /// <summary>Completed when the network is back or the PC woke up: a waiting reconnect then tries at once instead of after its delay.</summary>
+    private readonly Dictionary<string, TaskCompletionSource> _reconnectWake = [];
     private readonly Dictionary<string, PtySession> _sessions = [];
     private readonly HashSet<string> _connecting = [];
     private readonly HashSet<string> _terminals = [];
@@ -48,6 +50,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged += NetworkAvailabilityChanged;
+        SystemEvents.PowerModeChanged += PowerModeChanged;
         SizeChanged += (_, _) => UpdateDictationHeight();
         Title = "TerminalMgr " + AppInfo.Version;
         _dataDirectory = AppPaths.DataDirectory();
@@ -299,15 +303,7 @@ public partial class MainWindow : Window
         string id = item.Profile.Id;
         if (_closing) return;
         var decision = Reconnect(id).Lost(item.Profile.AutoReconnect, exitCode, DateTimeOffset.Now);
-        if (!decision.Retry)
-        {
-            if (item.Profile.AutoReconnect && ReconnectTracker.IsConnectionLost(exitCode))
-            {
-                item.Status = "Wiederverbindung aufgegeben";
-                Post(new { type = "output", id, data = "\x1b[90m[" + decision.Reason + "]\x1b[0m\r\n" });
-            }
-            return;
-        }
+        if (!decision.Retry) return; // normal end or option off: nothing to say, there is no attempt limit
         CancelReconnect(id, reset: false);
         var wait = _reconnectWait[id] = new CancellationTokenSource();
         _ = ReconnectAfterAsync(item, decision, tmuxSessionId, wait);
@@ -316,21 +312,47 @@ public partial class MainWindow : Window
     private async Task ReconnectAfterAsync(ProfileItem item, ReconnectDecision decision, string? tmuxSessionId, CancellationTokenSource wait)
     {
         string id = item.Profile.Id;
+        var wake = _reconnectWake[id] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            string attempt = $"{decision.Attempt}/{ReconnectTracker.MaxAttempts}";
+            string attempt = $"Versuch {decision.Attempt}";
             Post(new { type = "output", id, data = $"\x1b[90m[Verbindung abgebrochen. Neuer Versuch in {decision.Delay.TotalSeconds:0} s ({attempt})]\x1b[0m\r\n" });
             for (int left = (int)Math.Ceiling(decision.Delay.TotalSeconds); left > 0; left--)
             {
                 item.Status = $"Verbindung verloren · neuer Versuch in {left} s ({attempt})";
-                await Task.Delay(TimeSpan.FromSeconds(1), wait.Token);
+                var tick = Task.Delay(TimeSpan.FromSeconds(1), wait.Token);
+                if (await Task.WhenAny(tick, wake.Task) == wake.Task) break;
+                wait.Token.ThrowIfCancellationRequested();
             }
             if (_closing || _sessions.ContainsKey(id)) return; // the user connected by hand in the meantime
             item.Status = $"Verbinde neu … ({attempt})";
             await ConnectAsync(item, tmuxSessionId, null, automatic: true);
         }
         catch (OperationCanceledException) { }
-        finally { if (_reconnectWait.TryGetValue(id, out var current) && ReferenceEquals(current, wait)) _reconnectWait.Remove(id); }
+        finally
+        {
+            if (_reconnectWait.TryGetValue(id, out var current) && ReferenceEquals(current, wait)) _reconnectWait.Remove(id);
+            if (_reconnectWake.TryGetValue(id, out var currentWake) && ReferenceEquals(currentWake, wake)) _reconnectWake.Remove(id);
+        }
+    }
+
+    private void NetworkAvailabilityChanged(object? sender, System.Net.NetworkInformation.NetworkAvailabilityEventArgs e)
+    {
+        if (e.IsAvailable) Dispatcher.BeginInvoke(WakeReconnects);
+    }
+
+    private void PowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume) Dispatcher.BeginInvoke(WakeReconnects);
+    }
+
+    /// <summary>Network back or PC woken up: every waiting reconnect tries now, after a short pause for the network to settle.</summary>
+    private async void WakeReconnects()
+    {
+        if (_closing || _reconnectWake.Count == 0) return;
+        try { await Task.Delay(TimeSpan.FromSeconds(2), _shutdown.Token); }
+        catch (OperationCanceledException) { return; }
+        foreach (var wake in _reconnectWake.Values.ToArray()) wake.TrySetResult();
     }
 
     private async Task DisconnectAsync(ProfileItem item)
@@ -863,6 +885,8 @@ public partial class MainWindow : Window
         _shutdown.Cancel();
         StopStream();
         foreach (var wait in _reconnectWait.Values) wait.Cancel();
+        System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
+        SystemEvents.PowerModeChanged -= PowerModeChanged;
         DisposeDictation();
         StatusText.Text = "SSH-Sessions werden geschlossen …";
         await Task.WhenAll(_sessions.Values.Select(s => s.DisposeAsync().AsTask()));

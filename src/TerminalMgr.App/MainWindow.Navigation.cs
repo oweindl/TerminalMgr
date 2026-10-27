@@ -32,10 +32,14 @@ public partial class MainWindow
     {
         if (_closing) return;
         if (action == "palette") { OpenPaletteFromHost(); return; }
+        // A held key repeats faster than a tmux command takes: the presses collected while waiting for the gate become one longer scroll.
+        if (action == "scrollUp") Interlocked.Increment(ref _scrollUpPresses);
+        else if (action == "scrollDown") Interlocked.Increment(ref _scrollDownPresses);
         await _navigationGate.WaitAsync(_shutdown.Token).ConfigureAwait(true);
         try
         {
             if (action.StartsWith("favorite:")) { await RunFavoriteAsync(action["favorite:".Length..]); return; }
+            if (action.StartsWith("scroll", StringComparison.Ordinal)) { await RunScrollAsync(action); return; }
             if (action == "windowBack") { await GoBackAsync(); return; }
             string? command = action switch
             {
@@ -50,6 +54,29 @@ public partial class MainWindow
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception ex) { StatusText.Text = "Navigation: " + ex.Message; }
         finally { _navigationGate.Release(); }
+    }
+
+    private int _scrollUpPresses, _scrollDownPresses;
+
+    /// <summary>Scrolls the tmux history of the selected server: lines, pages, or back to the live screen.</summary>
+    private async Task RunScrollAsync(string action)
+    {
+        string? command = action switch
+        {
+            "scrollUp" => Interlocked.Exchange(ref _scrollUpPresses, 0) is > 0 and var up ? TmuxNavigation.ScrollUp(up) : null,
+            "scrollDown" => Interlocked.Exchange(ref _scrollDownPresses, 0) is > 0 and var down ? TmuxNavigation.ScrollDown(down) : null,
+            "scrollPageUp" => TmuxNavigation.PageUp,
+            "scrollPageDown" => TmuxNavigation.PageDown,
+            "scrollEnd" => TmuxNavigation.ScrollEnd,
+            _ => null
+        };
+        if (command is null) return; // the presses were already sent with an earlier command
+        if (Selected is not { } item || !_sessions.TryGetValue(item.Profile.Id, out var pty))
+        {
+            StatusText.Text = "Zum Scrollen zuerst einen verbundenen Server auswählen.";
+            return;
+        }
+        await TmuxClient.RunCommandAsync(pty, command, _shutdown.Token);
     }
 
     /// <summary>Window of the current session of the selected server: index, next or previous.</summary>

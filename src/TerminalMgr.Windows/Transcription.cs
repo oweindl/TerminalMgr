@@ -58,7 +58,7 @@ public sealed class WhisperTranscriber(string? modelsDirectory = null, bool inte
             await using var processor = builder.Build();
             var text = new StringBuilder();
             await foreach (var segment in processor.ProcessAsync(audio, CancellationToken.None)) { cancellationToken.ThrowIfCancellationRequested(); text.Append(segment.Text).Append(' '); }
-            return DictationText.Clean(text.ToString());
+            return DictationText.RemoveArtifacts(DictationText.Clean(text.ToString()), options.InitialPrompt);
         }
         finally { NativeGate.Release(); }
     }
@@ -79,7 +79,9 @@ public sealed class WhisperTranscriber(string? modelsDirectory = null, bool inte
             var builder = Factory(path).CreateBuilder().WithLanguage(options.Language).WithThreads(Math.Clamp(Environment.ProcessorCount / 2, 2, 8))
                 .WithTokenTimestamps().WithMaxSegmentLength(1).SplitOnWord().WithAudioContextSize(context).WithNoContext()
                 .WithTemperature(0f).WithTemperatureInc(0f); // no repeated decoding at higher temperatures: a provisional text has to be quick
-            if (!string.IsNullOrWhiteSpace(options.InitialPrompt)) builder = builder.WithPrompt(options.InitialPrompt);
+            // The provisional text runs on short windows with a reduced audio context; there the small model tends to answer with the
+            // prompt itself. The vocabulary only matters for the final text.
+            if (!interim && !string.IsNullOrWhiteSpace(options.InitialPrompt)) builder = builder.WithPrompt(options.InitialPrompt);
             await using var processor = builder.Build();
             var words = new List<TimedWord>();
             await foreach (var segment in processor.ProcessAsync(audio, CancellationToken.None))
@@ -88,7 +90,7 @@ public sealed class WhisperTranscriber(string? modelsDirectory = null, bool inte
                 string text = DictationText.Clean(segment.Text);
                 if (text.Length > 0) words.Add(new(text, segment.Start, segment.End));
             }
-            return words;
+            return DictationText.RemoveArtifacts(words, options.InitialPrompt);
         }
         finally { NativeGate.Release(); }
     }

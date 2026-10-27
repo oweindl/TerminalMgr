@@ -269,6 +269,16 @@ try
     });
     Test("Dictation text: new text goes to the caret with spaces only where words would touch", () =>
     {
+        const string echoPrompt = "tmux, git, Claude Code, Docker, SSH, GitHub, PowerShell, Linux, npm, Kubernetes";
+        Check(DictationText.RemoveArtifacts("tmux git Claude Code Docker SSH GitHub PowerShell Linux npm Kubernetes", echoPrompt) == "", "Whole prompt echoed");
+        Check(DictationText.RemoveArtifacts("Starte Docker SSH GitHub PowerShell neu", echoPrompt) == "Starte neu", "Prompt run inside speech");
+        Check(DictationText.RemoveArtifacts("Starte Docker und git neu", echoPrompt) == "Starte Docker und git neu", "A few terms said on purpose stay");
+        Check(DictationText.RemoveArtifacts("Linux Linux Linux Linux Linux Linux", echoPrompt) == "Linux", "Decoding loop collapses");
+        Check(DictationText.RemoveArtifacts("Ja ja ja okay", echoPrompt) == "Ja ja ja okay" && DictationText.RemoveArtifacts("tmux git Claude Code", "") == "tmux git Claude Code", "No prompt, no change");
+        var echoed = new List<TimedWord> { new("Linux,", TimeSpan.Zero, TimeSpan.FromSeconds(1)), new("npm,", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)), new("Kubernetes", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3)) };
+        Check(DictationText.RemoveArtifacts(echoed, echoPrompt).Count == 3, "Three prompt words are below the limit");
+        echoed.Insert(0, new("PowerShell,", TimeSpan.Zero, TimeSpan.Zero));
+        Check(DictationText.RemoveArtifacts(echoed, echoPrompt).Count == 0, "Four prompt words in a row are dropped from timed words");
         Check(DictationText.InsertAtCaret("", 0, "Hallo") == ("Hallo", 5), "Empty");
         Check(DictationText.InsertAtCaret("Hallo", 5, "Welt") == ("Hallo Welt", 10), "Append needs a space");
         Check(DictationText.InsertAtCaret("Hallo Welt", 5, "liebe") == ("Hallo liebe Welt", 11), "Middle needs spaces on both sides");
@@ -721,16 +731,34 @@ try
         var oldLoaded = new SettingsStore(old).Load();
         Check(oldLoaded.Profiles[0].AutoConnect && !oldLoaded.Profiles[0].AutoReconnect && !oldLoaded.StartWithWindows, "Old profile gained options");
     });
-    Test("Reconnect: only a lost connection is retried, waits grow 2-4-8-16-30 s and stop after 10 attempts", () =>
+    Test("Reconnect: only a lost connection is retried, waits grow 2-4-8-16-30 s and never stop", () =>
     {
         var t = new ReconnectTracker();
         var now = DateTimeOffset.Now;
         t.Connected(now);
         var waits = Enumerable.Range(1, 7).Select(i => t.Lost(true, 255, now.AddSeconds(i))).ToList();
         Check(waits.Select(w => (int)w.Delay.TotalSeconds).SequenceEqual([2, 4, 8, 16, 30, 30, 30]) && waits.Select(w => w.Attempt).SequenceEqual([1, 2, 3, 4, 5, 6, 7]) && waits.All(w => w.Retry), "Backoff");
-        t.Lost(true, 255, now); t.Lost(true, 255, now); t.Lost(true, 255, now);
-        var last = t.Lost(true, 255, now);
-        Check(!last.Retry && last.Reason.Contains("10"), "Must give up: " + last);
+        ReconnectDecision last = waits[^1];
+        for (int i = 0; i < 500; i++) last = t.Lost(true, 255, now);
+        Check(last.Retry && last.Delay == TimeSpan.FromSeconds(30) && last.Attempt == 507, "A long outage must keep retrying every 30 s: " + last);
+    });
+    Test("Scroll shortcuts: defaults, no clash, tmux commands for lines, pages and the jump to the end", () =>
+    {
+        var settings = new AppSettings();
+        var scroll = ShortcutRules.NavigationShortcuts(settings).Where(a => a.Action.StartsWith("scroll")).ToDictionary(a => a.Action, a => a.Shortcut.ToString());
+        Check(scroll["scrollUp"] == "Ctrl+Up" && scroll["scrollDown"] == "Ctrl+Down" && scroll["scrollPageUp"] == "Ctrl+PageUp" && scroll["scrollPageDown"] == "Ctrl+PageDown" && scroll["scrollEnd"] == "Ctrl+End", "Default scroll shortcuts");
+        Check(ShortcutRules.FindConflict(settings) is null, "Defaults must not clash");
+        Check(ShortcutRules.FindConflict(new AppSettings { Shortcuts = new ShortcutOptions { ScrollEnd = "Ctrl+Up" } }) is { } clash && clash.Contains("doppelt"), "Doubled scroll shortcut");
+        Check(new ShortcutOptions { ScrollUp = "Up" }.Normalized().ScrollUp == "Ctrl+Up", "A plain key falls back to the default");
+        Check(TmuxNavigation.ScrollUp(1) == "copy-mode ; send-keys -X -N 3 scroll-up" && TmuxNavigation.ScrollUp(4).Contains("-N 12"), "Scroll up enters the copy mode, presses add up");
+        Check(TmuxNavigation.ScrollDown(2).Contains("scroll-down-and-cancel") && TmuxNavigation.ScrollDown(2).StartsWith("if-shell -F \"#{pane_in_mode}\""), "Scroll down only inside the copy mode and leaves at the bottom");
+        Check(TmuxNavigation.ScrollEnd.Contains("send-keys -X cancel") && TmuxNavigation.PageDown.Contains("page-down-and-cancel") && TmuxNavigation.PageUp.Contains("page-up"), "Pages and end");
+        Check(TmuxNavigation.ScrollUp(1000).Contains("-N 300"), "Presses are capped");
+    });
+    Test("SSH arguments: keepalive notices a silent network loss within about 45 s, connect attempts time out", () =>
+    {
+        var a = SshCommand.Arguments(new() { Name = "dev", Destination = "devbox" });
+        Check(a.Contains("ServerAliveInterval=15") && a.Contains("ServerAliveCountMax=3") && a.Contains("ConnectTimeout=15"), "Keepalive or connect timeout missing: " + string.Join(' ', a));
     });
     Test("Reconnect: normal ends, disabled option and stable connections", () =>
     {
