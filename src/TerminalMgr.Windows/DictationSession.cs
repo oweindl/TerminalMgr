@@ -24,6 +24,11 @@ public sealed class DictationSession(Func<IAudioSource> createSource, ITranscrib
     private DictationState _state;
     private int _generation, _samplesAtPartial;
     private bool _partialRunning, _speechNoted;
+    private bool _readyRaised;
+    private int _ignoreSamples;
+    private long _startedAt;
+    /// <summary>With the start tone on, the first moments of audio are dropped: the tone itself must not be picked up as speech.</summary>
+    private const double ToneSeconds = 0.25;
     private const double MinimumWindowSeconds = 1.0;
     private const double WindowMargin = 0.2;  // seconds before the last confirmed word, so that a cut word comes back whole
 
@@ -32,6 +37,8 @@ public sealed class DictationSession(Func<IAudioSource> createSource, ITranscrib
 
     public event Action<DictationState>? StateChanged;
     public event Action<double>? Level;
+    /// <summary>The microphone delivers audio: from now on it listens. (The moment for the start tone.)</summary>
+    public event Action? Ready;
     /// <summary>The provisional text as one string (confirmed and tentative words).</summary>
     public event Action<string>? Partial;
     public event Action<string, string>? Interim;
@@ -51,6 +58,9 @@ public sealed class DictationSession(Func<IAudioSource> createSource, ITranscrib
             _agreement.Reset();
             _samplesAtPartial = 0;
             _partialRunning = _speechNoted = false;
+            _readyRaised = false;
+            _ignoreSamples = 0;
+            _startedAt = Stopwatch.GetTimestamp();
             Metrics = new();
             _detector = new SilenceDetector(AudioDevices.SampleRate, options.SilenceSeconds, options.LevelThreshold);
             _work = new CancellationTokenSource();
@@ -92,9 +102,23 @@ public sealed class DictationSession(Func<IAudioSource> createSource, ITranscrib
         short[]? snapshot = null;
         int snapshotStart = 0;
         CancellationToken token;
+        bool raiseReady = false;
         lock (_lock)
         {
             if (generation != _generation || _state != DictationState.Recording) return;
+            if (!_readyRaised)
+            {
+                _readyRaised = true;
+                raiseReady = true;
+                Metrics.AudioReady(Stopwatch.GetElapsedTime(_startedAt).TotalMilliseconds);
+                _ignoreSamples = options.PingStart && options.PingVolume > 0 ? (int)(ToneSeconds * AudioDevices.SampleRate) : 0;
+            }
+            if (_ignoreSamples > 0)
+            {
+                int drop = Math.Min(_ignoreSamples, chunk.Length);
+                _ignoreSamples -= drop;
+                chunk = chunk[drop..];
+            }
             _samples.AddRange(chunk);
             reason = _detector.Feed(chunk);
             level = _detector.Level;
@@ -124,6 +148,7 @@ public sealed class DictationSession(Func<IAudioSource> createSource, ITranscrib
                 }
             }
         }
+        if (raiseReady) Ready?.Invoke();
         Level?.Invoke(level);
         if (reason != StopReason.None) Finish(manual: false, reason, generation);
         else if (snapshot is not null)

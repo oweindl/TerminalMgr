@@ -17,6 +17,10 @@ public sealed record ExportedDictation
     public string InitialPrompt { get; init; } = "";
     public double SilenceSeconds { get; init; } = 1.5;
     public double LevelThreshold { get; init; } = 0.015;
+    public bool PingStart { get; init; } = true;
+    public bool PingEnd { get; init; } = true;
+    public int PingVolume { get; init; } = 35;
+    public bool PrepareAtStart { get; init; } = true;
 }
 
 /// <summary>App settings as exported. Not part of it: start with Windows, the skipped update version, the model, the microphone.</summary>
@@ -94,7 +98,8 @@ public static class ConfigFile
                 FontSize = settings.FontSize, ClipHistoryLimit = settings.ClipHistoryLimit, AcceptOsc52 = settings.AcceptOsc52, CopyOnSelect = settings.CopyOnSelect,
                 CheckForUpdates = settings.Update.CheckOnStart, Shortcuts = settings.Shortcuts.Normalized(), Favorites = settings.Favorites.ToList(),
                 Dictation = new ExportedDictation { Shortcut = dictation.Shortcut, Language = dictation.Language, InitialPrompt = dictation.InitialPrompt,
-                    SilenceSeconds = dictation.SilenceSeconds, LevelThreshold = dictation.LevelThreshold }
+                    SilenceSeconds = dictation.SilenceSeconds, LevelThreshold = dictation.LevelThreshold,
+                    PingStart = dictation.PingStart, PingEnd = dictation.PingEnd, PingVolume = dictation.PingVolume, PrepareAtStart = dictation.PrepareAtStart }
             } : null,
             PinnedClips = selection.PinnedClips ? settings.PinnedClips.Where(c => c.Pinned).ToList() : null,
             SshHosts = selection.SshHosts ? hostBlocks.ToList() : null

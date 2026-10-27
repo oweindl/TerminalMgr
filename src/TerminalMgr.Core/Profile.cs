@@ -50,12 +50,21 @@ public sealed record DictationOptions
     public double InterimWindowSeconds { get; init; } = 7;
     /// <summary>Pause between two provisional results.</summary>
     public double InterimCycleSeconds { get; init; } = 0.7;
+    /// <summary>A short tone when the microphone is live, so the user knows when to speak (and not earlier).</summary>
+    public bool PingStart { get; init; } = true;
+    /// <summary>A short tone when the recording ends.</summary>
+    public bool PingEnd { get; init; } = true;
+    /// <summary>Volume of both tones in percent.</summary>
+    public int PingVolume { get; init; } = 35;
+    /// <summary>Load the speech models in the background when TerminalMgr starts, so the first dictation does not wait for them.</summary>
+    public bool PrepareAtStart { get; init; } = true;
 
     public DictationOptions Normalized() => this with {
         Engine = SpeechEngineIds.Normalize(Engine),
         InterimModel = WhisperModels.Get(InterimModel).Name,
         InterimWindowSeconds = Math.Clamp(InterimWindowSeconds, 4, 12),
         InterimCycleSeconds = Math.Clamp(InterimCycleSeconds, 0.4, 3),
+        PingVolume = Math.Clamp(PingVolume, 0, 100),
         Shortcut = Core.Shortcut.TryParse(Shortcut, out var s) ? s.ToString() : "Ctrl+Y",
         Model = WhisperModels.Get(Model).Name,
         Language = Language is "en" or "auto" ? Language : "de",

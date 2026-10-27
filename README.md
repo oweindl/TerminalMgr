@@ -154,6 +154,8 @@ TerminalMgr **merkt sich beim Beenden** Position und Größe des Fensters, ob es
 
 **Fokus:** Nach jedem Wechsel per Tastatur (Alt+Ziffer, Navigation durch tmux-Fenster, Palette, Favoriten) und nach einem Klick auf einen Session-Tab liegt der Fokus im Terminal, nicht in Serverliste oder Tab-Leiste.
 
+**Diktat: Start und Signaltöne.** Die Aufnahme startet zuerst; die Spracherkennung wird danach einmal im Hintergrund vorbereitet (und, wenn eingeschaltet, schon wenige Sekunden nach dem Programmstart), statt bei jedem Strg+Y erst zu rechnen. Ein kurzer **Signalton** sagt, wann das Mikrofon wirklich zuhört: ein aufsteigender Doppelton beim Start („jetzt sprechen“), ein absteigender am Ende der Aufnahme. Unter *Einstellungen › Diktat* lassen sich Start-Ton und End-Ton einzeln abschalten, die Lautstärke (0 bis 100 %, 0 = stumm) einstellen und das Vorbereiten beim Start ein- oder ausschalten. Bei eingeschaltetem Start-Ton werden die ersten 0,25 Sekunden der Aufnahme verworfen, damit der Ton selbst nicht als Sprache erkannt wird. In `speech-metrics.log` steht pro Runde „Taste bis Aufnahme“ und „Mikrofon bereit nach“.
+
 **Diktat, Wiederholungen und Zeiten:** Wiederholt Whisper ein Wort oder eine Wortgruppe immer wieder („Linux, Linux, Linux, Linux“, auch mit Kommas dazwischen), steht sie nur einmal im Text, im Zwischenstand und im Endtext. Die Zeiten jeder Diktatrunde (erstes Zwischenergebnis, Dauer der Zyklen, Zeit bis zum Endtext) schreibt TerminalMgr in `%LOCALAPPDATA%\TerminalMgr\speech-metrics.log` (die letzten 300 Zeilen); daran sieht man, wenn es einmal langsam war.
 
 ### Tastenkürzel, Wiederverbindung, Start mit Windows

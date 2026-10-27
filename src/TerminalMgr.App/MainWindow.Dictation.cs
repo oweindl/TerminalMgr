@@ -43,6 +43,7 @@ public partial class MainWindow
     private void ToggleDictation()
     {
         if (_closing) return;
+        _toggleStamp = System.Diagnostics.Stopwatch.GetTimestamp();
         if (!_dictationOpen) { _ = OpenDictationAsync(); return; }
         if (_modelDownload is not null) return;
         switch (_dictation?.State ?? DictationState.Idle)
@@ -71,9 +72,42 @@ public partial class MainWindow
             if (!await EnsureModelAsync(options.Model)) { CloseDictation(); return; }
             // The small model for the provisional text is optional: without it the final model is asked again every second or so (slow).
             if (_dictationOpen && options.InterimModel != options.Model) await EnsureModelAsync(options.InterimModel);
-            if (_dictationOpen) _ = WarmUpWhisperAsync(options);
         }
+        // The microphone starts first: it must not wait for the models. They are prepared afterwards, once, in the background.
         if (_dictationOpen) StartRecording();
+        if (_dictationOpen && options.Engine == SpeechEngineIds.Whisper) PrepareWhisperInBackground(options);
+    }
+
+    private long _toggleStamp;
+    private double? _ctrlToReadyMs;
+    private string? _preparedKey;
+
+    /// <summary>Loads the models and compiles the GPU kernels once per model choice, off the UI thread. Without this the first words wait for it.</summary>
+    private void PrepareWhisperInBackground(DictationOptions options)
+    {
+        string key = options.Model + "|" + options.InterimModel;
+        if (_preparedKey == key) return;
+        _preparedKey = key;
+        _transcriber ??= new WhisperTranscriber();
+        _interimTranscriber ??= new WhisperTranscriber(interim: true);
+        _ = Task.Run(async () =>
+        {
+            try { await WarmUpWhisperAsync(options); }
+            catch (Exception) { _preparedKey = null; }
+        });
+    }
+
+    /// <summary>A few seconds after the start, when the models are installed: prepare them, so even the first dictation starts fast.</summary>
+    private async void PrepareDictationAtStart()
+    {
+        try
+        {
+            var options = DictationSettings;
+            if (!options.PrepareAtStart || options.Engine != SpeechEngineIds.Whisper || !WhisperModels.IsInstalled(WhisperModels.Get(options.Model))) return;
+            await Task.Delay(TimeSpan.FromSeconds(4), _shutdown.Token);
+            if (!_closing) PrepareWhisperInBackground(options);
+        }
+        catch (OperationCanceledException) { }
     }
 
     /// <summary>Loads the models and compiles the GPU kernels while the user starts talking, so that the first words are not delayed.</summary>
@@ -86,7 +120,11 @@ public partial class MainWindow
             if (WhisperModels.IsInstalled(WhisperModels.Get(options.InterimModel))) await _interimTranscriber.PrepareAsync(options);
             await _transcriber.PrepareAsync(options);
         }
-        catch (Exception ex) { StatusText.Text = "Diktat: Modell konnte nicht vorbereitet werden: " + ex.Message; }
+        catch (Exception ex)
+        {
+            _preparedKey = null;
+            _ = Dispatcher.BeginInvoke(() => StatusText.Text = "Diktat: Modell konnte nicht vorbereitet werden: " + ex.Message);
+        }
     }
 
     /// <summary>Panel height: at most a third of the window; the text inside scrolls.</summary>
@@ -133,6 +171,11 @@ public partial class MainWindow
         // Engine events come from worker threads; only the current engine may touch the UI.
         void Ui(Action action) => Dispatcher.BeginInvoke(() => { if (ReferenceEquals(_dictation, session) && !_closing) action(); });
         session.StateChanged += state => Ui(() => ApplyDictationState(state));
+        // The tones are played right on the event thread (not via the UI thread) so that they are as early as possible.
+        void Ready() { _ctrlToReadyMs = System.Diagnostics.Stopwatch.GetElapsedTime(_toggleStamp).TotalMilliseconds; if (options.PingStart) DictationTones.Play(true, options.PingVolume); }
+        if (session is DictationSession whisper) whisper.Ready += Ready;
+        else session.StateChanged += state => { if (state == DictationState.Recording) Ready(); };
+        session.StateChanged += state => { if (state == DictationState.Processing && options.PingEnd) DictationTones.Play(false, options.PingVolume); };
         session.Level += level => Ui(() => DictationLevel.Value = level * 100);
         session.Interim += (confirmed, tentative) => Ui(() => ShowInterim(confirmed, tentative));
         session.Completed += result => Ui(() => DictationCompleted(result));
@@ -241,7 +284,8 @@ public partial class MainWindow
     private void LogSpeechMetrics(DictationResult result)
     {
         if (_dictation is not { } engine) return;
-        string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {engine.Id}: {engine.Metrics.Summary()} · {result.Text.Length} Zeichen";
+        string toReady = _ctrlToReadyMs is { } t ? $"Taste bis Aufnahme {t:0} ms · " : "";
+        string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {engine.Id}: {toReady}{engine.Metrics.Summary()} · {result.Text.Length} Zeichen";
         if (Environment.GetEnvironmentVariable("TERMINALMGR_SPEECH_METRICS") == "1") StatusText.Text = "Diktat: " + line;
         try
         {

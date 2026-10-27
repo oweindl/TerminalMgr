@@ -16,12 +16,13 @@ public sealed class SettingsDialog : Window
     private const string DefaultMicrophone = "Windows-Standard";
     private readonly AppSettings _original;
     private readonly StackPanel _panel = new() { Margin = new Thickness(24) };
-    private readonly CheckBox _startWithWindows, _acceptOsc52, _copyOnSelect, _checkUpdates;
+    private readonly CheckBox _startWithWindows, _acceptOsc52, _copyOnSelect, _checkUpdates, _pingStart, _pingEnd, _prepareAtStart;
     private string? _skippedVersion;
     /// <summary>The user pressed "Jetzt nach Updates suchen": the settings are saved and the caller runs the check.</summary>
     public bool CheckForUpdatesNow { get; private set; }
     /// <summary>"Exportieren" or "Importieren" was pressed: the settings are saved and the caller opens the matching dialog.</summary>
     public ConfigAction ConfigAction { get; private set; }
+    private readonly TextBox _pingVolume;
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine, _windowModifier;
     private readonly TextBox _nextShortcut, _previousShortcut, _backShortcut, _paletteShortcut;
@@ -110,6 +111,13 @@ public sealed class SettingsDialog : Window
         _prompt = Field("Fachbegriffe für die Erkennung (Initial-Prompt)", dictation.InitialPrompt);
         _prompt.AcceptsReturn = true; _prompt.TextWrapping = TextWrapping.Wrap; _prompt.Height = 70; _prompt.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         _silence = Field("Stilledauer bis zum Ende der Aufnahme in Sekunden (0,5 bis 10)", dictation.SilenceSeconds.ToString(CultureInfo.CurrentCulture));
+        _pingStart = new CheckBox { Content = "Signalton, wenn das Mikrofon bereit ist (ab jetzt sprechen)", IsChecked = dictation.PingStart, Margin = new Thickness(0, 10, 0, 0) };
+        _pingEnd = new CheckBox { Content = "Signalton am Ende der Aufnahme", IsChecked = dictation.PingEnd };
+        _panel.Children.Add(_pingStart);
+        _panel.Children.Add(_pingEnd);
+        _pingVolume = Field("Lautstärke der Signaltöne in Prozent (0 bis 100, 0 = stumm)", dictation.PingVolume.ToString(CultureInfo.CurrentCulture));
+        _prepareAtStart = new CheckBox { Content = "Spracherkennung beim Start von TerminalMgr vorbereiten (das erste Diktat startet schneller, braucht dauerhaft Speicher)", IsChecked = dictation.PrepareAtStart, Margin = new Thickness(0, 8, 0, 0) };
+        _panel.Children.Add(_prepareAtStart);
         _threshold = Field("Pegelschwelle für Sprache (0,002 bis 0,2; Vorgabe 0,015, höher = unempfindlicher)", dictation.LevelThreshold.ToString(CultureInfo.CurrentCulture));
 
         _panel.Children.Add(new TextBlock {
@@ -198,6 +206,8 @@ public sealed class SettingsDialog : Window
         { Warn("Die Stilledauer muss zwischen 0,5 und 10 Sekunden liegen."); return; }
         if (!TryNumber(_threshold.Text, out double threshold) || threshold is < 0.002 or > 0.2)
         { Warn("Die Pegelschwelle muss zwischen 0,002 und 0,2 liegen."); return; }
+        if (!int.TryParse(_pingVolume.Text.Trim(), out int pingVolume) || pingVolume is < 0 or > 100)
+        { Warn("Die Lautstärke der Signaltöne muss zwischen 0 und 100 liegen."); return; }
         string microphone = (string)_microphone.SelectedItem;
         var candidate = _original with {
             ClipHistoryLimit = limit,
@@ -221,7 +231,9 @@ public sealed class SettingsDialog : Window
                 Language = _language.SelectedIndex switch { 1 => "en", 2 => "auto", _ => "de" },
                 InitialPrompt = _prompt.Text.Trim(),
                 SilenceSeconds = silence,
-                LevelThreshold = threshold
+                LevelThreshold = threshold,
+                PingStart = _pingStart.IsChecked == true, PingEnd = _pingEnd.IsChecked == true, PingVolume = pingVolume,
+                PrepareAtStart = _prepareAtStart.IsChecked == true
             }).Normalized()
         };
         if (ShortcutRules.FindConflict(candidate) is { } conflict) { Warn(conflict); return; }
