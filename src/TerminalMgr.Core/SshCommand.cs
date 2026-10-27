@@ -9,7 +9,8 @@ public static class SshCommand
         profile.Validate();
         List<string> args = [];
         if (!string.IsNullOrWhiteSpace(profile.ConfigPath)) args.AddRange(["-F", profile.ConfigPath]);
-        args.AddRange(["-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3"]);
+        // A silent network loss (Wi-Fi change, standby, VPN) is noticed after 3 x 15 s; ssh then ends with 255 and the reconnect takes over.
+        args.AddRange(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "ConnectTimeout=15"]);
         if (profile.Mode != StartMode.SshConfig)
             args.AddRange(["-tt", "-o", "RemoteCommand=none"]);
         args.Add(profile.Destination);
@@ -65,7 +66,7 @@ public static class SshCommand
         if (!string.IsNullOrWhiteSpace(profile.ConfigPath)) args.AddRange(["-F", profile.ConfigPath]);
         args.AddRange([interactive ? "-tt" : "-T", "-o", "RemoteCommand=none", "-o", "ConnectTimeout=8"]);
         if (!interactive) args.AddRange(["-o", "BatchMode=yes"]);
-        args.AddRange(["-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", profile.Destination, command]);
+        args.AddRange(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", profile.Destination, command]);
         return args;
     }
     public static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'") + "'";

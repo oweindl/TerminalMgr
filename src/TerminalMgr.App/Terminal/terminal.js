@@ -75,7 +75,7 @@
     container.append(element);
     const term = new Terminal({
       cursorBlink:true, fontFamily:monoFont(),
-      fontSize, scrollback:10000, allowProposedApi:false,
+      fontSize, scrollback:50000, allowProposedApi:false,
       theme:xtermTheme()
     });
     const fit = new FitAddon.FitAddon();

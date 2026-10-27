@@ -285,7 +285,7 @@ public partial class MainWindow
         Post(new { type = "paste", id, text, enter = run });
         if (_profiles.FirstOrDefault(p => p.Profile.Id == id) is { } target) ProfilesList.SelectedItem = target;
         CloseDictation();
-        Post(new { type = "focus", id });
+        FocusTerminal(id);
     }
 
     private void CloseDictation()
@@ -298,6 +298,8 @@ public partial class MainWindow
         DictationPartial.Visibility = Visibility.Collapsed;
         DictationBox.Text = "";
         ApplyDictationState(DictationState.Idle);
+        // The box was still the focused element while it collapsed, so FocusTerminal would skip the WPF focus: set it directly.
+        TerminalView.Focus();
         if (Selected is { } selected) Post(new { type = "focus", id = selected.Profile.Id });
     }
 
