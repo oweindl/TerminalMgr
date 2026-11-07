@@ -27,6 +27,10 @@ public sealed class SettingsDialog : Window
     private readonly TextBox _historyLimit, _dictationShortcut, _copyShortcut, _pasteShortcut, _prompt, _silence, _threshold;
     private readonly ComboBox _microphone, _model, _interimModel, _language, _sessionModifier, _engine, _windowModifier;
     private readonly TextBox _nextShortcut, _previousShortcut, _backShortcut, _paletteShortcut;
+    private readonly CheckBox _makyxEnabled, _makyxNotify;
+    private readonly TextBox _makyxAddress, _makyxFingerprint;
+    private readonly PasswordBox _makyxToken;
+    private readonly TextBlock _makyxResult;
     private List<Favorite> _favorites;
     public AppSettings? Result { get; private set; }
 
@@ -50,6 +54,31 @@ public sealed class SettingsDialog : Window
         var aiSetup = new Button { Content = "KI-Anbieter einrichten …", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) };
         aiSetup.Click += (_, _) => AiSetupRequested?.Invoke();
         _panel.Children.Add(aiSetup);
+
+        Heading("Makyx-Leitstand");
+        _panel.Children.Add(new TextBlock { Text = "Zeigt Läufe und Einzelaufträge aus Makyx unter der Serverliste, meldet „Wartet auf dich“ und springt in die Makyx-Seite oder in das tmux-Fenster einer Instanz. Das Token hat nur Leserechte; es wird im Windows-Anmeldeinformationsspeicher abgelegt, nicht in den Einstellungen und nicht im Export.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 0, 0, 6) });
+        var makyx = settings.Makyx;
+        _makyxEnabled = new CheckBox { Content = "Makyx-Leitstand verwenden", IsChecked = makyx.Enabled };
+        _panel.Children.Add(_makyxEnabled);
+        _makyxAddress = Field("Adresse des Runner-Kanals (z. B. https://makyx.example:8801)", makyx.Address);
+        _makyxFingerprint = Field("CA-Fingerprint (SHA-256, aus dem Makyx-Dialog „Leitstand-Zugang anlegen“)", makyx.CaFingerprint);
+        string? stored = null;
+        try { stored = MakyxCredentialStore.Hint(); } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { /* no credential store: field stays empty */ }
+        _panel.Children.Add(new TextBlock { Text = stored is null ? "Token (mkl_…)" : $"Token (gespeichert: {stored}; leer lassen, um es zu behalten)", TextWrapping = TextWrapping.Wrap });
+        _makyxToken = new PasswordBox { MaxLength = 100 };
+        _panel.Children.Add(_makyxToken);
+        _makyxNotify = new CheckBox { Content = "Meldung, wenn in Makyx etwas neu auf mich wartet", IsChecked = makyx.Notify, Margin = new Thickness(0, 10, 0, 0) };
+        _panel.Children.Add(_makyxNotify);
+        var makyxButtons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        var makyxCheck = new Button { Content = "Verbindung prüfen" };
+        makyxCheck.Click += async (_, _) => await CheckMakyxAsync(makyxCheck);
+        var makyxRemove = new Button { Content = "Token entfernen", ToolTip = "Löscht das gespeicherte Token aus dem Windows-Anmeldeinformationsspeicher." };
+        makyxRemove.Click += (_, _) => { try { MakyxCredentialStore.Delete(); _makyxResult!.Text = "Token entfernt."; } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception) { _makyxResult!.Text = "Das Token ließ sich nicht entfernen."; } };
+        makyxButtons.Children.Add(makyxCheck); makyxButtons.Children.Add(makyxRemove);
+        _panel.Children.Add(makyxButtons);
+        _makyxResult = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = Brushes.LightSlateGray };
+        _panel.Children.Add(_makyxResult);
 
         Heading("Updates");
         _skippedVersion = settings.Update.SkippedVersion;
@@ -205,6 +234,36 @@ public sealed class SettingsDialog : Window
     private static bool TryNumber(string text, out double value) =>
         double.TryParse(text.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
+    private MakyxOptions MakyxFromFields() => (_original.Makyx with {
+        Enabled = _makyxEnabled.IsChecked == true, Address = _makyxAddress.Text, CaFingerprint = _makyxFingerprint.Text, Notify = _makyxNotify.IsChecked == true
+    }).Normalized();
+
+    /// <summary>The token to use: the one typed in, otherwise the stored one (null when there is none).</summary>
+    private string? MakyxTokenToUse()
+    {
+        if (_makyxToken.Password.Trim().Length > 0) return _makyxToken.Password.Trim();
+        try { return MakyxCredentialStore.Read(); } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception) { return null; }
+    }
+
+    private async Task CheckMakyxAsync(Button button)
+    {
+        var options = MakyxFromFields();
+        if (options.Problem() is { } problem) { _makyxResult.Text = problem; return; }
+        string? token = MakyxTokenToUse();
+        if (token is null || !token.StartsWith("mkl_", StringComparison.Ordinal)) { _makyxResult.Text = "Bitte das Token eintragen (es beginnt mit mkl_)."; return; }
+        button.IsEnabled = false; _makyxResult.Text = "Prüfe …";
+        try
+        {
+            using var client = new MakyxClient(options, token);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+            var hello = await client.HelloAsync(timeout.Token);
+            _makyxResult.Text = hello.Version == "v1" ? $"Verbunden. Zugang „{hello.Client}“, Schnittstelle {hello.Version}." : $"Antwort unerwartet (Schnittstelle „{hello.Version}“).";
+        }
+        catch (MakyxClient.MakyxException ex) { _makyxResult.Text = ex.Message; }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or OperationCanceledException or ArgumentException) { _makyxResult.Text = "Makyx antwortet nicht wie erwartet."; }
+        finally { button.IsEnabled = true; }
+    }
+
     private void Save()
     {
         if (!int.TryParse(_historyLimit.Text.Trim(), out int limit) || limit is < 1 or > 1000)
@@ -244,6 +303,15 @@ public sealed class SettingsDialog : Window
             }).Normalized()
         };
         if (ShortcutRules.FindConflict(candidate) is { } conflict) { Warn(conflict); return; }
+        var makyxOptions = MakyxFromFields();
+        if (makyxOptions.Enabled && makyxOptions.Problem() is { } makyxProblem) { Warn("Makyx-Leitstand: " + makyxProblem); return; }
+        if (_makyxToken.Password.Trim().Length > 0)
+        {
+            try { MakyxCredentialStore.Save(_makyxToken.Password); }
+            catch (ArgumentException ex) { Warn(ex.Message); return; }
+            catch (System.ComponentModel.Win32Exception) { Warn("Das Token ließ sich nicht im Windows-Anmeldeinformationsspeicher ablegen."); return; }
+        }
+        candidate = candidate with { Makyx = makyxOptions };
         Result = candidate;
         DialogResult = true;
     }

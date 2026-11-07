@@ -62,5 +62,6 @@ public partial class MainWindow
         _aiCollapsed = layout?.AiPanelCollapsed ?? false;
         ApplyAiHeight();
         ChangeAiSource();
+        ApplyMakyxSettings();
     }
 }

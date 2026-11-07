@@ -8,22 +8,27 @@ namespace TerminalMgr.Windows;
 public static class AiCredentialStore
 {
     private const string Target = "TerminalMgr/AI/OpenRouter";
-    public static void SaveOpenRouter(string secret)
+    public static void SaveOpenRouter(string secret) => Save(Target, "OpenRouter", secret, "Ungültiger API-Key.");
+    public static string? ReadOpenRouter() => Read(Target);
+    public static void DeleteOpenRouter() => Delete(Target);
+
+    /// <summary>Stores a secret under its own target (generic credential of the current Windows user; not exported, not synchronised).</summary>
+    internal static void Save(string target, string userName, string secret, string invalidMessage)
     {
-        if (string.IsNullOrWhiteSpace(secret) || secret.Length > 2048 || secret.Any(char.IsControl)) throw new ArgumentException("Ungültiger API-Key.");
+        if (string.IsNullOrWhiteSpace(secret) || secret.Length > 2048 || secret.Any(char.IsControl)) throw new ArgumentException(invalidMessage);
         byte[] bytes = Encoding.UTF8.GetBytes(secret.Trim());
         IntPtr blob = Marshal.AllocHGlobal(bytes.Length);
         try
         {
             Marshal.Copy(bytes, 0, blob, bytes.Length);
-            var credential = new Credential { Type = 1, TargetName = Target, CredentialBlobSize = (uint)bytes.Length, CredentialBlob = blob, Persist = 2, UserName = "OpenRouter" };
+            var credential = new Credential { Type = 1, TargetName = target, CredentialBlobSize = (uint)bytes.Length, CredentialBlob = blob, Persist = 2, UserName = userName };
             if (!CredWrite(ref credential, 0)) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
         finally { for (int i = 0; i < bytes.Length; i++) Marshal.WriteByte(blob, i, 0); Marshal.FreeHGlobal(blob); Array.Clear(bytes); }
     }
-    public static string? ReadOpenRouter()
+    internal static string? Read(string target)
     {
-        if (!CredRead(Target, 1, 0, out var pointer))
+        if (!CredRead(target, 1, 0, out var pointer))
         {
             int error = Marshal.GetLastWin32Error();
             if (error == 1168) return null;
@@ -38,9 +43,9 @@ public static class AiCredentialStore
         }
         finally { CredFree(pointer); }
     }
-    public static void DeleteOpenRouter()
+    internal static void Delete(string target)
     {
-        if (!CredDelete(Target, 1, 0) && Marshal.GetLastWin32Error() != 1168) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (!CredDelete(target, 1, 0) && Marshal.GetLastWin32Error() != 1168) throw new Win32Exception(Marshal.GetLastWin32Error());
     }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct Credential

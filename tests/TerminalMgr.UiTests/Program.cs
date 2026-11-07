@@ -35,6 +35,55 @@ internal static class Program
         }
     }
 
+    private static void TestMakyxDashboard()
+    {
+        MakyxRun Run(string id, MakyxStatus status, bool terminal, int minutes) => new(id, "u-" + id, "einzelauftrag", "Titel " + id, status, "Beispiel", "rechner-a", DateTimeOffset.UnixEpoch.AddMinutes(minutes), null, 125, 0.0121,
+            "https://makyx.example/v/m/auftrag/" + id, null, terminal ? new MakyxTerminal(true, null, "rechner-a", "benutzer@host-a", "makyx", "makyx", "auftrag-" + id) : MakyxTerminal.None("strukturiert"));
+        var opened = new List<string>(); var terminals = new List<string>();
+        var panel = new MakyxRunsPanel { TerminalProblem = run => run.Id == "E-2" ? "kein SSH-Profil für rechner-a" : null };
+        panel.OpenRequested += run => opened.Add(run.Id); panel.TerminalRequested += run => terminals.Add(run.Id);
+        panel.Render([Run("E-1", MakyxStatus.Waiting, true, 3), Run("E-2", MakyxStatus.Working, true, 2), Run("E-3", MakyxStatus.Done, false, 1)], "leer");
+        panel.Measure(new Size(260, double.PositiveInfinity));
+        Check(panel.Children.Count == 3, "three rows expected");
+        Check(panel.DesiredSize.Height <= 3 * 52, "rows are too tall: " + panel.DesiredSize.Height);
+        var first = (Border)panel.Children[0];
+        Check(first.ContextMenu!.Items.Count == 3 && ((MenuItem)first.ContextMenu.Items[1]).IsEnabled && ((MenuItem)first.ContextMenu.Items[1]).Header.ToString() == "Im Terminal öffnen", "terminal entry is enabled for a tmux window with a profile");
+        var noProfile = (MenuItem)((Border)panel.Children[1]).ContextMenu!.Items[1];
+        Check(!noProfile.IsEnabled && noProfile.Header.ToString()!.Contains("kein SSH-Profil"), "terminal entry is disabled with the reason when no profile matches");
+        var structured = (MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[1];
+        Check(!structured.IsEnabled && structured.Header.ToString()!.Contains("strukturierte Session"), "a structured session has no terminal, said explicitly");
+        ((MenuItem)first.ContextMenu.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)first.ContextMenu.Items[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(opened.SequenceEqual(["E-1"]) && terminals.SequenceEqual(["E-1"]), "menu entries raise the events");
+        Check(System.Windows.Automation.AutomationProperties.GetName(first).Contains("E-1") && System.Windows.Automation.AutomationProperties.GetName(first).Contains("wartet"), "rows have an accessible name with the status");
+        panel.Render([], "Makyx nicht eingerichtet");
+        Check(panel.Children.Count == 1 && ((TextBlock)panel.Children[0]).Text == "Makyx nicht eingerichtet", "empty text is shown");
+        Check(MakyxRunsPanel.Duration(45) == "45 s" && MakyxRunsPanel.Duration(409) == "6:49 min" && MakyxRunsPanel.Duration(7500) == "2 h 5 min" && MakyxRunsPanel.Duration(null) == "", "duration text");
+        Check(MakyxRunsPanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)) == "Beispiel · rechner-a · 2:05 min · 0,01 USD", "detail line: " + MakyxRunsPanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)));
+        var colors = Enum.GetValues<MakyxStatus>().Select(s => ((System.Windows.Media.SolidColorBrush)MakyxRunsPanel.DotBrush(s)).Color.ToString()).ToList();
+        Check(colors.Distinct().Count() >= 5, "each status has its own dot color");
+
+        // Toast: never takes the focus, at most three at once, closes with the click
+        int clicks = 0;
+        for (int i = 0; i < 5; i++) ToastWindow.Show("Wartet auf dich", "Rückfrage: E-" + i + " · Beispiel", () => clicks++);
+        var toasts = Application.Current.Windows.OfType<ToastWindow>().ToList();
+        Check(toasts.Count == ToastWindow.MaxOpen, "at most three toasts: " + toasts.Count);
+        Check(toasts.All(t => !t.ShowActivated && !t.ShowInTaskbar && t.Topmost && !t.Focusable), "a toast must not take the focus");
+        foreach (var t in toasts) t.Close();
+        Check(!Application.Current.Windows.OfType<ToastWindow>().Any(), "toasts close");
+
+        // Main window: the strip exists, is collapsed without setup and says so
+        var main = new MainWindow();
+        main.Measure(new Size(1480, 940)); main.Arrange(new Rect(0, 0, 1480, 940)); main.UpdateLayout();
+        var strip = (MakyxRunsPanel)main.FindName("MakyxRuns");
+        var body = (StackPanel)main.FindName("MakyxPanelBody");
+        var button = (Button)main.FindName("MakyxCollapseButton");
+        Check(strip is not null && body.Visibility == Visibility.Collapsed && button.Content.ToString()!.Contains("LÄUFE"), "the LÄUFE strip is there and collapsed by default");
+        Check(strip!.Children.OfType<TextBlock>().Any(t => t.Text.Contains("nicht eingerichtet")), "without setup the strip says that Makyx is not set up");
+        var dialog = new SettingsDialog(new AppSettings { Makyx = new MakyxOptions { Address = "https://makyx.example:8801" } });
+        dialog.Measure(new Size(620, 900));
+        Console.WriteLine("PASS Makyx dashboard strip, context menu states, toast and settings fields");
+    }
+
     private static void TestAiSubscriptions()
     {
         var now = DateTimeOffset.UtcNow;
@@ -668,6 +717,7 @@ internal static class Program
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
             TestClipboardCompactDesign();
             TestAiSubscriptions();
+            TestMakyxDashboard();
             TestWindowStrip();
             TestClipboardFullText();
             TestUpdateDialog();

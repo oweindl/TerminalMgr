@@ -122,6 +122,8 @@ public sealed record AppSettings
     public bool CopyOnSelect { get; init; }
     /// <summary>Window position, size and open panels of the last run (see <see cref="WindowLayout"/>).</summary>
     public WindowLayout? Window { get; init; }
+    /// <summary>Makyx dashboard (runs, "waits for you", jump into the tmux window of an instance). Off by default; the token is kept in the Credential Manager.</summary>
+    public MakyxOptions Makyx { get; init; } = new();
     public List<Profile> Profiles { get; init; } = [];
     public List<ClipboardEntry> PinnedClips { get; init; } = [];
     /// <summary>Saved tmux windows with their own shortcut (see <see cref="Favorite"/>).</summary>

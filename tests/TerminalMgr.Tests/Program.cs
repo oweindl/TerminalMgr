@@ -37,6 +37,8 @@ void Test(string name, Action action)
     try { action(); passed++; Console.WriteLine("PASS " + name); }
     catch (Exception ex) { failures.Add(name + ": " + ex.Message); Console.WriteLine("FAIL " + name + ": " + ex.Message); }
 }
+MakyxTests.Run(Test, Check);
+MakyxClientTests.Run(Test, Check);
 // The real SSH checks (--ssh-smoke) use an SSH alias of the tester's own, never one that is written into the repository.
 string sshHost = Environment.GetEnvironmentVariable("TERMINALMGR_SSH_TEST_HOST") ?? "";
 var root = Path.Combine(Path.GetTempPath(), "TerminalMgr-tests-" + Guid.NewGuid().ToString("N"));
@@ -567,7 +569,7 @@ try
         var clips = items.Where(i => i.Group == PaletteBuilder.ClipboardGroup).ToList();
         Check(clips.Count == 2 && clips[0].Id == "clip:0" && clips[0].Title == "erste Zeile" && clips[0].Subtitle.Contains("2 Zeilen") && clips[1].Id == "clip:2", "Clipboard entries keep their list index, empty ones are skipped");
         Check(items.Last() is { Id: "action:dictation", Shortcut: "Ctrl+Y", Group: "Aktionen" }, "Action");
-        Check(PaletteBuilder.GroupOrder.SequenceEqual(["Favoriten", "Zuletzt benutzt", "tmux-Fenster", "Clipboard", "Aktionen"]), "Group order");
+        Check(PaletteBuilder.GroupOrder.SequenceEqual(["Favoriten", "Zuletzt benutzt", "tmux-Fenster", "Makyx", "Clipboard", "Aktionen"]), "Group order");
     });
     Test("Palette window ids: only well-formed ones are accepted", () =>
     {

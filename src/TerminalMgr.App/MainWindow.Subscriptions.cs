@@ -103,7 +103,7 @@ public partial class MainWindow
     private void ApplyAiHeight()
     {
         if (AiPanelRow is null || ServerContent is null || AiPanelBody is null) return;
-        double height = Math.Min(_aiHeight, Math.Max(36, ServerContent.ActualHeight - 69));
+        double height = Math.Min(_aiHeight, Math.Max(36, ServerContent.ActualHeight - 69 - (MakyxPanelRow?.Height.Value ?? 0)));
         AiPanelRow.Height = new GridLength(_aiCollapsed ? 36 : height);
         AiPanelBody.Visibility = _aiCollapsed ? Visibility.Collapsed : Visibility.Visible;
         AiCollapseButton.Content = (_aiCollapsed ? "›" : "⌄") + "  KI-ABOS";

@@ -47,7 +47,7 @@
     return ranked.map(r => r.item);
   }
 
-  const groupOrder = ['Favoriten', 'Zuletzt benutzt', 'tmux-Fenster', 'Clipboard', 'Aktionen'];
+  const groupOrder = ['Favoriten', 'Zuletzt benutzt', 'tmux-Fenster', 'Makyx', 'Clipboard', 'Aktionen'];
   // Empty input: favorites and the windows used last, by group.
   function whenEmpty(items) {
     const shown = items.filter(i => i.showWhenEmpty);
