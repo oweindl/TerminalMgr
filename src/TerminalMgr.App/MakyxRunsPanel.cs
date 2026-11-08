@@ -40,7 +40,9 @@ public sealed class MakyxRunsPanel : StackPanel
 
     public static string Detail(MakyxRun run)
     {
-        var parts = new List<string> { run.Project };
+        var parts = new List<string>();
+        if (run.Project.Length > 0) parts.Add(run.Project);
+        else if (run.Kind == "session") parts.Add("freie Session");
         if (run.Machine is { Length: > 0 }) parts.Add(run.Machine);
         if (Duration(run.DurationSeconds) is { Length: > 0 } d) parts.Add(d);
         if (run.CostUsd is { } c) parts.Add(c.ToString("0.00", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) + " USD");

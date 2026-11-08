@@ -88,6 +88,13 @@ public static class MakyxJson
     public static MakyxWaiting ParseWaitingJson(string json) { using var doc = JsonDocument.Parse(json); return ParseWaitingItem(doc.RootElement); }
     public static string? ParseId(string json) { using var doc = JsonDocument.Parse(json); return Str(doc.RootElement, "id"); }
 
+    /// <summary>The answer of POST anmeldecode: {"code": "..."}; null when the field is missing or not a valid code.</summary>
+    public static string? ParseLoginCode(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return Str(doc.RootElement, "code") is { } code && MakyxBrowserRules.IsLoginCode(code) ? code : null;
+    }
+
     /// <summary>Human text for the kind of a waiting item (toast and list).</summary>
     public static string WaitingKindText(MakyxWaiting w) => w.Kind switch
     {

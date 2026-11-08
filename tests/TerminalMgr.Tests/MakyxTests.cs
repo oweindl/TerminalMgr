@@ -190,6 +190,29 @@ internal static class MakyxTests
             check(!MakyxBrowserRules.ChainMatches([other.RawData], fingerprint) && !MakyxBrowserRules.ChainMatches([ca.RawData], "") && !MakyxBrowserRules.ChainMatches([ca.RawData], null), "fremde CA oder kein Fingerprint: abgelehnt");
         });
 
+        test("Makyx-Fenster: Anmeldung per Token führt nur auf Makyx-Pfade, Code nur URL-sicher", () =>
+        {
+            const string code = "Abc123_-x.y~z";
+            string? url = MakyxBrowserRules.LoginUrl("https://makyx.example:8800/v/makyx/lauf/L-001?tab=log#ende", code);
+            check(url == "https://makyx.example:8800/anmelden?code=Abc123_-x.y~z&ziel=%2Fv%2Fmakyx%2Flauf%2FL-001%3Ftab%3Dlog%23ende", "Ziel ist der relative Pfad des Links: " + url);
+            check(MakyxBrowserRules.LoginUrl("https://makyx.example:8800/", code)!.EndsWith("&ziel=%2F", StringComparison.Ordinal), "Startseite");
+            check(MakyxBrowserRules.LoginUrl("https://makyx.example/x", "kurz") is null && MakyxBrowserRules.LoginUrl("https://makyx.example/x", "abc def ghi") is null
+                && MakyxBrowserRules.LoginUrl("https://makyx.example/x", "abcdefgh&ziel=//boese.example") is null && MakyxBrowserRules.LoginUrl("https://makyx.example/x", null) is null, "ungültige Codes");
+            check(MakyxBrowserRules.LoginUrl("file:///c:/x", code) is null && MakyxBrowserRules.LoginUrl("https://benutzer:geheim@makyx.example/", code) is null, "ungültige Links");
+            check(MakyxBrowserRules.IsLoginAddress(url) && !MakyxBrowserRules.IsLoginAddress("https://makyx.example:8800/v/makyx/") && !MakyxBrowserRules.IsLoginAddress(null), "Anmeldeadresse erkannt");
+            check(MakyxJson.ParseLoginCode("{\"code\":\"" + code + "\",\"gueltig_bis\":\"2026-01-01T00:00:00Z\"}") == code, "Antwort mit Code");
+            check(MakyxJson.ParseLoginCode("{\"token\":\"x\"}") is null && MakyxJson.ParseLoginCode("{\"code\":\"a b\"}") is null && MakyxJson.ParseLoginCode("[]") is null, "Antwort ohne gültigen Code");
+        });
+
+        test("Makyx: freie Session aus /laeufe (Art session, ohne Nummer und Projekt) mit Terminal", () =>
+        {
+            const string json = "{\"zeit\":\"2026-01-01T10:00:00Z\",\"laeufe\":[{\"id\":\"S-1a2b3c4d\",\"art\":\"session\",\"nummer\":null,\"titel\":\"Terminal-Session\",\"status\":\"arbeitet\",\"projekt\":null,\"rechner\":\"rechner-a\","
+                + "\"link\":\"https://makyx.example:8800/v/makyx/session/1\",\"terminal\":{\"vorhanden\":true,\"rechner\":\"rechner-a\",\"ssh_ziel\":\"benutzer@rechner-a\",\"tmux_socket\":\"makyx\",\"tmux_session\":\"makyx\",\"tmux_fenster\":\"@3\"}}]}";
+            var run = MakyxJson.ParseRuns(json, out _).Single();
+            check(run.Id == "S-1a2b3c4d" && run.Kind == "session" && run.Project == "" && run.IsActive, "Session gelesen");
+            check(run.Terminal.Available && run.Terminal.TmuxSocket == "makyx" && run.Terminal.TmuxWindow == "@3", "Terminal-Zuordnung");
+        });
+
         test("Makyx: Profil des Rechners wird zugeordnet (Zuordnung, Name, Ziel)", () =>
         {
             var a = new Profile { Id = "p1", Name = "Arbeitsrechner", Destination = "benutzer@host-a" };

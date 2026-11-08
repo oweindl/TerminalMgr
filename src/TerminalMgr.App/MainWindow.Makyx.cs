@@ -118,7 +118,26 @@ public partial class MainWindow
     {
         string safe = MakyxJson.SafeLink(link);
         if (safe.Length == 0) { StatusText.Text = "Für diesen Eintrag gibt es keinen Link."; return; }
-        MakyxBrowserWindow.Open(this, _dataDirectory, () => Makyx.CaFingerprint, safe);
+        MakyxBrowserWindow.Open(this, _dataDirectory, () => Makyx.CaFingerprint, safe, MakyxLoginCodeAsync);
+    }
+
+    /// <summary>One-time sign-in code for the Makyx window, fetched with the paired token; null (page asks for the password) when anything fails.</summary>
+    private async Task<string?> MakyxLoginCodeAsync()
+    {
+        if (!Makyx.Enabled || Makyx.Problem() is not null) return null;
+        string? token;
+        try { token = MakyxCredentialStore.Read(); } catch (System.ComponentModel.Win32Exception) { return null; }
+        if (token is null) return null;
+        try
+        {
+            using var client = new MakyxClient(Makyx, token);
+            return await client.LoginCodeAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is MakyxClient.MakyxException or ArgumentException)
+        {
+            StatusText.Text = "Makyx: Anmeldung per Token nicht möglich (" + ex.Message + ") – die Seite fragt nach dem Passwort.";
+            return null;
+        }
     }
 
     /// <summary>Only http and https are opened, in the default browser.</summary>

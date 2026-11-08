@@ -24,9 +24,13 @@ public sealed class MakyxBrowserWindow : Window
     private readonly Func<string?> _fingerprint;
     private Task? _ready;
     private string? _pending;
+    private Func<Task<string?>>? _loginCode;
+    /// <summary>Origins for which a token sign-in was already tried in this window process (the web session then lives in it).</summary>
+    private readonly HashSet<string> _signedIn = new(StringComparer.Ordinal);
 
     /// <summary>Opens the link in the Makyx window (created on first use, then reused and brought to the front).</summary>
-    public static void Open(Window owner, string dataDirectory, Func<string?> caFingerprint, string link)
+    /// <param name="loginCode">Fetches a one-time sign-in code with the paired token (null when that fails); used once per Makyx origin, so no password is asked.</param>
+    public static void Open(Window owner, string dataDirectory, Func<string?> caFingerprint, string link, Func<Task<string?>>? loginCode = null)
     {
         if (MakyxBrowserRules.Origin(link) is null) return;
         if (_current is null)
@@ -40,6 +44,7 @@ public sealed class MakyxBrowserWindow : Window
         if (!_current.IsVisible) _current.Show();
         if (_current.WindowState == WindowState.Minimized) _current.WindowState = WindowState.Normal;
         _current.Activate();
+        _current._loginCode = loginCode;
         _ = _current.NavigateAsync(link);
     }
 
@@ -57,7 +62,7 @@ public sealed class MakyxBrowserWindow : Window
         foreach (var button in new[] { _back, reload, external }) { button.SetResourceReference(StyleProperty, "FlatButton"); button.Height = 28; }
         _back.Click += (_, _) => { if (_view.CoreWebView2?.CanGoBack == true) _view.CoreWebView2.GoBack(); };
         reload.Click += (_, _) => _view.CoreWebView2?.Reload();
-        external.Click += (_, _) => OpenExternal(_view.CoreWebView2?.Source ?? _pending);
+        external.Click += (_, _) => OpenExternal(ShownAddress(_view.CoreWebView2?.Source));
         _address.SetResourceReference(TextBlock.ForegroundProperty, "Text2Brush");
         Label(_back, "Zurück"); Label(reload, "Neu laden"); Label(external, "Im Browser öffnen");
 
@@ -109,7 +114,7 @@ public sealed class MakyxBrowserWindow : Window
             args.Handled = true;
             if (MakyxBrowserRules.IsAllowed(args.Uri, _origins)) core.Navigate(args.Uri); else OpenExternal(args.Uri);
         };
-        core.SourceChanged += (_, _) => { _address.Text = core.Source; _back.IsEnabled = core.CanGoBack; };
+        core.SourceChanged += (_, _) => { _address.Text = ShownAddress(core.Source) ?? ""; _back.IsEnabled = core.CanGoBack; };
         core.HistoryChanged += (_, _) => _back.IsEnabled = core.CanGoBack;
         core.DocumentTitleChanged += (_, _) => Title = core.DocumentTitle is { Length: > 0 } t ? "Makyx · " + t : "Makyx";
         // Own Makyx CA: allowed only for the Makyx pages and only when the CA matches the fingerprint of the settings.
@@ -137,7 +142,11 @@ public sealed class MakyxBrowserWindow : Window
         try
         {
             await EnsureReadyAsync();
-            _view.CoreWebView2.Navigate(link);
+            string target = link;
+            // Sign in with the token once per origin (note Makyx-PoC/13 E); without a code the page opens as before (Makyx asks for the password).
+            if (_loginCode is { } fetch && _signedIn.Add(origin) && MakyxBrowserRules.LoginUrl(link, await fetch()) is { } login) target = login;
+            if (!ReferenceEquals(_pending, link)) return;   // a newer link was opened meanwhile
+            _view.CoreWebView2.Navigate(target);
         }
         catch (Exception ex) when (ex is WebView2RuntimeNotFoundException or InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
@@ -145,6 +154,9 @@ public sealed class MakyxBrowserWindow : Window
             CloseForGood();
         }
     }
+
+    /// <summary>The sign-in address carries the one-time code: show (and hand to the browser) the link it leads to instead.</summary>
+    private string? ShownAddress(string? source) => MakyxBrowserRules.IsLoginAddress(source) ? _pending : source ?? _pending;
 
     /// <summary>Only http and https, in the default browser.</summary>
     private static void OpenExternal(string? link)

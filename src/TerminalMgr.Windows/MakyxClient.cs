@@ -98,6 +98,33 @@ public sealed class MakyxClient : IDisposable
     public async Task<IReadOnlyList<MakyxWaiting>> WaitingAsync(CancellationToken cancel) => MakyxJson.ParseWaiting(await GetAsync("wartet", cancel));
     public async Task<IReadOnlyList<MakyxMachine>> MachinesAsync(CancellationToken cancel) => MakyxJson.ParseMachines(await GetAsync("rechner", cancel));
 
+    /// <summary>A one-time sign-in code for the Makyx web interface (POST anmeldecode, valid about 60 s); the code is never logged.</summary>
+    public async Task<string> LoginCodeAsync(CancellationToken cancel)
+    {
+        string body = await PostAsync("anmeldecode", "{}", cancel);
+        try { return MakyxJson.ParseLoginCode(body) ?? throw new MakyxException("Makyx hat keinen Anmeldecode geliefert."); }
+        catch (System.Text.Json.JsonException) { throw new MakyxException("Makyx antwortet nicht wie erwartet."); }
+    }
+
+    private async Task<string> PostAsync(string path, string json, CancellationToken cancel)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await _http.PostAsync(new Uri(_base, path), content, timeout.Token);
+            if (response.StatusCode is HttpStatusCode.Unauthorized) throw new MakyxException("Das Token wurde nicht angenommen (falsch oder widerrufen).", response.StatusCode);
+            if (response.StatusCode is HttpStatusCode.TooManyRequests) throw new MakyxException("Makyx begrenzt die Abfragen; später erneut versuchen.", response.StatusCode);
+            if (!response.IsSuccessStatusCode) throw new MakyxException($"Makyx antwortet mit {(int)response.StatusCode}.", response.StatusCode);
+            string body = await response.Content.ReadAsStringAsync(timeout.Token);
+            if (body.Length > 100_000) throw new MakyxException("Makyx antwortet nicht wie erwartet.");
+            return body;
+        }
+        catch (HttpRequestException ex) { throw new MakyxException(Describe(ex)); }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { throw new MakyxException("Makyx antwortet nicht (Zeitlimit)."); }
+    }
+
     /// <summary>The event stream until it ends or <paramref name="cancel"/> fires. Throws <see cref="MakyxException"/> when it can not be opened.</summary>
     public async IAsyncEnumerable<SseEvent> StreamAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancel)
     {
