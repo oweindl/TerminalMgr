@@ -603,7 +603,7 @@ public partial class MainWindow : Window
 
     private void ClipEnter(object sender, MouseEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: ClipItem { IsTruncated: true, IsExpanded: false } item } card) ClipHover.Enter(card, item.FullText);
+        if (sender is FrameworkElement { DataContext: ClipItem { IsTruncated: true, IsExpanded: false } item } card) ClipHover.Enter(card, item.ShownText);
     }
     private void ClipLeave(object sender, MouseEventArgs e)
     {

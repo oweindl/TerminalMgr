@@ -296,7 +296,7 @@
         <TextBlock Text="{Binding Line1}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
         <TextBlock Text="{Binding Line2}" Visibility="{Binding Line2Visibility}" FontFamily="{DynamicResource MonoFont}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
        </StackPanel>
-       <TextBox Text="{Binding FullText, Mode=OneWay}" Visibility="{Binding ExpandedVisibility}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="12" Padding="0" Margin="0,0,24,0" MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
+       <TextBox Text="{Binding ShownText, Mode=OneWay}" Visibility="{Binding ExpandedVisibility}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextBrush}" FontFamily="{DynamicResource MonoFont}" FontSize="12" Padding="0" Margin="0,0,24,0" MaxHeight="240" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
        <Button x:Name="ClipActions" Content="⋯" Click="ClipMenuClick" Tag="{Binding}" Style="{StaticResource ClipActionButton}" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,-3,-4,0" Opacity="0" IsHitTestVisible="False" ToolTip="Einfügen, kopieren, anheften …" AutomationProperties.Name="Eintragsaktionen"/>
        <Grid Grid.Row="1" Margin="0,5,0,0">
         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

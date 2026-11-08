@@ -3,9 +3,15 @@
 TerminalMgr zeigt Läufe und Einzelaufträge aus **Makyx** (Software-Fabrik) in einer Leiste **LÄUFE** unter KI-ABOS, meldet per Toast, wenn etwas neu auf dich wartet, und springt auf Klick in die Makyx-Seite oder in das tmux-Fenster der Instanz. Es liest nur; das Token hat Leserechte.
 
 ## Einrichten
-1. In Makyx › Einstellungen › **Leitstand-Zugänge** einen Zugang anlegen. Der Dialog zeigt das Token (nur einmal), die Adresse des Runner-Kanals und den **CA-Fingerprint**.
-2. In TerminalMgr › Einstellungen › **Makyx-Leitstand**: Schalter an, Adresse (`https://makyx.example:8801`), CA-Fingerprint, Token eintragen, **Verbindung prüfen**, Speichern.
-   Das Token liegt im Windows-Anmeldeinformationsspeicher (Ziel `TerminalMgr/Makyx/Leitstand`), nie in `settings.json` und nie im Export.
+**Mit Kopieren und Einfügen (empfohlen):**
+1. In Makyx › Einstellungen › **Leitstand-Zugänge** einen Zugang anlegen und im Block „Konfiguration für TerminalMgr“ den Text **kopieren**.
+2. In TerminalMgr › Einstellungen › **Makyx-Leitstand** den Text in das Feld **Konfiguration einlesen** einfügen (liegt er schon in der Zwischenablage, steht er beim Öffnen schon da) und **Einlesen** klicken. Alternativ **Aus Datei …** mit der in Makyx heruntergeladenen Datei.
+3. Die **Vorschau** zeigt Makyx-Name, Adressen, Zugang, den **CA-Fingerprint** (bitte mit Makyx vergleichen) und die Art (Einmal-Code oder Token). **Übernehmen** löst den Einmal-Code bei Makyx gegen das Token ein, legt das Token im Windows-Anmeldeinformationsspeicher ab, speichert Adresse und CA und prüft die Verbindung. Bei Erfolg erscheint die Leiste LÄUFE. Gibt es schon eine Verbindung, fragt TerminalMgr vorher „Bestehenden Leitstand ersetzen?“.
+4. Der Einmal-Code ist 10 Minuten gültig und nur einmal einlösbar. Meldungen wie „Der Code ist abgelaufen“ oder „schon benutzt“ heißen: in Makyx unter Leitstand-Zugänge die Konfiguration neu erzeugen. Steht ausnahmsweise das Token selbst im Text, bietet TerminalMgr danach **Zwischenablage leeren** an. Die Clipboard-Liste zeigt solche Einträge nur als „Makyx-Leitstand-Konfiguration“.
+
+**Manuell** (unter „Manuell einrichten“, eingeklappt): Schalter an, Adresse (`https://makyx.example:8801`), CA-Fingerprint, Token eintragen, **Verbindung prüfen**, Speichern.
+
+Das Token liegt immer im Windows-Anmeldeinformationsspeicher (Ziel `TerminalMgr/Makyx/Leitstand`), nie in `settings.json`, nie im Export und nie im Klartext in der Clipboard-Liste.
 
 ## Bedienung
 - Leiste LÄUFE (›/⌄): Wartendes zuerst, dann Arbeitendes, dann zuletzt Beendetes. Klick öffnet die Makyx-Seite im Browser.

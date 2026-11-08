@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using TerminalMgr.Core;
@@ -11,7 +12,7 @@ namespace TerminalMgr.App;
 /// <summary>Application settings: general, shortcuts, clipboard and dictation.</summary>
 public enum ConfigAction { None, Export, Import }
 
-public sealed class SettingsDialog : Window
+public sealed partial class SettingsDialog : Window
 {
     private const string DefaultMicrophone = "Windows-Standard";
     private readonly AppSettings _original;
@@ -31,6 +32,13 @@ public sealed class SettingsDialog : Window
     private readonly TextBox _makyxAddress, _makyxFingerprint;
     private readonly PasswordBox _makyxToken;
     private readonly TextBlock _makyxResult;
+    private readonly TextBox _makyxConfig;
+    private readonly TextBlock _makyxPreview;
+    private readonly Border _makyxPreviewBox;
+    private readonly Button _makyxApply, _makyxClearClipboard;
+    private MakyxConfig? _pendingConfig;
+    /// <summary>Asks before an existing Makyx connection is replaced; tests set their own answer.</summary>
+    public Func<string, bool>? ConfirmReplace { get; set; }
     private List<Favorite> _favorites;
     public AppSettings? Result { get; private set; }
 
@@ -59,8 +67,45 @@ public sealed class SettingsDialog : Window
         _panel.Children.Add(new TextBlock { Text = "Zeigt Läufe und Einzelaufträge aus Makyx unter der Serverliste, meldet „Wartet auf dich“ und springt in die Makyx-Seite oder in das tmux-Fenster einer Instanz. Das Token hat nur Leserechte; es wird im Windows-Anmeldeinformationsspeicher abgelegt, nicht in den Einstellungen und nicht im Export.",
             TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 0, 0, 6) });
         var makyx = settings.Makyx;
-        _makyxEnabled = new CheckBox { Content = "Makyx-Leitstand verwenden", IsChecked = makyx.Enabled };
+        _panel.Children.Add(new TextBlock { Text = "Konfiguration einlesen", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+        _makyxConfig = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 64, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontFamily = new FontFamily("Consolas"), FontSize = 11 };
+        var configHint = new TextBlock { Text = "Text aus Makyx hier einfügen", IsHitTestVisible = false, Margin = new Thickness(8, 6, 0, 0), Foreground = Brushes.LightSlateGray, VerticalAlignment = VerticalAlignment.Top };
+        _makyxConfig.TextChanged += (_, _) => configHint.Visibility = _makyxConfig.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _panel.Children.Add(new Grid { Children = { _makyxConfig, configHint } });
+        var makyxConfigButtons = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        var readButton = new Button { Content = "Einlesen", ToolTip = "Prüft den eingefügten Text und zeigt eine Vorschau. Gespeichert wird erst nach „Übernehmen“." };
+        readButton.Click += (_, _) => ReadMakyxConfig();
+        var fileButton = new Button { Content = "Aus Datei …", ToolTip = "Liest die Konfiguration aus einer in Makyx heruntergeladenen Datei." };
+        fileButton.Click += (_, _) => ReadMakyxConfigFromFile();
+        makyxConfigButtons.Children.Add(readButton); makyxConfigButtons.Children.Add(fileButton);
+        _panel.Children.Add(makyxConfigButtons);
+        _makyxPreview = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        _makyxApply = new Button { Content = "Übernehmen" };
+        _makyxApply.Click += async (_, _) => await ApplyMakyxConfigAsync();
+        var cancelPreview = new Button { Content = "Abbrechen" };
+        cancelPreview.Click += (_, _) => { _pendingConfig = null; _makyxPreviewBox!.Visibility = Visibility.Collapsed; _makyxResult!.Text = ""; };
+        var previewButtons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        previewButtons.Children.Add(_makyxApply); previewButtons.Children.Add(cancelPreview);
+        _makyxPreviewBox = new Border { Visibility = Visibility.Collapsed, BorderBrush = Brushes.SlateGray, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(10), Margin = new Thickness(0, 6, 0, 0),
+            Child = new StackPanel { Children = { _makyxPreview, previewButtons } } };
+        _panel.Children.Add(_makyxPreviewBox);
+        _makyxResult = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = Brushes.LightSlateGray };
+        _panel.Children.Add(_makyxResult);
+        _makyxClearClipboard = new Button { Content = "Zwischenablage leeren", Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Left,
+            ToolTip = "Der eingefügte Text enthielt das Token im Klartext. Danach liegt nichts mehr davon in der Zwischenablage." };
+        _makyxClearClipboard.Click += (_, _) => { try { Clipboard.Clear(); _makyxResult.Text = "Zwischenablage geleert."; _makyxClearClipboard.Visibility = Visibility.Collapsed; } catch (System.Runtime.InteropServices.ExternalException) { _makyxResult.Text = "Die Zwischenablage ließ sich nicht leeren."; } };
+        _panel.Children.Add(_makyxClearClipboard);
+        // A configuration text that is already in the clipboard is only offered, never read or applied without the buttons.
+        try { if (Clipboard.ContainsText() && Clipboard.GetText() is { } clip && MakyxConfigText.LooksLikeConfig(clip)) _makyxConfig.Text = clip; }
+        catch (System.Runtime.InteropServices.ExternalException) { /* the clipboard is busy: no suggestion */ }
+
+        _makyxEnabled = new CheckBox { Content = "Makyx-Leitstand verwenden", IsChecked = makyx.Enabled, Margin = new Thickness(0, 10, 0, 0) };
         _panel.Children.Add(_makyxEnabled);
+        _makyxNotify = new CheckBox { Content = "Meldung, wenn in Makyx etwas neu auf mich wartet", IsChecked = makyx.Notify };
+        _panel.Children.Add(_makyxNotify);
+        var manualToggle = new ToggleButton { Content = "Manuell einrichten ▸", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 10, 0, 0) };
+        _panel.Children.Add(manualToggle);
+        int manualFrom = _panel.Children.Count;
         _makyxAddress = Field("Adresse des Runner-Kanals (z. B. https://makyx.example:8801)", makyx.Address);
         _makyxFingerprint = Field("CA-Fingerprint (SHA-256, aus dem Makyx-Dialog „Leitstand-Zugang anlegen“)", makyx.CaFingerprint);
         string? stored = null;
@@ -68,8 +113,6 @@ public sealed class SettingsDialog : Window
         _panel.Children.Add(new TextBlock { Text = stored is null ? "Token (mkl_…)" : $"Token (gespeichert: {stored}; leer lassen, um es zu behalten)", TextWrapping = TextWrapping.Wrap });
         _makyxToken = new PasswordBox { MaxLength = 100 };
         _panel.Children.Add(_makyxToken);
-        _makyxNotify = new CheckBox { Content = "Meldung, wenn in Makyx etwas neu auf mich wartet", IsChecked = makyx.Notify, Margin = new Thickness(0, 10, 0, 0) };
-        _panel.Children.Add(_makyxNotify);
         var makyxButtons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
         var makyxCheck = new Button { Content = "Verbindung prüfen" };
         makyxCheck.Click += async (_, _) => await CheckMakyxAsync(makyxCheck);
@@ -77,8 +120,13 @@ public sealed class SettingsDialog : Window
         makyxRemove.Click += (_, _) => { try { MakyxCredentialStore.Delete(); _makyxResult!.Text = "Token entfernt."; } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception) { _makyxResult!.Text = "Das Token ließ sich nicht entfernen."; } };
         makyxButtons.Children.Add(makyxCheck); makyxButtons.Children.Add(makyxRemove);
         _panel.Children.Add(makyxButtons);
-        _makyxResult = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(0, 4, 0, 0), Foreground = Brushes.LightSlateGray };
-        _panel.Children.Add(_makyxResult);
+        var manualElements = _panel.Children.Cast<UIElement>().Skip(manualFrom).ToList();
+        foreach (var element in manualElements) element.Visibility = Visibility.Collapsed;
+        manualToggle.Click += (_, _) =>
+        {
+            foreach (var element in manualElements) element.Visibility = manualToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            manualToggle.Content = manualToggle.IsChecked == true ? "Manuell einrichten ▾" : "Manuell einrichten ▸";
+        };
 
         Heading("Updates");
         _skippedVersion = settings.Update.SkippedVersion;
@@ -245,23 +293,26 @@ public sealed class SettingsDialog : Window
         try { return MakyxCredentialStore.Read(); } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception) { return null; }
     }
 
-    private async Task CheckMakyxAsync(Button button)
+    private async Task<bool> CheckMakyxAsync(Button? button)
     {
         var options = MakyxFromFields();
-        if (options.Problem() is { } problem) { _makyxResult.Text = problem; return; }
+        if (options.Problem() is { } problem) { _makyxResult.Text = problem; return false; }
         string? token = MakyxTokenToUse();
-        if (token is null || !token.StartsWith("mkl_", StringComparison.Ordinal)) { _makyxResult.Text = "Bitte das Token eintragen (es beginnt mit mkl_)."; return; }
-        button.IsEnabled = false; _makyxResult.Text = "Prüfe …";
+        if (token is null || !token.StartsWith("mkl_", StringComparison.Ordinal)) { _makyxResult.Text = "Bitte das Token eintragen (es beginnt mit mkl_)."; return false; }
+        if (button is not null) button.IsEnabled = false;
+        _makyxResult.Text = "Prüfe …";
         try
         {
             using var client = new MakyxClient(options, token);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
             var hello = await client.HelloAsync(timeout.Token);
             _makyxResult.Text = hello.Version == "v1" ? $"Verbunden. Zugang „{hello.Client}“, Schnittstelle {hello.Version}." : $"Antwort unerwartet (Schnittstelle „{hello.Version}“).";
+            return hello.Version == "v1";
         }
         catch (MakyxClient.MakyxException ex) { _makyxResult.Text = ex.Message; }
         catch (Exception ex) when (ex is System.Text.Json.JsonException or OperationCanceledException or ArgumentException) { _makyxResult.Text = "Makyx antwortet nicht wie erwartet."; }
-        finally { button.IsEnabled = true; }
+        finally { if (button is not null) button.IsEnabled = true; }
+        return false;
     }
 
     private void Save()

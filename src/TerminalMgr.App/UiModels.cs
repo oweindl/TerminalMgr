@@ -63,10 +63,14 @@ public sealed class ClipItem : INotifyPropertyChanged
 {
     private readonly ClipPreview _preview;
     private bool _expanded;
-    public ClipItem(ClipboardEntry entry, bool expanded = false) { Entry = entry; _preview = ClipboardText.Preview(entry.Text); _expanded = expanded && _preview.Truncated; }
+    public ClipItem(ClipboardEntry entry, bool expanded = false) { Entry = entry; _preview = ClipboardText.Preview(ShownTextOf(entry)); _expanded = expanded && _preview.Truncated; }
     public event PropertyChangedEventHandler? PropertyChanged;
     public ClipboardEntry Entry { get; }
+    /// <summary>The real text: what "Kopieren" and "Einfügen" use.</summary>
     public string FullText => Entry.Text;
+    /// <summary>What the list shows: the real text, except for a Makyx configuration (it holds a code or a token), which is shown only by its name.</summary>
+    public string ShownText => ShownTextOf(Entry);
+    private static string ShownTextOf(ClipboardEntry entry) => MakyxConfigText.LooksLikeConfig(entry.Text) ? MakyxConfigText.MaskedLabel : entry.Text;
     /// <summary>The list shows less than the whole text, so hovering shows a popup and a click can unfold the entry.</summary>
     public bool IsTruncated => _preview.Truncated;
     /// <summary>Unfolded in the list: the full text (about 15 lines, scrollable) instead of the two-line preview.</summary>

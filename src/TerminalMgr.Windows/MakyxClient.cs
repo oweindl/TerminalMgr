@@ -17,19 +17,54 @@ public sealed class MakyxClient : IDisposable
     {
         if (!options.TryBaseUri(out var uri)) throw new ArgumentException(options.Problem() ?? "Adresse ungültig.");
         _base = uri!;
-        string pin = options.CaFingerprint;
-        var handler = new SocketsHttpHandler
-        {
-            ConnectTimeout = TimeSpan.FromSeconds(10), PooledConnectionLifetime = TimeSpan.FromMinutes(10), AllowAutoRedirect = false,
-            UseProxy = false,
-            SslOptions = new SslClientAuthenticationOptions
-            {
-                RemoteCertificateValidationCallback = (_, cert, chain, errors) => errors == SslPolicyErrors.None || MakyxTls.Validate(cert as X509Certificate2 ?? (cert is null ? null : new X509Certificate2(cert)), chain, errors, pin)
-            }
-        };
-        _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        _http = new HttpClient(CreateHandler(options.CaFingerprint)) { Timeout = Timeout.InfiniteTimeSpan };
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    /// <summary>The connection handler: no redirects, no proxy, and the CA of the runner channel pinned by its fingerprint.</summary>
+    private static SocketsHttpHandler CreateHandler(string pin) => new()
+    {
+        ConnectTimeout = TimeSpan.FromSeconds(10), PooledConnectionLifetime = TimeSpan.FromMinutes(10), AllowAutoRedirect = false,
+        UseProxy = false,
+        SslOptions = new SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (_, cert, chain, errors) => errors == SslPolicyErrors.None || MakyxTls.Validate(cert as X509Certificate2 ?? (cert is null ? null : new X509Certificate2(cert)), chain, errors, pin)
+        }
+    };
+
+    /// <summary>
+    /// Exchanges the one-time code of a configuration text for the token: POST …/kopplung with {"code": "..."} and the answer {"token": "mkl_..."}.
+    /// There is no token yet, so the call carries none; the code is the credential. Neither code nor token ever appears in a message.
+    /// </summary>
+    public static async Task<string> RedeemAsync(MakyxOptions options, string code, CancellationToken cancel)
+    {
+        if (!options.TryBaseUri(out var baseUri)) throw new ArgumentException(options.Problem() ?? "Adresse ungültig.");
+        using var http = new HttpClient(CreateHandler(options.CaFingerprint)) { Timeout = TimeSpan.FromSeconds(20) };
+        try
+        {
+            using var content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { code }), Encoding.UTF8, "application/json");
+            using var response = await http.PostAsync(new Uri(baseUri!, "kopplung"), content, cancel);
+            if (response.StatusCode is HttpStatusCode.Gone) throw new MakyxException("Der Code ist abgelaufen. In Makyx unter Leitstand-Zugänge die Konfiguration neu erzeugen.", response.StatusCode);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+                throw new MakyxException("Der Code ist ungültig oder wurde schon benutzt. In Makyx unter Leitstand-Zugänge die Konfiguration neu erzeugen.", response.StatusCode);
+            if (response.StatusCode is HttpStatusCode.TooManyRequests) throw new MakyxException("Makyx begrenzt die Abfragen; bitte in einer Minute noch einmal versuchen.", response.StatusCode);
+            if (!response.IsSuccessStatusCode) throw new MakyxException($"Makyx antwortet mit {(int)response.StatusCode}.", response.StatusCode);
+            string body = await response.Content.ReadAsStringAsync(cancel);
+            if (body.Length > 20_000) throw new MakyxException("Makyx antwortet nicht wie erwartet.");
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && doc.RootElement.TryGetProperty("token", out var tokenElement)
+                    && tokenElement.ValueKind == System.Text.Json.JsonValueKind.String && tokenElement.GetString() is { } token
+                    && token.StartsWith("mkl_", StringComparison.Ordinal) && token.Length <= 100 && !token.Any(char.IsWhiteSpace))
+                    return token;
+            }
+            catch (System.Text.Json.JsonException) { /* handled below */ }
+            throw new MakyxException("Makyx hat kein Token geliefert (unerwartete Antwort).");
+        }
+        catch (HttpRequestException ex) { throw new MakyxException(Describe(ex)); }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { throw new MakyxException("Makyx antwortet nicht (Zeitlimit)."); }
     }
 
     public sealed class MakyxException(string message, HttpStatusCode? status = null) : Exception(message) { public HttpStatusCode? Status { get; } = status; }
