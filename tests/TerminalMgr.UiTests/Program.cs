@@ -194,6 +194,40 @@ internal static class Program
         }
         Console.WriteLine($"PASS Compact clipboard: header {header.ActualHeight:F0}px, one-line row {first.ActualHeight:F0}px, menu actions retain full text");
     }
+    /// <summary>The drop-down lists use the dark theme: a template of our own (not the light system one) with readable text.</summary>
+    private static void TestComboBoxTheme()
+    {
+        var dialog = new ProfileDialog(new Profile { Name = "Test", Destination = "test" })
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual, Left = -10000, Top = -10000, ShowInTaskbar = false, ShowActivated = false
+        };
+        dialog.Show();
+        dialog.UpdateLayout();
+        var combo = (ComboBox)typeof(ProfileDialog).GetField("_mode", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(dialog)!;
+        combo.ApplyTemplate();
+        Check(combo.Template.FindName("Toggle", combo) is System.Windows.Controls.Primitives.ToggleButton, "The combo box uses the dark template");
+        var box = (Border)((System.Windows.Controls.Primitives.ToggleButton)combo.Template.FindName("Toggle", combo)).Template.FindName("Box", (System.Windows.Controls.Primitives.ToggleButton)combo.Template.FindName("Toggle", combo));
+        var fill = ((System.Windows.Media.SolidColorBrush)box.Background).Color;
+        var text = ((System.Windows.Media.SolidColorBrush)combo.Foreground).Color;
+        double Luma(System.Windows.Media.Color c) => 0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B;
+        Check(Luma(text) - Luma(fill) > 100, $"Readable: text {text}, box {fill}");
+        Check(combo.Items.Count == 3, "The three start modes are listed");
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") is { Length: > 0 } directory)
+        {
+            Pump(() => false, 150);
+            var content = (FrameworkElement)dialog.Content;
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(content.ActualWidth), (int)Math.Ceiling(content.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(content);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            Directory.CreateDirectory(directory);
+            using var png = File.Create(Path.Combine(directory, "profile-dialog.png"));
+            encoder.Save(png);
+        }
+        dialog.Close();
+        Console.WriteLine("PASS Dark combo boxes: own template, readable text, three start modes");
+    }
+
     private static void TestWindowStrip()
     {
         var main = new MainWindow();
@@ -715,6 +749,7 @@ internal static class Program
             clips.ItemsSource = new[] { new ClipItem(new ClipboardEntry("eins\nzwei\ndrei", "dev", DateTimeOffset.Now)) };
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
+            TestComboBoxTheme();
             TestClipboardCompactDesign();
             TestAiSubscriptions();
             TestMakyxDashboard();
