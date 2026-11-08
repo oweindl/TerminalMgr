@@ -929,6 +929,15 @@ try
             "https://", "ms-msdt:/id", "https://example.com/a b", "https://example.com/", "mailto:a@b.c", new string('a', 3000) })
             Check(!LinkRules.TryNormalize(bad, out _), "Must be refused: " + bad);
     });
+    Test("tmux client: only a start command that runs tmux makes the terminal a tmux client (keys never go into a plain shell)", () =>
+    {
+        Check(TmuxWindowParser.IsTmuxCommand("tmux new -A -s main") && TmuxWindowParser.IsTmuxCommand("exec tmux attach -t work") && TmuxWindowParser.IsTmuxCommand("/usr/bin/tmux new-session -A -s x") && TmuxWindowParser.IsTmuxCommand("TMUX new"), "Real tmux commands");
+        Check(!TmuxWindowParser.IsTmuxCommand(null) && !TmuxWindowParser.IsTmuxCommand("") && !TmuxWindowParser.IsTmuxCommand("   ") && !TmuxWindowParser.IsTmuxCommand("bash -l") && !TmuxWindowParser.IsTmuxCommand("none"), "No command, plain shell");
+        Check(!TmuxWindowParser.IsTmuxCommand("tmux-sessionizer") && !TmuxWindowParser.IsTmuxCommand("run_tmuxlike") && !TmuxWindowParser.IsTmuxCommand("notmux"), "Other names that contain the letters");
+        // The profile that starts tmux itself (mode tmux) is always a tmux client; the ssh config default (no RemoteCommand) is not.
+        Check(SshCommand.Arguments(new Profile { Name = "x", Destination = "x", Mode = StartMode.Tmux, TmuxSession = "main" }).Last().StartsWith("tmux new-session -A"), "Mode tmux starts tmux");
+        Check(!SshCommand.Arguments(new Profile { Name = "x", Destination = "x", Mode = StartMode.SshConfig }).Any(a => TmuxWindowParser.IsTmuxCommand(a)), "Mode ssh config alone starts no tmux");
+    });
     Test("Window strip: parser reads windows, clock and screens and strips escape sequences", () =>
     {
         string output = "@@NOW 1000\n@1\t0\t0\t0\t0\t\tbash\tshell\n@2\t1\t1\t0\t0\t\tclaude\tclaude\n@3\t2\t0\t1\t0\t\tterraform\tdeploy\n@4\t3\t0\t0\t1\t0\tdotnet\tbuild\nmuell ohne Tabs\n"

@@ -60,6 +60,7 @@ public partial class MainWindow
             StatusText.Text = "Zum Wechseln des tmux-Fensters zuerst einen verbundenen Server auswählen.";
             return;
         }
+        if (!await ClientInTmuxAsync(item, _shutdown.Token)) { StatusText.Text = NotInTmuxHint; return; }
         // The starting point is needed for "back"; it is looked up once per server, before the first switch.
         if (_history.Current?.ProfileId != item.Profile.Id) await RecordPositionAsync(item, TimeSpan.FromSeconds(2));
         await TmuxClient.RunCommandAsync(pty, command, _shutdown.Token);
