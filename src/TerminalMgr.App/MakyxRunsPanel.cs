@@ -12,6 +12,7 @@ public sealed class MakyxRunsPanel : StackPanel
     public event Action<MakyxRun>? OpenRequested;
     public event Action<MakyxRun>? TerminalRequested;
     public event Action<MakyxRun>? CopyRequested;
+    public event Action<MakyxRun>? BrowserRequested;
     /// <summary>The terminal entry is enabled when this returns null (a reason otherwise).</summary>
     public Func<MakyxRun, string?>? TerminalProblem { get; set; }
 
@@ -87,7 +88,9 @@ public sealed class MakyxRunsPanel : StackPanel
         terminal.Click += (_, _) => TerminalRequested?.Invoke(run);
         var copy = new MenuItem { Header = "Link kopieren", IsEnabled = run.Link.Length > 0 };
         copy.Click += (_, _) => CopyRequested?.Invoke(run);
-        menu.Items.Add(open); menu.Items.Add(terminal); menu.Items.Add(copy);
+        var browser = new MenuItem { Header = "Im Browser öffnen", IsEnabled = run.Link.Length > 0 };
+        browser.Click += (_, _) => BrowserRequested?.Invoke(run);
+        menu.Items.Add(open); menu.Items.Add(terminal); menu.Items.Add(browser); menu.Items.Add(copy);
         return menu;
     }
 }

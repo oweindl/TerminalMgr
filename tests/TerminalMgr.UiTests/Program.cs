@@ -47,7 +47,11 @@ internal static class Program
         Check(panel.Children.Count == 3, "three rows expected");
         Check(panel.DesiredSize.Height <= 3 * 52, "rows are too tall: " + panel.DesiredSize.Height);
         var first = (Border)panel.Children[0];
-        Check(first.ContextMenu!.Items.Count == 3 && ((MenuItem)first.ContextMenu.Items[1]).IsEnabled && ((MenuItem)first.ContextMenu.Items[1]).Header.ToString() == "Im Terminal öffnen", "terminal entry is enabled for a tmux window with a profile");
+        var browserRuns = new List<string>(); panel.BrowserRequested += run => browserRuns.Add(run.Id);
+        Check(first.ContextMenu!.Items.Count == 4 && ((MenuItem)first.ContextMenu.Items[2]).Header.ToString() == "Im Browser öffnen", "menu: open in Makyx window, terminal, browser, copy link");
+        ((MenuItem)first.ContextMenu.Items[2]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(browserRuns.SequenceEqual(["E-1"]), "browser entry raises its event");
+        Check(((MenuItem)first.ContextMenu.Items[1]).IsEnabled && ((MenuItem)first.ContextMenu.Items[1]).Header.ToString() == "Im Terminal öffnen", "terminal entry is enabled for a tmux window with a profile");
         var noProfile = (MenuItem)((Border)panel.Children[1]).ContextMenu!.Items[1];
         Check(!noProfile.IsEnabled && noProfile.Header.ToString()!.Contains("kein SSH-Profil"), "terminal entry is disabled with the reason when no profile matches");
         var structured = (MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[1];

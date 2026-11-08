@@ -172,6 +172,24 @@ internal static class MakyxTests
             check(MakyxTmux.SocketsFor(other, [profile, other], machines).Count == 0, "Rechner ohne tmux-Socket liefert nichts");
         });
 
+        test("Makyx-Fenster: nur Makyx-Seiten, alles andere in den Browser; eigene CA nur mit passendem Fingerprint", () =>
+        {
+            check(MakyxBrowserRules.Origin("https://makyx.example:8800/v/makyx/lauf/L-001") == "https://makyx.example:8800", "Herkunft mit Port");
+            check(MakyxBrowserRules.Origin("http://Makyx.Example/x") == "http://makyx.example:80", "Standardport, Kleinschreibung");
+            check(MakyxBrowserRules.Origin("file:///c:/x") is null && MakyxBrowserRules.Origin("javascript:alert(1)") is null && MakyxBrowserRules.Origin("https://benutzer:geheim@makyx.example/") is null && MakyxBrowserRules.Origin(null) is null, "fremde Schemata und Benutzerangaben");
+            var origins = new HashSet<string> { "https://makyx.example:8800" };
+            check(MakyxBrowserRules.IsAllowed("https://makyx.example:8800/v/makyx/rechner", origins), "Makyx-Seite bleibt im Fenster");
+            check(!MakyxBrowserRules.IsAllowed("https://makyx.example:8801/api/", origins) && !MakyxBrowserRules.IsAllowed("https://andere.example/", origins) && !MakyxBrowserRules.IsAllowed("http://makyx.example:8800/", origins), "anderer Port, anderer Host, http statt https: Browser");
+
+            var (pem, fingerprint) = MakyxConfigTests.NewCa();
+            var (otherPem, _) = MakyxConfigTests.NewCa();
+            using var ca = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(pem);
+            using var other = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(otherPem);
+            check(MakyxBrowserRules.ChainMatches([other.RawData, ca.RawData], fingerprint), "CA in der Kette passt");
+            check(MakyxBrowserRules.ChainMatches([ca.RawData], MakyxConfigText.Group(fingerprint)), "Fingerprint mit Doppelpunkten");
+            check(!MakyxBrowserRules.ChainMatches([other.RawData], fingerprint) && !MakyxBrowserRules.ChainMatches([ca.RawData], "") && !MakyxBrowserRules.ChainMatches([ca.RawData], null), "fremde CA oder kein Fingerprint: abgelehnt");
+        });
+
         test("Makyx: Profil des Rechners wird zugeordnet (Zuordnung, Name, Ziel)", () =>
         {
             var a = new Profile { Id = "p1", Name = "Arbeitsrechner", Destination = "benutzer@host-a" };

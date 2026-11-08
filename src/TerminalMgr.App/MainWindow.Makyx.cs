@@ -19,6 +19,7 @@ public partial class MainWindow
     private void InitializeMakyx()
     {
         MakyxRuns.OpenRequested += run => OpenMakyxLink(run.Link);
+        MakyxRuns.BrowserRequested += run => OpenMakyxInBrowser(run.Link);
         MakyxRuns.CopyRequested += run => { try { Clipboard.SetText(run.Link); StatusText.Text = "Link kopiert."; } catch (System.Runtime.InteropServices.ExternalException) { StatusText.Text = "Der Link ließ sich nicht kopieren."; } };
         MakyxRuns.TerminalRequested += run => _ = OpenMakyxTerminalAsync(run);
         MakyxRuns.TerminalProblem = TerminalProblem;
@@ -93,6 +94,10 @@ public partial class MainWindow
         var menu = new ContextMenu();
         var refresh = new MenuItem { Header = "Neu verbinden", IsEnabled = Makyx.Enabled };
         refresh.Click += (_, _) => ApplyMakyxSettings(); menu.Items.Add(refresh);
+        // The interface address is the origin of the links Makyx reports; without runs there is none yet.
+        string? home = _makyx?.Runs().Select(r => MakyxBrowserRules.Origin(r.Link)).FirstOrDefault(o => o is not null);
+        var open = new MenuItem { Header = "Makyx öffnen", IsEnabled = home is not null };
+        open.Click += (_, _) => OpenMakyxLink(home + "/"); menu.Items.Add(open);
         var settings = new MenuItem { Header = "Makyx-Einstellungen …" };
         settings.Click += (_, _) => OpenSettings(this, new RoutedEventArgs()); menu.Items.Add(settings);
         menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
@@ -108,8 +113,16 @@ public partial class MainWindow
         MakyxScroll.MaxHeight = Math.Max(0, MakyxPanelRow.Height.Value - 62);
     }
 
-    /// <summary>Only http and https are opened, in the default browser.</summary>
+    /// <summary>Opens a Makyx page in the Makyx window of TerminalMgr (note 15, stage 1); only http and https.</summary>
     private void OpenMakyxLink(string link)
+    {
+        string safe = MakyxJson.SafeLink(link);
+        if (safe.Length == 0) { StatusText.Text = "Für diesen Eintrag gibt es keinen Link."; return; }
+        MakyxBrowserWindow.Open(this, _dataDirectory, () => Makyx.CaFingerprint, safe);
+    }
+
+    /// <summary>Only http and https are opened, in the default browser.</summary>
+    private void OpenMakyxInBrowser(string link)
     {
         string safe = MakyxJson.SafeLink(link);
         if (safe.Length == 0) { StatusText.Text = "Für diesen Eintrag gibt es keinen Link."; return; }
