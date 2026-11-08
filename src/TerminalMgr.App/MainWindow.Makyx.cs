@@ -8,7 +8,7 @@ using TerminalMgr.Windows;
 namespace TerminalMgr.App;
 
 /// <summary>Makyx dashboard: the LÄUFE strip under KI-ABOS, a toast for new "waits for you" items, the jump into the Makyx page or the tmux window of an instance, and the palette entries.
-/// Read only; nothing is changed in Makyx.</summary>
+/// Steering (sessions, runs, answers, stop) lives in MainWindow.MakyxControl.cs.</summary>
 public partial class MainWindow
 {
     private MakyxMonitor? _makyx;
@@ -23,6 +23,7 @@ public partial class MainWindow
         MakyxRuns.CopyRequested += run => { try { Clipboard.SetText(run.Link); StatusText.Text = "Link kopiert."; } catch (System.Runtime.InteropServices.ExternalException) { StatusText.Text = "Der Link ließ sich nicht kopieren."; } };
         MakyxRuns.TerminalRequested += run => _ = OpenMakyxTerminalAsync(run);
         MakyxRuns.TerminalProblem = TerminalProblem;
+        InitializeMakyxControl();
         _makyxClock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => { if (_makyx is not null && !Makyx.Collapsed) RenderMakyx(); }, Dispatcher);
         _makyxClock.Start();
         RenderMakyx();      // shows "nicht eingerichtet" until the settings are loaded and the monitor starts
@@ -54,6 +55,7 @@ public partial class MainWindow
     {
         if (_closing || !ReferenceEquals(_makyx, monitor)) return;
         RenderMakyx();
+        OpenPendingMakyxSession();
         if (!Makyx.Notify) return;
         foreach (var item in change.NewWaiting)
             ToastWindow.Show("Wartet auf dich", $"{MakyxJson.WaitingKindText(item)}: {item.Title}" + (item.Project is { Length: > 0 } p ? " · " + p : ""), () => OpenMakyxLink(item.Link));
@@ -98,6 +100,8 @@ public partial class MainWindow
         string? home = _makyx?.Runs().Select(r => MakyxBrowserRules.Origin(r.Link)).FirstOrDefault(o => o is not null);
         var open = new MenuItem { Header = "Makyx öffnen", IsEnabled = home is not null };
         open.Click += (_, _) => OpenMakyxLink(home + "/"); menu.Items.Add(open);
+        AddMakyxControlMenus(menu);
+        menu.Items.Add(new Separator());
         var settings = new MenuItem { Header = "Makyx-Einstellungen …" };
         settings.Click += (_, _) => OpenSettings(this, new RoutedEventArgs()); menu.Items.Add(settings);
         menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;

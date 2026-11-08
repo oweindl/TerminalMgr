@@ -48,7 +48,12 @@ internal static class Program
         Check(panel.DesiredSize.Height <= 3 * 52, "rows are too tall: " + panel.DesiredSize.Height);
         var first = (Border)panel.Children[0];
         var browserRuns = new List<string>(); panel.BrowserRequested += run => browserRuns.Add(run.Id);
-        Check(first.ContextMenu!.Items.Count == 4 && ((MenuItem)first.ContextMenu.Items[2]).Header.ToString() == "Im Browser öffnen", "menu: open in Makyx window, terminal, browser, copy link");
+        Check(first.ContextMenu!.Items.Count == 7 && ((MenuItem)first.ContextMenu.Items[2]).Header.ToString() == "Im Browser öffnen", "menu: open in Makyx window, terminal, browser, copy link, then stop and emergency stop");
+        var stops = new List<string>(); var emergencies = new List<string>();
+        panel.StopRequested += run => stops.Add(run.Id); panel.EmergencyRequested += run => emergencies.Add(run.Id);
+        ((MenuItem)first.ContextMenu.Items[5]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)first.ContextMenu.Items[6]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(stops.SequenceEqual(["E-1"]) && emergencies.SequenceEqual(["E-1"]) && ((MenuItem)first.ContextMenu.Items[5]).IsEnabled, "stop entries raise their events for an active run");
+        Check(!((MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[5]).IsEnabled && !((MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[6]).IsEnabled, "a finished run can not be stopped");
         ((MenuItem)first.ContextMenu.Items[2]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Check(browserRuns.SequenceEqual(["E-1"]), "browser entry raises its event");
         Check(((MenuItem)first.ContextMenu.Items[1]).IsEnabled && ((MenuItem)first.ContextMenu.Items[1]).Header.ToString() == "Im Terminal öffnen", "terminal entry is enabled for a tmux window with a profile");

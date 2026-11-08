@@ -106,6 +106,26 @@ public sealed class MakyxClient : IDisposable
         catch (System.Text.Json.JsonException) { throw new MakyxException("Makyx antwortet nicht wie erwartet."); }
     }
 
+    public async Task<IReadOnlyList<MakyxProject>> ProjectsAsync(CancellationToken cancel) => MakyxJson.ParseProjects(await GetAsync("projekte", cancel));
+
+    // Writing actions (right "steuern"); Makyx logs each with the access. Ids are checked before they go into a path.
+    /// <summary>Starts a terminal session; the answer is the session (with terminal) when Makyx returns it, else null.</summary>
+    public async Task<MakyxRun?> StartSessionAsync(string project, string? machine, string? agent, string? model, CancellationToken cancel)
+    {
+        string body = await PostAsync("sessions", MakyxControl.SessionBody(project, machine, agent, model), cancel);
+        try { return MakyxJson.ParseStarted(body); } catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    public Task AnswerAsync(string waitingId, MakyxDecision decision, string? text, CancellationToken cancel) =>
+        PostAsync("wartet/" + MakyxControl.PathId(waitingId) + "/antwort", MakyxControl.AnswerBody(decision, text), cancel);
+
+    public Task StartRunAsync(string project, IReadOnlyList<string> items, CancellationToken cancel) =>
+        PostAsync("laeufe", MakyxControl.StartRunBody(project, items), cancel);
+
+    public Task StopRunAsync(string runId, CancellationToken cancel) => PostAsync("laeufe/" + MakyxControl.PathId(runId) + "/anhalten", "{}", cancel);
+
+    public Task EmergencyStopAsync(string runId, CancellationToken cancel) => PostAsync("laeufe/" + MakyxControl.PathId(runId) + "/nothalt", MakyxControl.EmergencyBody, cancel);
+
     private async Task<string> PostAsync(string path, string json, CancellationToken cancel)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
@@ -116,8 +136,8 @@ public sealed class MakyxClient : IDisposable
             using var response = await _http.PostAsync(new Uri(_base, path), content, timeout.Token);
             if (response.StatusCode is HttpStatusCode.Unauthorized) throw new MakyxException("Das Token wurde nicht angenommen (falsch oder widerrufen).", response.StatusCode);
             if (response.StatusCode is HttpStatusCode.TooManyRequests) throw new MakyxException("Makyx begrenzt die Abfragen; später erneut versuchen.", response.StatusCode);
-            if (!response.IsSuccessStatusCode) throw new MakyxException($"Makyx antwortet mit {(int)response.StatusCode}.", response.StatusCode);
             string body = await response.Content.ReadAsStringAsync(timeout.Token);
+            if (!response.IsSuccessStatusCode) throw new MakyxException(MakyxControl.ErrorText((int)response.StatusCode, body) + ".", response.StatusCode);
             if (body.Length > 100_000) throw new MakyxException("Makyx antwortet nicht wie erwartet.");
             return body;
         }
@@ -205,6 +225,9 @@ public sealed class MakyxMonitor : IDisposable
                 // The machines (tmux socket, SSH target) let the server menu list Makyx windows; an old Makyx without /rechner is no error.
                 try { var machines = await client.MachinesAsync(cancel); lock (_gate) _machines = machines; }
                 catch (MakyxClient.MakyxException) { }
+                // Projects (menu "Projekte"); an older Makyx without /projekte is no error either.
+                try { var projects = await client.ProjectsAsync(cancel); lock (_gate) _projects = projects; }
+                catch (Exception ex) when (ex is MakyxClient.MakyxException or System.Text.Json.JsonException) { }
                 first = false; failures = 0; LastContact = DateTimeOffset.Now;
                 ConnectionChanged?.Invoke("connected", LastContact);
                 Changed?.Invoke(change);
@@ -239,5 +262,20 @@ public sealed class MakyxMonitor : IDisposable
     private IReadOnlyList<MakyxMachine> _machines = [];
     /// <summary>The machines as of the last (re)connect.</summary>
     public IReadOnlyList<MakyxMachine> Machines() { lock (_gate) return _machines; }
+    private IReadOnlyList<MakyxProject> _projects = [];
+    /// <summary>The projects as of the last (re)connect or <see cref="RefreshProjectsAsync"/>.</summary>
+    public IReadOnlyList<MakyxProject> Projects() { lock (_gate) return _projects; }
+
+    /// <summary>Reloads the projects (counts of running instances and open gates change often); keeps the old list on any error.</summary>
+    public async Task RefreshProjectsAsync()
+    {
+        try
+        {
+            using var client = new MakyxClient(_options, _token);
+            var projects = await client.ProjectsAsync(_stop.Token);
+            lock (_gate) _projects = projects;
+        }
+        catch (Exception ex) when (ex is MakyxClient.MakyxException or System.Text.Json.JsonException or OperationCanceledException or ObjectDisposedException or ArgumentException) { }
+    }
     public void Dispose() { _stop.Cancel(); try { _loop?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { } _stop.Dispose(); }
 }

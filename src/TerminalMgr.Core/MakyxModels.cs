@@ -78,6 +78,31 @@ public static class MakyxJson
     public static IReadOnlyList<MakyxWaiting> ParseWaiting(string json) => List(json, "wartet", ParseWaitingItem, out _);
     public static IReadOnlyList<MakyxMachine> ParseMachines(string json) => List(json, "rechner", ParseMachine, out _);
 
+    /// <summary>A string or a number (ids may come as either).</summary>
+    private static string? IdText(JsonElement e, string name) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v)
+        ? v.ValueKind == JsonValueKind.String ? v.GetString() : v.ValueKind == JsonValueKind.Number ? v.GetRawText() : null : null;
+
+    public static MakyxProject ParseProject(JsonElement e)
+    {
+        string id = IdText(e, "id") ?? "?";
+        string? repo = Str(e, "repository") ?? Str(e, "repo");
+        if (repo is null && e.ValueKind == JsonValueKind.Object && e.TryGetProperty("repository", out var r) && r.ValueKind == JsonValueKind.Object) repo = Str(r, "pfad") ?? Str(r, "url") ?? Str(r, "name");
+        return new(id, Str(e, "name") ?? id, repo, Str(e, "quelle"), Str(e, "rechner"), Int(e, "instanzen_laufend") ?? 0, Int(e, "gates_offen") ?? 0, SafeLink(Str(e, "link")));
+    }
+
+    public static IReadOnlyList<MakyxProject> ParseProjects(string json) => List(json, "projekte", ParseProject, out _);
+
+    /// <summary>The answer of POST sessions: the session itself or wrapped in "session"/"lauf"; null when it carries no id.</summary>
+    public static MakyxRun? ParseStarted(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) return null;
+        foreach (string wrapper in new[] { "session", "lauf" })
+            if (root.TryGetProperty(wrapper, out var inner) && inner.ValueKind == JsonValueKind.Object) { root = inner; break; }
+        return Str(root, "id") is null ? null : ParseRun(root);
+    }
+
     public static MakyxHello ParseHello(string json)
     {
         using var doc = JsonDocument.Parse(json);

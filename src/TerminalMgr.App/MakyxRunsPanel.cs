@@ -13,6 +13,10 @@ public sealed class MakyxRunsPanel : StackPanel
     public event Action<MakyxRun>? TerminalRequested;
     public event Action<MakyxRun>? CopyRequested;
     public event Action<MakyxRun>? BrowserRequested;
+    /// <summary>"Anhalten …" (stops the run; the window asks first).</summary>
+    public event Action<MakyxRun>? StopRequested;
+    /// <summary>"Nothalt (ganz Makyx) …" (stops all of Makyx; the window asks first).</summary>
+    public event Action<MakyxRun>? EmergencyRequested;
     /// <summary>The terminal entry is enabled when this returns null (a reason otherwise).</summary>
     public Func<MakyxRun, string?>? TerminalProblem { get; set; }
 
@@ -93,6 +97,13 @@ public sealed class MakyxRunsPanel : StackPanel
         var browser = new MenuItem { Header = "Im Browser öffnen", IsEnabled = run.Link.Length > 0 };
         browser.Click += (_, _) => BrowserRequested?.Invoke(run);
         menu.Items.Add(open); menu.Items.Add(terminal); menu.Items.Add(browser); menu.Items.Add(copy);
+        // Steering (right "steuern"): only for active runs; free sessions end in their terminal.
+        bool stoppable = MakyxControl.IsStoppable(run);
+        var stop = new MenuItem { Header = "Anhalten …", IsEnabled = stoppable };
+        stop.Click += (_, _) => StopRequested?.Invoke(run);
+        var emergency = new MenuItem { Header = "Nothalt (ganz Makyx) …", IsEnabled = stoppable };
+        emergency.Click += (_, _) => EmergencyRequested?.Invoke(run);
+        menu.Items.Add(new Separator()); menu.Items.Add(stop); menu.Items.Add(emergency);
         return menu;
     }
 }

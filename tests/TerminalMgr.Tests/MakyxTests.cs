@@ -17,6 +17,11 @@ internal static class MakyxTests
 
     private static string Event(string name, string data, int id) => $"id: {id}\nevent: {name}\ndata: {data}\n\n";
 
+    private static bool Throws(Action action)
+    {
+        try { action(); return false; } catch (ArgumentException) { return true; }
+    }
+
     public static void Run(Action<string, Action> test, Action<bool, string> check)
     {
         test("Makyx: API-JSON wird zu Läufen, Status, Terminal und Kosten", () =>
@@ -211,6 +216,38 @@ internal static class MakyxTests
             var run = MakyxJson.ParseRuns(json, out _).Single();
             check(run.Id == "S-1a2b3c4d" && run.Kind == "session" && run.Project == "" && run.IsActive, "Session gelesen");
             check(run.Terminal.Available && run.Terminal.TmuxSocket == "makyx" && run.Terminal.TmuxWindow == "@3", "Terminal-Zuordnung");
+        });
+
+        test("Makyx: Projekte lesen (Kennung als Text oder Zahl, Zähler, nur sichere Links)", () =>
+        {
+            const string json = "{\"projekte\":[{\"id\":\"p-1\",\"name\":\"Beispiel\",\"repository\":\"/arbeit/beispiel\",\"quelle\":\"lokal\",\"rechner\":\"rechner-a\",\"instanzen_laufend\":2,\"gates_offen\":1,\"link\":\"https://makyx.example:8800/v/makyx/projekt/p-1\"},"
+                + "{\"id\":7,\"name\":\"Zweites\",\"link\":\"javascript:alert(1)\"}]}";
+            var projects = MakyxJson.ParseProjects(json);
+            check(projects.Count == 2 && projects[0] is { Id: "p-1", Name: "Beispiel", Repository: "/arbeit/beispiel", Machine: "rechner-a", Running: 2, GatesOpen: 1 }, "erstes Projekt");
+            check(projects[1] is { Id: "7", Running: 0, GatesOpen: 0, Link: "" }, "Zahl als Kennung, fehlende Zähler, unsicherer Link verworfen");
+            check(MakyxControl.ProjectText(projects[0]) == "Beispiel · 2 laufen · 1 Gate" && MakyxControl.ProjectText(projects[1]) == "Zweites", "Menütext");
+            check(MakyxJson.ParseProjects("{}").Count == 0, "ohne Liste leer");
+        });
+
+        test("Makyx steuern: Anfragen, Kennungen im Pfad, Fehlertexte", () =>
+        {
+            check(MakyxControl.SessionBody("p-1", "rechner-a", "codex", "modell-x") == "{\"projekt\":\"p-1\",\"rechner\":\"rechner-a\",\"agent\":\"codex\",\"modell\":\"modell-x\",\"modus\":\"terminal\"}", "Session mit allem");
+            check(MakyxControl.SessionBody("p-1", " ", "unbekannt", null) == "{\"projekt\":\"p-1\",\"agent\":\"claude\",\"modus\":\"terminal\"}", "Vorgaben: kein Rechner, Agent claude, kein Modell");
+            check(Throws(() => MakyxControl.SessionBody(" ", null, null, null)), "Projekt fehlt");
+            check(MakyxControl.AnswerBody(MakyxDecision.Approve, null) == "{\"entscheidung\":\"freigeben\"}" && MakyxControl.AnswerBody(MakyxDecision.Reject, " ") == "{\"entscheidung\":\"ablehnen\"}", "Freigeben, Ablehnen");
+            check(MakyxControl.AnswerBody(MakyxDecision.Return, " bitte \"so\" ") == "{\"entscheidung\":\"zurueckgeben\",\"text\":\"bitte \\u0022so\\u0022\"}", "Zurückgeben mit Text, sauber maskiert: " + MakyxControl.AnswerBody(MakyxDecision.Return, " bitte \"so\" "));
+            check(Throws(() => MakyxControl.AnswerBody(MakyxDecision.Return, "")), "Zurückgeben ohne Text");
+            var items = MakyxControl.RunItems("B-12\r\n\r\n  Neuer Punkt  \n");
+            check(items.SequenceEqual(["B-12", "Neuer Punkt"]), "Punkte je Zeile");
+            check(MakyxControl.StartRunBody("p-1", items) == "{\"projekt\":\"p-1\",\"punkte\":[\"B-12\",\"Neuer Punkt\"]}", "Lauf-Anfrage");
+            check(Throws(() => MakyxControl.StartRunBody("p-1", [])) && Throws(() => MakyxControl.StartRunBody("p-1", Enumerable.Range(0, 51).Select(i => "P" + i).ToList())), "leer oder zu viele Punkte");
+            check(MakyxControl.PathId("L-001") == "L-001" && MakyxControl.PathId("a_b-9") == "a_b-9", "gültige Kennungen");
+            check(Throws(() => MakyxControl.PathId("../x")) && Throws(() => MakyxControl.PathId("a/b")) && Throws(() => MakyxControl.PathId("a?b")) && Throws(() => MakyxControl.PathId("")) && Throws(() => MakyxControl.PathId(null)), "Pfad-Tricks abgelehnt");
+            check(MakyxControl.ErrorText(403, "{\"fehler\":\"kein_recht_steuern\"}").Contains("Recht „steuern“"), "kein Recht steuern erklärt");
+            check(MakyxControl.ErrorText(400, "{\"fehler\":\"projekt_unbekannt\",\"meldung\":\"Projekt nicht gefunden\"}") == "Makyx lehnt die Anfrage ab: Projekt nicht gefunden", "Meldung von Makyx");
+            check(MakyxControl.ErrorText(404, "kein json") == "Makyx kennt diesen Eintrag nicht (mehr)" && MakyxControl.ErrorText(500, null) == "Makyx antwortet mit 500", "ohne Text");
+            check(MakyxJson.ParseStarted("{\"session\":{\"id\":\"S-1a2b3c4d\",\"art\":\"session\",\"status\":\"arbeitet\",\"terminal\":{\"vorhanden\":true,\"tmux_socket\":\"makyx\",\"tmux_session\":\"makyx\",\"tmux_fenster\":\"@4\"}}}")?.Terminal.TmuxWindow == "@4", "gestartete Session (eingepackt)");
+            check(MakyxJson.ParseStarted("{\"id\":\"S-1\",\"art\":\"session\"}")?.Id == "S-1" && MakyxJson.ParseStarted("{\"ok\":true}") is null, "gestartete Session (direkt) oder keine");
         });
 
         test("Makyx: Profil des Rechners wird zugeordnet (Zuordnung, Name, Ziel)", () =>
