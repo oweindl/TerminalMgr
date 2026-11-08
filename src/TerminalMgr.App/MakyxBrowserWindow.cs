@@ -31,10 +31,13 @@ public sealed class MakyxBrowserWindow : Window
         if (MakyxBrowserRules.Origin(link) is null) return;
         if (_current is null)
         {
-            _current = new MakyxBrowserWindow(dataDirectory, caFingerprint) { Left = owner.Left + 60, Top = owner.Top + 40 };
-            _current.Closed += (_, _) => _current = null;
-            _current.Show();
+            var window = new MakyxBrowserWindow(dataDirectory, caFingerprint) { Left = owner.Left + 60, Top = owner.Top + 40 };
+            _current = window;
+            window.Closed += (_, _) => _current = null;
+            // Hidden on close (keeps the Makyx login of this run); closed for good together with the main window, so the app can end.
+            owner.Closed += (_, _) => window.CloseForGood();
         }
+        if (!_current.IsVisible) _current.Show();
         if (_current.WindowState == WindowState.Minimized) _current.WindowState = WindowState.Normal;
         _current.Activate();
         _ = _current.NavigateAsync(link);
@@ -68,6 +71,21 @@ public sealed class MakyxBrowserWindow : Window
         DockPanel.SetDock(top, Dock.Top);
         root.Children.Add(top); root.Children.Add(_view);
         Content = root;
+    }
+
+    private bool _closeForGood;
+
+    /// <summary>Closing only hides the window: the WebView2 process and with it the Makyx session cookie stay for this app run.</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (!_closeForGood) { e.Cancel = true; Hide(); return; }
+        base.OnClosing(e);
+    }
+
+    private void CloseForGood()
+    {
+        _closeForGood = true;
+        Close();
     }
 
     private static void Label(UIElement element, string name) => System.Windows.Automation.AutomationProperties.SetName(element, name);
@@ -124,7 +142,7 @@ public sealed class MakyxBrowserWindow : Window
         catch (Exception ex) when (ex is WebView2RuntimeNotFoundException or InvalidOperationException or System.Runtime.InteropServices.COMException)
         {
             OpenExternal(link);
-            Close();
+            CloseForGood();
         }
     }
 
