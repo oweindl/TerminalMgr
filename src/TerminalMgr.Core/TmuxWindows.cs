@@ -59,6 +59,19 @@ public static partial class TmuxWindowParser
         return sessionId + ":" + windowId;
     }
 
+    /// <summary>
+    /// Does this start command run tmux (as a program of its own, not as part of another name such as "tmux-sessionizer")?
+    /// Only then is the terminal of the connection a tmux client that tmux keys may be typed into.
+    /// </summary>
+    public static bool IsTmuxCommand(string? command)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return false;
+        static bool Part(char c) => char.IsLetterOrDigit(c) || c is '-' or '_' or '.';
+        for (int at = command.IndexOf("tmux", StringComparison.OrdinalIgnoreCase); at >= 0; at = command.IndexOf("tmux", at + 4, StringComparison.OrdinalIgnoreCase))
+            if ((at == 0 || !Part(command[at - 1])) && (at + 4 >= command.Length || !Part(command[at + 4]))) return true;
+        return false;
+    }
+
     /// <summary>Session name from a RemoteCommand such as "tmux new -A -s main" or "tmux attach -t main".</summary>
     public static string? SessionNameFromCommand(string? command)
     {

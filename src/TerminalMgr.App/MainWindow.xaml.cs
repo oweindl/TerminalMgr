@@ -28,6 +28,8 @@ public partial class MainWindow : Window
     private readonly TmuxSessionQuery _tmuxQuery = new();
     // What the app knows about the tmux session each connection hangs on (by ID after a pick, by name from the profile).
     private readonly Dictionary<string, (string? Id, string? Name)> _tmuxAttached = [];
+    /// <summary>Servers whose terminal is a plain shell (no tmux started by the connection): tmux keys must not be typed into it.</summary>
+    private readonly HashSet<string> _notInTmux = [];
     private readonly Dictionary<string, string> _tmuxLabel = [];
     private readonly Dictionary<string, ReconnectTracker> _reconnect = [];
     private readonly Dictionary<string, CancellationTokenSource> _reconnectWait = [];
@@ -410,6 +412,7 @@ public partial class MainWindow : Window
     private void ForgetTmux(string id)
     {
         _tmuxAttached.Remove(id);
+        _notInTmux.Remove(id);
         StripSessionChanged(id, null);
         if (_tmuxLabel.Remove(id) && Selected?.Profile.Id == id) SessionTitle.Text = TitleFor(Selected);
     }
@@ -503,12 +506,41 @@ public partial class MainWindow : Window
         return (null, TmuxWindowParser.SessionNameFromCommand(command));
     }
 
+    /// <summary>
+    /// Is the terminal of this connected server a tmux client? Only then may the window commands (Ctrl+number, next, back, the picker)
+    /// be typed into it. A profile that starts a plain shell has no tmux, even if the server runs tmux sessions of its own: the keys
+    /// would land in the shell as garbage commands.
+    /// </summary>
+    private async Task<bool> ClientInTmuxAsync(ProfileItem item, CancellationToken cancel = default)
+    {
+        string id = item.Profile.Id;
+        if (!_sessions.ContainsKey(id)) return false;
+        if (_tmuxAttached.ContainsKey(id)) return true;
+        if (_notInTmux.Contains(id)) return false;
+        string? command = item.Profile.Mode switch {
+            StartMode.SshConfig => await _tmuxQuery.RemoteCommandAsync(item.Profile, cancel),
+            StartMode.Command => item.Profile.Command,
+            _ => "tmux"
+        };
+        bool tmux = TmuxWindowParser.IsTmuxCommand(command);
+        if (!tmux) _notInTmux.Add(id);
+        return tmux;
+    }
+
+    private const string NotInTmuxHint = "Dieses Terminal ist eine normale Shell ohne tmux. Mit der Befehlspalette (Strg+Umschalt+K) ein tmux-Fenster wählen, dann verbindet TerminalMgr mit der Session; oder im Profil den Startmodus „tmux“ einstellen.";
+
     private async Task SwitchToTmuxWindowAsync(ProfileItem item, TmuxWindowRecord window)
     {
         string id = item.Profile.Id;
         try
         {
             ProfilesList.SelectedItem = item;
+            // A connection that is only a plain shell cannot switch windows by keys: it is replaced by one attached to that window.
+            if (_sessions.ContainsKey(id) && !await ClientInTmuxAsync(item, _shutdown.Token))
+            {
+                StatusText.Text = item.Name + ": war nur eine Shell, verbinde mit der tmux-Session „" + window.SessionName + "“ …";
+                await DisconnectAsync(item);
+            }
             if (_sessions.TryGetValue(id, out var pty))
             {
                 await TmuxClient.SwitchToWindowAsync(pty, window.SessionId, window.WindowId, _shutdown.Token);
@@ -546,6 +578,7 @@ public partial class MainWindow : Window
         ProfilesList.SelectedItem = item;
         if (_sessions.TryGetValue(item.Profile.Id, out var session))
         {
+            if (!await ClientInTmuxAsync(item)) { StatusText.Text = NotInTmuxHint; return; }
             await session.SendAsync("\x02w");
             FocusTerminal(item.Profile.Id);
         }
