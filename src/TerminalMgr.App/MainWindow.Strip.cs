@@ -104,7 +104,7 @@ public partial class MainWindow
             tracker.Reset();      // the first frame is a baseline, not a change
             _stream = TmuxStripStream.Start(item.Profile, target,
                 poll => Dispatcher.BeginInvoke(() => OnStripFrame(generation, item, tracker, poll)),
-                reason => Dispatcher.BeginInvoke(() => OnStripEnded(generation, profileId, reason)));
+                reason => Dispatcher.BeginInvoke(() => OnStripEnded(generation, profileId, reason)), socket: item.TmuxSocket);
             _streamProfileId = profileId;
             _streamTarget = target;
         }

@@ -68,7 +68,7 @@ public partial class MainWindow
         {
             try
             {
-                var windows = await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(4), _shutdown.Token);
+                var windows = await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(4), _shutdown.Token, item.TmuxSocket);
                 _paletteWindows[item.Profile.Id] = windows;
                 if (generation == _paletteRefresh) PostPaletteItems();
             }

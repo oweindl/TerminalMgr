@@ -271,7 +271,7 @@ public partial class MainWindow : Window
             _sessions[id] = pty;
             var arguments = tmuxSessionId is null ? SshCommand.Arguments(item.Profile)
                 : tmuxWindowId is null ? SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId)
-                : SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId, tmuxWindowId);
+                : SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId, tmuxWindowId, item.TmuxSocket);
             ForgetTmux(id);
             if (tmuxSessionId is not null) _tmuxAttached[id] = (tmuxSessionId, null);
             else if (item.Profile.Mode == StartMode.Tmux) _tmuxAttached[id] = (null, item.Profile.TmuxSession);
@@ -465,14 +465,17 @@ public partial class MainWindow : Window
     {
         try
         {
-            var windowsTask = _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(10), cancel);
+            var windowsTask = _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(10), cancel, item.TmuxSocket);
+            var makyxTask = MakyxWindowsForAsync(item, cancel);
             var attachedTask = AttachedTmuxAsync(item, cancel);
-            var sessions = TmuxWindowParser.Group(await windowsTask);
+            var windows = await windowsTask;
+            var sessions = item.TmuxSocket is null ? TmuxWindowParser.Group(windows) : MakyxTmux.Sessions(windows);
+            var makyx = await makyxTask;
             var (attachedId, attachedName) = await attachedTask;
             int at = menu.Items.IndexOf(placeholder);
             if (at < 0 || !menu.IsOpen) return;
             menu.Items.RemoveAt(at);
-            if (sessions.Count == 0)
+            if (sessions.Count == 0 && makyx.Count == 0)
             {
                 menu.Items.Insert(at, new MenuItem { Header = "Keine tmux-Sessions auf dem Server", IsEnabled = false });
                 return;
@@ -481,6 +484,10 @@ public partial class MainWindow : Window
                 s => (attachedId is not null && s.Id == attachedId) || (attachedName is not null && s.Name == attachedName),
                 window => _ = SwitchToTmuxWindowAsync(item, window));
             foreach (var entry in entries) menu.Items.Insert(at++, entry);
+            // Makyx instances of this server: on the tmux socket of Makyx, opened as their own entry "Makyx · server".
+            foreach (var (socket, makyxSessions) in makyx)
+                foreach (var entry in TmuxMenu.Build(makyxSessions, _ => false, window => _ = OpenMakyxWindowAsync(item, socket, window)))
+                    menu.Items.Insert(at++, entry);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

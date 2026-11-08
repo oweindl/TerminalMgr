@@ -22,14 +22,14 @@ public sealed class TmuxStripStream : IAsyncDisposable
     }
 
     /// <summary>Starts the connection. <paramref name="onFrame"/> and <paramref name="onEnded"/> are called on a background thread.</summary>
-    public static TmuxStripStream Start(Profile profile, string sessionTarget, Action<WindowPoll> onFrame, Action<string> onEnded, int intervalSeconds = 1)
+    public static TmuxStripStream Start(Profile profile, string sessionTarget, Action<WindowPoll> onFrame, Action<string> onEnded, int intervalSeconds = 1, string? socket = null)
     {
         var start = new ProcessStartInfo(TmuxSessionQuery.SshExecutable)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8
         };
-        foreach (string argument in SshCommand.TmuxStripArguments(profile, sessionTarget, intervalSeconds)) start.ArgumentList.Add(argument);
+        foreach (string argument in SshCommand.TmuxStripArguments(profile, sessionTarget, intervalSeconds, socket)) start.ArgumentList.Add(argument);
         var process = Process.Start(start) ?? throw new InvalidOperationException("ssh konnte nicht gestartet werden.");
         return new TmuxStripStream(process, onFrame, onEnded);
     }

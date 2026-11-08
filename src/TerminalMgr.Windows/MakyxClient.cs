@@ -175,6 +175,9 @@ public sealed class MakyxMonitor : IDisposable
                     if (first || since is null) change = State.LoadSnapshot(runs.Runs, waiting, runs.Time);
                     else { State.MergeRuns(runs.Runs, runs.Time); change = State.LoadSnapshot([], waiting, runs.Time); }
                 }
+                // The machines (tmux socket, SSH target) let the server menu list Makyx windows; an old Makyx without /rechner is no error.
+                try { var machines = await client.MachinesAsync(cancel); lock (_gate) _machines = machines; }
+                catch (MakyxClient.MakyxException) { }
                 first = false; failures = 0; LastContact = DateTimeOffset.Now;
                 ConnectionChanged?.Invoke("connected", LastContact);
                 Changed?.Invoke(change);
@@ -206,5 +209,8 @@ public sealed class MakyxMonitor : IDisposable
 
     public IReadOnlyList<MakyxRun> Runs() { lock (_gate) return State.Ordered(); }
     public IReadOnlyCollection<MakyxWaiting> Waiting() { lock (_gate) return State.Waiting.ToList(); }
+    private IReadOnlyList<MakyxMachine> _machines = [];
+    /// <summary>The machines as of the last (re)connect.</summary>
+    public IReadOnlyList<MakyxMachine> Machines() { lock (_gate) return _machines; }
     public void Dispose() { _stop.Cancel(); try { _loop?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { } _stop.Dispose(); }
 }

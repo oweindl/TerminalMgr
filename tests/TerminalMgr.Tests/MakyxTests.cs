@@ -141,6 +141,37 @@ internal static class MakyxTests
             }
         });
 
+        test("Makyx: Fenster auf dem eigenen Socket werden abgefragt, ohne Ansichts-Doppel, und dem Server zugeordnet", () =>
+        {
+            var profile = new Profile { Id = "p1", Name = "rechner-a", Destination = "benutzer@rechner-a" };
+            check(SshCommand.TmuxWindowsArguments(profile, "makyx")[^1].StartsWith("tmux -L 'makyx' list-windows -a -F "), "Abfrage mit Socket");
+            check(SshCommand.TmuxWindowsArguments(profile)[^1].StartsWith("tmux list-windows -a -F "), "ohne Socket wie bisher");
+            check(SshCommand.TmuxAttachArguments(profile, "$1", "@3", "makyx")[^1] == "tmux -L 'makyx' attach-session -t '$1:@3'", "Anhängen mit Socket");
+            string script = WindowStripParser.Script("$1", 1, "makyx");
+            check(script.Contains("tmux -L 'makyx' list-windows -t") && script.Contains("tmux -L 'makyx' capture-pane") && !script.Contains("; tmux list-windows"), "Fensterleiste fragt denselben Socket: " + script);
+            bool refused = false;
+            try { SshCommand.TmuxWindowsArguments(profile, "ma'kyx"); } catch (ArgumentException) { refused = true; }
+            check(refused, "ungültiger Socket wird abgelehnt");
+
+            string output = string.Join("\n",
+                "$0\t@0\t0\t1\tmakyx\tuebersicht\tsleep",
+                "$0\t@1\t1\t0\tmakyx\tlauf9-bau\tclaude",
+                "$0\t@2\t2\t0\tmakyx\tsession-frei\tclaude",
+                "$3\t@1\t1\t1\tansicht-f9363\tlauf9-bau\tclaude",
+                "$4\t@2\t2\t1\tansicht-0aa12\tsession-frei\tclaude");
+            var sessions = MakyxTmux.Sessions(TmuxWindowParser.Parse(output));
+            check(sessions.Count == 1 && sessions[0].Name == "Makyx · makyx" && sessions[0].Id == "$0", "eine Session, Ansichten fallen weg: " + string.Join(",", sessions.Select(s => s.Name)));
+            check(sessions[0].Windows.Select(w => w.Name).SequenceEqual(["lauf9-bau", "session-frei"]), "zwei Fenster, Platzhalter ohne Programm fehlt");
+
+            var other = new Profile { Id = "p2", Name = "rechner-b", Destination = "rechner-b" };
+            var machines = new[] {
+                new MakyxMachine("m1", "makyx-rechner-a", "verbunden", true, "1.0", "benutzer@rechner-a", "makyx"),
+                new MakyxMachine("m2", "makyx-rechner-c", "verbunden", true, "1.0", "rechner-c", "makyx"),
+                new MakyxMachine("m3", "rechner-b", "verbunden", true, "1.0", "rechner-b", null) };
+            check(MakyxTmux.SocketsFor(profile, [profile, other], machines).SequenceEqual(["makyx"]), "Rechner über das SSH-Ziel zugeordnet");
+            check(MakyxTmux.SocketsFor(other, [profile, other], machines).Count == 0, "Rechner ohne tmux-Socket liefert nichts");
+        });
+
         test("Makyx: Profil des Rechners wird zugeordnet (Zuordnung, Name, Ziel)", () =>
         {
             var a = new Profile { Id = "p1", Name = "Arbeitsrechner", Destination = "benutzer@host-a" };
