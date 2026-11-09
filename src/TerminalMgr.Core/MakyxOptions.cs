@@ -12,14 +12,16 @@ public sealed record MakyxOptions
     public string CaFingerprint { get; init; } = "";
     /// <summary>Toast when something new waits for the user.</summary>
     public bool Notify { get; init; } = true;
-    public bool Collapsed { get; init; } = true;
-    public double Height { get; init; } = 200;
+    /// <summary>The LÄUFE area as the user left it; null (never toggled) means open once Makyx is set up, closed otherwise.</summary>
+    public bool? RunsOpen { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool Collapsed => !(RunsOpen ?? Enabled);
     /// <summary>Makyx machine name to profile id; a machine without an entry is matched automatically (see <see cref="MakyxProfileMatcher"/>).</summary>
     public Dictionary<string, string> MachineProfiles { get; init; } = [];
 
     public MakyxOptions Normalized() => this with
     {
-        Address = Address.Trim(), CaFingerprint = NormalizeFingerprint(CaFingerprint) ?? CaFingerprint.Trim(), Height = Math.Clamp(Height, 80, 600),
+        Address = Address.Trim(), CaFingerprint = NormalizeFingerprint(CaFingerprint) ?? CaFingerprint.Trim(),
         MachineProfiles = MachineProfiles.Where(p => p.Key.Length is > 0 and <= 100 && p.Value.Length is > 0 and <= 64).ToDictionary(p => p.Key, p => p.Value)
     };
 

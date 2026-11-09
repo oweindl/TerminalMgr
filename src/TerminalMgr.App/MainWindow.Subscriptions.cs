@@ -14,7 +14,8 @@ public partial class MainWindow
     private DispatcherTimer? _aiTimer;
     private bool _aiLocal, _aiCollapsed, _aiBusy;
     private int _aiGeneration;
-    private double _aiHeight = 220;
+    /// <summary>Height of the AI area as the user dragged it; 0 fits the rows.</summary>
+    private double _aiHeight;
     private string? _aiKey;
     private IReadOnlyList<AiAccountSnapshot> _aiAccounts = [];
     private readonly Dictionary<string, IReadOnlyList<AiAccountSnapshot>> _aiCache = [];
@@ -92,27 +93,13 @@ public partial class MainWindow
     {
         AiAccounts.Render(_aiAccounts, DateTimeOffset.UtcNow);
         AiCount.Text = _aiAccounts.Count == 0 ? "" : _aiAccounts.Count + " Anbieter";
+        ApplySidebarLayout();   // the AI area fits its rows
     }
     private void ToggleAiPanel(object sender, RoutedEventArgs e)
     {
         _aiCollapsed = !_aiCollapsed;
-        ApplyAiHeight(); SaveSettings();
+        ApplySidebarLayout(); SaveSettings();
         if (!_aiCollapsed) ChangeAiSource(); else CancelAiRead();
-    }
-    private void AiAreaSizeChanged(object sender, SizeChangedEventArgs e) => ApplyAiHeight();
-    private void ApplyAiHeight()
-    {
-        if (AiPanelRow is null || ServerContent is null || AiPanelBody is null) return;
-        double height = Math.Min(_aiHeight, Math.Max(36, ServerContent.ActualHeight - 69 - (MakyxPanelRow?.Height.Value ?? 0)));
-        AiPanelRow.Height = new GridLength(_aiCollapsed ? 36 : height);
-        AiPanelBody.Visibility = _aiCollapsed ? Visibility.Collapsed : Visibility.Visible;
-        AiCollapseButton.Content = (_aiCollapsed ? "›" : "⌄") + "  KI-ABOS";
-        AiAccountsScroll.MaxHeight = Math.Max(0, height - 60);
-    }
-    private void AiSplitChanged(object sender, DragCompletedEventArgs e)
-    {
-        if (!_aiCollapsed) _aiHeight = Math.Clamp(AiPanelRow.ActualHeight, 80, 600);
-        ApplyAiHeight(); SaveSettings();
     }
     private void AiMenu(object sender, RoutedEventArgs e)
     {

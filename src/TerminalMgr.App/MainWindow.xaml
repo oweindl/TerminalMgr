@@ -59,69 +59,70 @@
 
   <!-- Server panel: status, tmux sessions and windows (right click) as before -->
   <DockPanel x:Name="ServerPanel" Grid.Column="1" Visibility="Collapsed" Background="{DynamicResource BarBrush}">
-   <StackPanel DockPanel.Dock="Top" Margin="12,14,12,8">
-    <TextBlock Text="SERVER" Foreground="{DynamicResource Text2Brush}" FontSize="13" FontWeight="SemiBold" Margin="2,0,0,8"/>
-    <WrapPanel>
-     <Button Content="+ Profil" Click="AddProfile" Margin="0,3,6,3"/>
-     <Button Content="Import" Click="ImportProfiles" ToolTip="OpenSSH-Konfiguration importieren" Margin="0,3,0,3"/>
-    </WrapPanel>
-   </StackPanel>
-   <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,12">
-    <WrapPanel>
-     <Button x:Name="ConnectButton" Content="Verbinden" Click="ConnectSelected" Margin="0,3,6,3"/>
-     <Button x:Name="DisconnectButton" Content="Trennen" Click="DisconnectSelected" Margin="0,3,6,3"/>
-     <Button Content="Profil …" Click="EditProfile" Margin="0,3,0,3"/>
-    </WrapPanel>
-    <Button Content="Autostart-Profile verbinden" Click="ConnectAutomatic" Margin="0,3"/>
-    <TextBlock x:Name="SessionHint" Text="Alt+1 … Alt+9 · Session wechseln" FontSize="11" Foreground="{DynamicResource Text2Brush}" TextWrapping="Wrap" Margin="2,8,0,0"/>
-   </StackPanel>
-   <Grid x:Name="ServerContent" SizeChanged="AiAreaSizeChanged">
-    <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="65"/><RowDefinition x:Name="AiSplitterRow" Height="4"/><RowDefinition x:Name="AiPanelRow" Height="220" MinHeight="36"/><RowDefinition x:Name="MakyxPanelRow" Height="36"/></Grid.RowDefinitions>
+   <!-- Compact sidebar: one line per server, the runs get the space in the middle, the AI plans sit at the bottom.
+        Connect: double click; disconnect and edit: right click. -->
+   <DockPanel DockPanel.Dock="Top" Margin="12,10,8,6">
+    <Button x:Name="AutostartButton" DockPanel.Dock="Right" Content="⟳" Width="26" Height="26" Padding="0" Margin="2,0,0,0" FontSize="14" Style="{StaticResource FlatButton}" Click="ConnectAutomatic" ToolTip="Autostart-Profile verbinden" AutomationProperties.Name="Autostart-Profile verbinden"/>
+    <Button DockPanel.Dock="Right" Content="Import" Click="ImportProfiles" ToolTip="OpenSSH-Konfiguration importieren" Style="{StaticResource FlatButton}" Padding="6,2" Margin="2,0,0,0" FontSize="12"/>
+    <Button DockPanel.Dock="Right" Content="+ Profil" Click="AddProfile" Style="{StaticResource FlatButton}" Padding="6,2" Margin="0" FontSize="12"/>
+    <TextBlock x:Name="ServerHeader" Text="SERVER" Foreground="{DynamicResource Text2Brush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,0,0"
+               ToolTip="Doppelklick verbindet · Rechtsklick: Trennen, Profil bearbeiten, tmux · Alt+1 … Alt+9 wechselt die Session"/>
+   </DockPanel>
+   <Grid x:Name="ServerContent" SizeChanged="SidebarSizeChanged">
+    <Grid.RowDefinitions>
+     <RowDefinition x:Name="ServerListRow" Height="*"/>
+     <RowDefinition x:Name="ServerSplitterRow" Height="4"/>
+     <RowDefinition x:Name="MakyxPanelRow" Height="Auto"/>
+     <RowDefinition x:Name="AiSplitterRow" Height="4"/>
+     <RowDefinition x:Name="AiPanelRow" Height="Auto"/>
+    </Grid.RowDefinitions>
    <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
+    <ListBox.ItemContainerStyle>
+     <!-- 23 + 2 × 3 padding + 1 line = 30 (WindowLayout.ServerRowHeight) -->
+     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="12,3,10,3"/></Style>
+    </ListBox.ItemContainerStyle>
     <ListBox.ItemTemplate><DataTemplate>
-     <Grid>
-      <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <Border Grid.Column="2" Visibility="{Binding AltVisibility}" BorderBrush="{DynamicResource LineStrongBrush}" BorderThickness="1" CornerRadius="4" Padding="5,0" VerticalAlignment="Top" Margin="6,2,0,0" ToolTip="Mit dieser Taste zu diesem Server wechseln">
-       <TextBlock Text="{Binding AltLabel}" FontFamily="{DynamicResource MonoFont}" FontSize="11" Foreground="{DynamicResource Text2Brush}"/>
-      </Border>
-      <Ellipse x:Name="Dot" Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,6,0,0" Fill="Transparent" Stroke="{DynamicResource LineStrongBrush}" StrokeThickness="1.5"/>
-      <StackPanel Grid.Column="1">
-       <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-       <TextBlock Text="{Binding Status}" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
-      </StackPanel>
+     <Grid Height="23" ToolTip="{Binding Status}">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <Ellipse x:Name="Dot" Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="Transparent" Stroke="{DynamicResource LineStrongBrush}" StrokeThickness="1.5"/>
+      <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+      <TextBlock Grid.Column="2" x:Name="AutoMark" Text="⟳" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="5,0,0,0" Visibility="Collapsed" ToolTip="Autostart"/>
+      <TextBlock Grid.Column="3" Text="{Binding AltLabel}" Visibility="{Binding AltVisibility}" FontFamily="{DynamicResource MonoFont}" FontSize="10" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="6,0,0,0" ToolTip="Mit dieser Taste zu diesem Server wechseln"/>
      </Grid>
      <DataTemplate.Triggers>
+      <DataTrigger Binding="{Binding Profile.AutoConnect}" Value="True"><Setter TargetName="AutoMark" Property="Visibility" Value="Visible"/></DataTrigger>
       <DataTrigger Binding="{Binding Connection}" Value="Connected"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource ConnectedBrush}"/><Setter TargetName="Dot" Property="Stroke" Value="{DynamicResource ConnectedBrush}"/></DataTrigger>
       <DataTrigger Binding="{Binding Connection}" Value="Connecting"><Setter TargetName="Dot" Property="Stroke" Value="{DynamicResource AccentBrush}"/></DataTrigger>
      </DataTemplate.Triggers>
     </DataTemplate></ListBox.ItemTemplate>
    </ListBox>
-    <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" ResizeDirection="Rows" Background="{DynamicResource LineBrush}" DragCompleted="AiSplitChanged"/>
-    <DockPanel Grid.Row="2" Background="{DynamicResource BarBrush}">
+    <GridSplitter x:Name="ServerListSplitter" Grid.Row="1" Height="4" HorizontalAlignment="Stretch" ResizeDirection="Rows" Background="{DynamicResource LineBrush}" DragCompleted="ServerSplitChanged"/>
+    <GridSplitter x:Name="AiSplitter" Grid.Row="3" Height="4" HorizontalAlignment="Stretch" ResizeDirection="Rows" Background="{DynamicResource LineBrush}" DragCompleted="AiSplitChanged"/>
+    <DockPanel Grid.Row="4" Background="{DynamicResource BarBrush}">
      <DockPanel DockPanel.Dock="Top" Margin="8,3,8,2">
       <Button DockPanel.Dock="Right" Content="⋯" Width="26" Height="26" Padding="0" Margin="0" Style="{StaticResource FlatButton}" Click="AiMenu" ToolTip="KI-Anbieter, Quelle und Aktualisieren" AutomationProperties.Name="KI-Anbieter einrichten"/>
       <TextBlock x:Name="AiCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="4,0"/>
-      <Button x:Name="AiCollapseButton" Content="⌄  KI-ABOS" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleAiPanel"/>
+      <Button x:Name="AiCollapseButton" Content="⌄  KI-ABOS" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleAiPanel"/>
      </DockPanel>
-     <StackPanel x:Name="AiPanelBody">
-      <TextBlock x:Name="AiSourceLabel" Text="Server auswählen oder Dieser PC über ⋯" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,6" TextTrimming="CharacterEllipsis"/>
-      <ScrollViewer x:Name="AiAccountsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="180">
+     <DockPanel x:Name="AiPanelBody">
+      <TextBlock x:Name="AiSourceLabel" DockPanel.Dock="Top" Text="Server auswählen oder Dieser PC über ⋯" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,4" TextTrimming="CharacterEllipsis"/>
+      <ScrollViewer x:Name="AiAccountsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <local:AiAccountPanel x:Name="AiAccounts"/>
       </ScrollViewer>
-     </StackPanel>
+     </DockPanel>
     </DockPanel>
-    <DockPanel Grid.Row="3" Background="{DynamicResource BarBrush}">
+    <DockPanel Grid.Row="2" Background="{DynamicResource BarBrush}">
      <DockPanel DockPanel.Dock="Top" Margin="8,3,8,2">
       <Button DockPanel.Dock="Right" Content="⋯" Width="26" Height="26" Padding="0" Margin="0" Style="{StaticResource FlatButton}" Click="MakyxMenu" ToolTip="Makyx neu verbinden und Einstellungen" AutomationProperties.Name="Makyx-Menü"/>
       <TextBlock x:Name="MakyxCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="4,0"/>
-      <Button x:Name="MakyxCollapseButton" Content="›  LÄUFE" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleMakyxPanel" AutomationProperties.Name="Läufe aus Makyx ein- oder ausklappen"/>
+      <Button x:Name="MakyxCollapseButton" Content="›  LÄUFE" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleMakyxPanel" AutomationProperties.Name="Läufe aus Makyx ein- oder ausklappen"/>
      </DockPanel>
-     <StackPanel x:Name="MakyxPanelBody" Visibility="Collapsed">
-      <TextBlock x:Name="MakyxStateLabel" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,4" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
-      <ScrollViewer x:Name="MakyxScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="140">
+     <DockPanel x:Name="MakyxPanelBody" Visibility="Collapsed">
+      <TextBlock x:Name="MakyxStateLabel" DockPanel.Dock="Top" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,4" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+      <ScrollViewer x:Name="MakyxScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <local:MakyxRunsPanel x:Name="MakyxRuns"/>
       </ScrollViewer>
-     </StackPanel>
+     </DockPanel>
     </DockPanel>
    </Grid>
   </DockPanel>

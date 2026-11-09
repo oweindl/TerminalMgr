@@ -129,7 +129,9 @@ internal static class MakyxTests
             string json = JsonSerializer.Serialize(new AppSettings { Makyx = o });
             check(!json.Contains("mkl_") && !json.Contains("oken", StringComparison.OrdinalIgnoreCase), "kein Token in den Einstellungen");
             var back = JsonSerializer.Deserialize<AppSettings>(json)!;
-            check(back.Makyx.Address.Contains("makyx.example") && back.Makyx.Enabled && back.Makyx.Notify && back.Makyx.Collapsed, "Einstellungen überstehen die Speicherung; Vorgaben: Benachrichtigung an, eingeklappt");
+            check(back.Makyx.Address.Contains("makyx.example") && back.Makyx.Enabled && back.Makyx.Notify && !back.Makyx.Collapsed && back.Makyx.RunsOpen is null, "Einstellungen überstehen die Speicherung; Vorgaben: Benachrichtigung an, Läufe offen, sobald eingerichtet");
+            check(new MakyxOptions().Collapsed && (o with { RunsOpen = false }).Collapsed && !(new MakyxOptions { RunsOpen = true }).Collapsed, "Läufe: ohne Einrichtung zu, sonst wie zuletzt gewählt");
+            check(!json.Contains("\"Collapsed\""), "der abgeleitete Zustand wird nicht gespeichert");
             check(JsonSerializer.Deserialize<AppSettings>("{}")!.Makyx is { Enabled: false }, "ältere Einstellungsdatei ohne Makyx: aus");
         });
 

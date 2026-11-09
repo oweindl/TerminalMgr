@@ -905,6 +905,11 @@ try
         Check(new WindowLayout().Fit([main]) is null, "Nothing saved");
         Check(new WindowLayout { Left = double.NaN, Top = 0, Width = 1200, Height = 800 }.Fit([main]) is null, "NaN refused");
         Check(WindowLayout.PanelWidth(0, 260, 180) == 260 && WindowLayout.PanelWidth(300, 260, 180) == 300 && WindowLayout.PanelWidth(double.NaN, 260, 180) == 260, "Panel width");
+        // Compact sidebar: a list fits its rows, keeps the dragged height, never pushes the runs below their minimum and keeps one row.
+        Check(WindowLayout.ListHeight(0, 7, 30, 2, 900, 128) == 212, "Seven servers fit in 212 px");
+        Check(WindowLayout.ListHeight(150, 7, 30, 2, 900, 128) == 150, "Dragged height is kept");
+        Check(WindowLayout.ListHeight(0, 30, 30, 2, 500, 128) == 372, "Many servers leave the runs their space");
+        Check(WindowLayout.ListHeight(0, 0, 30, 2, 100, 128) == 32 && WindowLayout.ListHeight(double.NaN, 3, 30, 2, 900, 128) == 92, "One row at least; garbage fits");
         var store = new SettingsStore(Path.Combine(root, "windowlayout"));
         store.Save(new() { Window = new WindowLayout { Left = 10, Top = 20, Width = 1000, Height = 700, Maximized = true, ServerOpen = false, ServerWidth = 300, ClipboardOpen = true, ClipboardWidth = 350 } });
         var back = store.Load().Window;
