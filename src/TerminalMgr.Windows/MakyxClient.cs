@@ -274,6 +274,9 @@ public sealed class MakyxMonitor : IDisposable
             using var client = new MakyxClient(_options, _token);
             var projects = await client.ProjectsAsync(_stop.Token);
             lock (_gate) _projects = projects;
+            // The machines too: the MAKYX tree shows whether each one is connected.
+            try { var machines = await client.MachinesAsync(_stop.Token); lock (_gate) _machines = machines; }
+            catch (MakyxClient.MakyxException) { }
         }
         catch (Exception ex) when (ex is MakyxClient.MakyxException or System.Text.Json.JsonException or OperationCanceledException or ObjectDisposedException or ArgumentException) { }
     }

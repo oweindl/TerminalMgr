@@ -14,7 +14,7 @@ TerminalMgr zeigt Läufe und Einzelaufträge aus **Makyx** (Software-Fabrik) in 
 Das Token liegt immer im Windows-Anmeldeinformationsspeicher (Ziel `TerminalMgr/Makyx/Leitstand`), nie in `settings.json`, nie im Export und nie im Klartext in der Clipboard-Liste.
 
 ## Bedienung
-- Leiste LÄUFE (›/⌄): Wartendes zuerst, dann Arbeitendes, dann zuletzt Beendetes. Klick öffnet die Makyx-Seite im Browser.
+- Baum MAKYX (›/⌄): Rechner (Punkt grün = verbunden, „n aktiv“ = belegte Session-Plätze) › Projekt › laufende Instanz. Klick auf Rechner oder Projekt klappt ein und aus, Klick auf eine Instanz öffnet ihr Terminal (ohne Terminal die Makyx-Seite). Rechtsklick: Rechner – Shell öffnen; Projekt – Neue Session, Lauf starten, Projektseite; Instanz – Terminal, Antworten, Makyx, Browser, Link, Anhalten. Fertige Läufe zeigt nur Makyx.
 - Rechtsklick: **In Makyx öffnen**, **Im Terminal öffnen** (bei einer Instanz in einem tmux-Fenster und einem SSH-Profil, das zum Rechner passt: gleicher Name oder gleiches Ziel), **Link kopieren**. Strukturierte Sessions haben kein Terminal.
 - **Im Terminal öffnen** verbindet mit dem Profil des Rechners und hängt sich per `tmux -L <Socket> attach-session -t <Session>:<Fenster>` an. Der Eintrag „Makyx · <Fenster>“ erscheint in der Serverliste und wird nicht gespeichert.
 - Toast „Wartet auf dich“ bei neuem Wartenden (abschaltbar); beim Start keine Meldungen für Bestehendes.
