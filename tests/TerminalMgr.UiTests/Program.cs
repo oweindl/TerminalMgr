@@ -90,6 +90,13 @@ internal static class Program
         Check(strip!.Children.OfType<TextBlock>().Any(t => t.Text.Contains("nicht eingerichtet")), "without setup the strip says that Makyx is not set up");
         var dialog = new SettingsDialog(new AppSettings { Makyx = new MakyxOptions { Address = "https://makyx.example:8801" } });
         dialog.Measure(new Size(620, 900));
+        // "Neue Session": the machine list is a plain list (the dark template has no text box) with the machine preselected.
+        var project = new MakyxProject("p1", "ProtyxPulse", null, null, null, 0, 0, "");
+        var session = new MakyxSessionDialog(project, [new MakyxMachine("r1", "rechner-a", "online", true, null, null, null)]);
+        var machineBox = FindDescendant<ComboBox>((DependencyObject)session.Content)!;
+        Check(!machineBox.IsEditable && machineBox.IsEnabled && machineBox.SelectedIndex == 0 && session.Machine == "rechner-a", "the only machine is chosen and selectable");
+        var noMachine = new MakyxSessionDialog(project, []);
+        Check(noMachine.Machine is null, "without machines Makyx chooses");
         Console.WriteLine("PASS Makyx dashboard strip, context menu states, toast and settings fields");
     }
 

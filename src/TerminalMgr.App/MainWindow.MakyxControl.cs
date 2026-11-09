@@ -100,7 +100,7 @@ public partial class MainWindow
 
     private async Task StartMakyxSessionAsync(MakyxProject project)
     {
-        var machines = (_makyx?.Machines() ?? []).Select(m => m.Name.Length > 0 ? m.Name : m.Id);
+        var machines = (_makyx?.Machines() ?? []).GroupBy(MakyxControl.MachineValue, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
         var dialog = new MakyxSessionDialog(project, machines) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         MakyxRun? started = null;

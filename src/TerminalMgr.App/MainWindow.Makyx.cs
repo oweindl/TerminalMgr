@@ -159,10 +159,12 @@ public partial class MainWindow
         {
             var args = SshCommand.MakyxTmuxAttachArguments(basis, socket, session, window); // validates the names
             string command = args[^1];
-            string name = "Makyx · " + window;
-            var profile = basis with { Id = Guid.NewGuid().ToString("N"), Name = name, Mode = StartMode.Command, Command = command, AutoConnect = false, AutoReconnect = false };
-            var existing = _profiles.FirstOrDefault(p => p.Temporary && p.Profile.Name == name && p.Profile.Destination == basis.Destination);
+            // The same tmux window opens the same entry again; a second instance of the same project on the same machine gets its id appended.
+            var existing = _profiles.FirstOrDefault(p => p.Temporary && p.Profile.Command == command && p.Profile.Destination == basis.Destination);
             if (existing is not null) { ProfilesList.SelectedItem = existing; await ConnectAsync(existing); return; }
+            string name = MakyxControl.TerminalName(run);
+            if (_profiles.Any(p => p.Profile.Name == name)) name += " · " + run.Id;
+            var profile = basis with { Id = Guid.NewGuid().ToString("N"), Name = name, Mode = StartMode.Command, Command = command, AutoConnect = false, AutoReconnect = false };
             var item = new ProfileItem(profile) { Temporary = true };
             _profiles.Add(item);
             ProfilesList.SelectedItem = item;
