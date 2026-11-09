@@ -76,7 +76,7 @@
     <TextBlock x:Name="SessionHint" Text="Alt+1 … Alt+9 · Session wechseln" FontSize="11" Foreground="{DynamicResource Text2Brush}" TextWrapping="Wrap" Margin="2,8,0,0"/>
    </StackPanel>
    <Grid x:Name="ServerContent" SizeChanged="AiAreaSizeChanged">
-    <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="65"/><RowDefinition x:Name="AiSplitterRow" Height="4"/><RowDefinition x:Name="AiPanelRow" Height="220" MinHeight="36"/></Grid.RowDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="*" MinHeight="65"/><RowDefinition x:Name="AiSplitterRow" Height="4"/><RowDefinition x:Name="AiPanelRow" Height="220" MinHeight="36"/><RowDefinition x:Name="MakyxPanelRow" Height="36"/></Grid.RowDefinitions>
    <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
     <ListBox.ItemTemplate><DataTemplate>
      <Grid>
@@ -107,6 +107,19 @@
       <TextBlock x:Name="AiSourceLabel" Text="Server auswählen oder Dieser PC über ⋯" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,6" TextTrimming="CharacterEllipsis"/>
       <ScrollViewer x:Name="AiAccountsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="180">
        <local:AiAccountPanel x:Name="AiAccounts"/>
+      </ScrollViewer>
+     </StackPanel>
+    </DockPanel>
+    <DockPanel Grid.Row="3" Background="{DynamicResource BarBrush}">
+     <DockPanel DockPanel.Dock="Top" Margin="8,3,8,2">
+      <Button DockPanel.Dock="Right" Content="⋯" Width="26" Height="26" Padding="0" Margin="0" Style="{StaticResource FlatButton}" Click="MakyxMenu" ToolTip="Makyx neu verbinden und Einstellungen" AutomationProperties.Name="Makyx-Menü"/>
+      <TextBlock x:Name="MakyxCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="4,0"/>
+      <Button x:Name="MakyxCollapseButton" Content="›  LÄUFE" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleMakyxPanel" AutomationProperties.Name="Läufe aus Makyx ein- oder ausklappen"/>
+     </DockPanel>
+     <StackPanel x:Name="MakyxPanelBody" Visibility="Collapsed">
+      <TextBlock x:Name="MakyxStateLabel" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,4" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+      <ScrollViewer x:Name="MakyxScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="140">
+       <local:MakyxRunsPanel x:Name="MakyxRuns"/>
       </ScrollViewer>
      </StackPanel>
     </DockPanel>

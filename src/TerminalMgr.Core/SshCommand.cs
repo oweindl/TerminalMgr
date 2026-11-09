@@ -49,6 +49,15 @@ public static class SshCommand
     public static IReadOnlyList<string> TmuxAttachArguments(Profile profile, string sessionId, string windowId) =>
         OverrideArguments(profile, interactive: true, "tmux attach-session -t " + ShellQuote(TmuxWindowParser.Target(sessionId, windowId)));
 
+    private static readonly System.Text.RegularExpressions.Regex MakyxName = new("^[A-Za-z0-9._-]{1,40}$");
+
+    /// <summary>Attach to the tmux window of a Makyx instance: own socket (<c>tmux -L</c>), session and window name as the Makyx dashboard API reports them.</summary>
+    public static IReadOnlyList<string> MakyxTmuxAttachArguments(Profile profile, string socket, string session, string window)
+    {
+        if (!MakyxName.IsMatch(socket) || !MakyxName.IsMatch(session) || !MakyxName.IsMatch(window)) throw new ArgumentException("Ungültiger tmux-Name von Makyx.");
+        return OverrideArguments(profile, interactive: true, $"tmux -L {ShellQuote(socket)} attach-session -t {ShellQuote(session + ":" + window)}");
+    }
+
     /// <summary>Prints the effective OpenSSH settings (ssh -G), e.g. the RemoteCommand from the config.</summary>
     public static IReadOnlyList<string> EffectiveConfigArguments(Profile profile)
     {

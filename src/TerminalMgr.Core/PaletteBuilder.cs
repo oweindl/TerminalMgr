@@ -13,11 +13,12 @@ public sealed record PaletteAction(string Name, string Title, string Shortcut);
 /// <summary>Builds the list behind Ctrl+Shift+K: favorites, windows of all connected servers, clipboard entries and actions.</summary>
 public static class PaletteBuilder
 {
-    public const string FavoritesGroup = "Favoriten", RecentGroup = "Zuletzt benutzt", WindowsGroup = "tmux-Fenster", ClipboardGroup = "Clipboard", ActionsGroup = "Aktionen";
+    public const string FavoritesGroup = "Favoriten", RecentGroup = "Zuletzt benutzt", WindowsGroup = "tmux-Fenster", ClipboardGroup = "Clipboard", ActionsGroup = "Aktionen", MakyxGroup = "Makyx";
     /// <summary>Order of the groups in the palette.</summary>
-    public static readonly string[] GroupOrder = [FavoritesGroup, RecentGroup, WindowsGroup, ClipboardGroup, ActionsGroup];
+    public static readonly string[] GroupOrder = [FavoritesGroup, RecentGroup, WindowsGroup, MakyxGroup, ClipboardGroup, ActionsGroup];
     public const int MaxClipboardEntries = 30;
     public const int MaxRecent = 8;
+    public const int MaxMakyx = 20;
 
     public static string WindowId(string profileId, string sessionId, string windowId) => $"window:{profileId}|{sessionId}|{windowId}";
 
@@ -33,7 +34,7 @@ public static class PaletteBuilder
     }
 
     public static IReadOnlyList<PaletteItem> Build(AppSettings settings, IReadOnlyList<PaletteServer> servers, IReadOnlyList<NavigationPosition> recent,
-        IReadOnlyList<string> clipboard, IReadOnlyList<PaletteAction> actions)
+        IReadOnlyList<string> clipboard, IReadOnlyList<PaletteAction> actions, IReadOnlyList<MakyxRun>? makyxRuns = null)
     {
         var items = new List<PaletteItem>();
         string ServerName(string profileId) => servers.FirstOrDefault(s => s.ProfileId == profileId)?.Name
@@ -54,6 +55,13 @@ public static class PaletteBuilder
                     string hint = window.SessionId == server.AttachedSessionId && window.Index is >= 0 and <= 9 ? $"{modifier}+{window.Index}" : "";
                     items.Add(new(WindowId(server.ProfileId, window.SessionId, window.WindowId), WindowsGroup, $"{server.Name} › {session.Name} › {window.Label}", window.Active ? "aktives Fenster" : "", hint, false, true));
                 }
+
+        foreach (var run in (makyxRuns ?? []).Where(r => r.IsActive).Take(MaxMakyx))
+        {
+            string detail = $"{MakyxJson.StatusText(run.Status)} · {run.Project}" + (run.Machine is null ? "" : " · " + run.Machine);
+            items.Add(new($"makyx:{run.Uuid}", MakyxGroup, $"{run.Id} {run.Title}", detail, "", false, true));
+            if (run.Terminal.Available) items.Add(new($"makyxterm:{run.Uuid}", MakyxGroup, $"{run.Id} {run.Title} im Terminal", detail, "", false, true));
+        }
 
         for (int i = 0; i < Math.Min(clipboard.Count, MaxClipboardEntries); i++)
         {

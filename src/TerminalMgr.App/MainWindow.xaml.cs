@@ -64,6 +64,7 @@ public partial class MainWindow : Window
         ProfilesList.ItemsSource = _profiles;
         InitializeLayout();
         InitializeSubscriptions();
+        InitializeMakyx();
         RestoreWindowPlacement();
         _flush = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => FlushOutput(), Dispatcher);
         _flush.Start();
@@ -849,6 +850,7 @@ public partial class MainWindow : Window
         PostShortcuts();
         PostTerminalSettings();
         ApplySettingsToUi();
+        ApplyMakyxSettings();
         RenderClips(); SaveSettings();
         if (dialog.CheckForUpdatesNow) _ = CheckForUpdatesNowAsync();
         if (dialog.ConfigAction == ConfigAction.Export) _ = ExportConfigAsync();
@@ -875,7 +877,7 @@ public partial class MainWindow : Window
         if (!_canSave) return;
         try
         {
-            _settings = _settings with { Profiles = _profiles.Select(p => p.Profile).ToList(),
+            _settings = _settings with { Profiles = _profiles.Where(p => !p.Temporary).Select(p => p.Profile).ToList(),
                 PinnedClips = _clipList.Items.Where(c => c.Pinned).ToList(), FontSize = _fontSize,
                 ClipHistoryLimit = _clipList.MaxUnpinned, Window = _layoutReady ? CaptureLayout() : _settings.Window };
             _store.Save(_settings);
@@ -928,6 +930,7 @@ public partial class MainWindow : Window
         _shutdown.Cancel();
         CancelAiRead();
         _aiTimer?.Stop();
+        DisposeMakyx();
         StopStream();
         foreach (var wait in _reconnectWait.Values) wait.Cancel();
         System.Net.NetworkInformation.NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;

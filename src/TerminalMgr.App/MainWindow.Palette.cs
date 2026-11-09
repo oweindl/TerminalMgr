@@ -39,7 +39,7 @@ public partial class MainWindow
             new("next", "Nächstes tmux-Fenster", shortcuts.NextWindow),
             new("previous", "Voriges tmux-Fenster", shortcuts.PreviousWindow),
         };
-        return PaletteBuilder.Build(_settings, servers, _history.Items, _clipList.Items.Select(c => c.Text).ToList(), actions);
+        return PaletteBuilder.Build(_settings, servers, _history.Items, _clipList.Items.Select(c => c.Text).ToList(), actions, _makyx?.Runs());
     }
 
     private object PaletteMessageItems() => BuildPaletteItems().Select(i => new
@@ -79,6 +79,7 @@ public partial class MainWindow
     private void RunPaletteItem(string id)
     {
         if (id.StartsWith("favorite:")) { RunNavigationAction(id); return; }
+        if (RunMakyxPaletteItem(id)) return;
         if (PaletteBuilder.TryParseWindowId(id, out var profileId, out var sessionId, out var windowId))
         {
             var item = _profiles.FirstOrDefault(p => p.Profile.Id == profileId);
