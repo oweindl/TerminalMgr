@@ -95,6 +95,7 @@ internal static class Program
         var session = new MakyxSessionDialog(project, [new MakyxMachine("r1", "rechner-a", "online", true, null, null, null)]);
         var machineBox = FindDescendant<ComboBox>((DependencyObject)session.Content)!;
         Check(!machineBox.IsEditable && machineBox.IsEnabled && machineBox.SelectedIndex == 0 && session.Machine == "rechner-a", "the only machine is chosen and selectable");
+        Check(!MainWindow.IsAppProcess() && MainWindow.IsAppProcess(@"C:\Programme\TerminalMgr\TerminalMgr.App.exe"), "tests never run the update check at start");
         var noMachine = new MakyxSessionDialog(project, []);
         Check(noMachine.Machine is null, "without machines Makyx chooses");
         Console.WriteLine("PASS Makyx dashboard strip, context menu states, toast and settings fields");

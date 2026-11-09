@@ -17,11 +17,18 @@ public partial class MainWindow
     /// <summary>Starts the look for a newer release in the background, so that it is usually done by the time the terminal is ready.</summary>
     private void BeginStartupUpdateCheck()
     {
-        if (!_settings.Update.CheckOnStart) return;
+        if (!_settings.Update.CheckOnStart || !IsAppProcess()) return;
         try { UpdateService.CleanUp(AppPaths.UpdateDirectory()); } catch (Exception) { /* leftovers of an earlier update are harmless */ }
         var service = UpdateService.FromEnvironment(AppInfo.Version);
         _startupUpdateCheck = Task.Run(async () => { try { return await service.CheckAsync(TimeSpan.FromSeconds(5), _shutdown.Token); } finally { service.Dispose(); } });
     }
+
+    /// <summary>
+    /// Only the app itself checks at start, never a test host or the screenshot tool: their local build (x.y.0) would always find a
+    /// newer release and the offer would block the tests.
+    /// </summary>
+    public static bool IsAppProcess(string? path = null) =>
+        string.Equals(Path.GetFileName(path ?? Environment.ProcessPath), "TerminalMgr.App.exe", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Awaited before the automatic connections start, so that a waiting offer does not tear down fresh sessions.</summary>
     private async Task HandleStartupUpdateAsync()
