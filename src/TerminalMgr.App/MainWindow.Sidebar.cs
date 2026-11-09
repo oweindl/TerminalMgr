@@ -28,7 +28,7 @@ public partial class MainWindow
         bool runsOpen = !Makyx.Collapsed;
 
         MakyxPanelBody.Visibility = runsOpen ? Visibility.Visible : Visibility.Collapsed;
-        MakyxCollapseButton.Content = (runsOpen ? "⌄" : "›") + "  LÄUFE";
+        MakyxCollapseButton.Content = (runsOpen ? "⌄" : "›") + "  MAKYX";
         AiPanelBody.Visibility = _aiCollapsed ? Visibility.Collapsed : Visibility.Visible;
         AiCollapseButton.Content = (_aiCollapsed ? "›" : "⌄") + "  KI-ABOS";
 

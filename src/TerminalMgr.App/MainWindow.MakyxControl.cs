@@ -19,6 +19,16 @@ public partial class MainWindow
     {
         MakyxRuns.StopRequested += run => _ = StopMakyxRunAsync(run, emergency: false);
         MakyxRuns.EmergencyRequested += run => _ = StopMakyxRunAsync(run, emergency: true);
+        // The MAKYX tree: a new session preselects the machine of its branch; a gate opens its own choice in the Makyx page.
+        MakyxRuns.NewSessionRequested += (project, machine) =>
+            _ = StartMakyxSessionAsync(machine is null ? project : project with { Machine = MakyxControl.MachineValue(machine) });
+        MakyxRuns.RunRequested += project => _ = StartMakyxRunAsync(project);
+        MakyxRuns.ProjectPageRequested += project => OpenMakyxLink(project.Link);
+        MakyxRuns.AnswerRequested += item =>
+        {
+            if (item.Kind == "rueckfrage") _ = AnswerMakyxAsync(item, MakyxDecision.Return);
+            else OpenMakyxLink(item.Link);
+        };
     }
 
     private bool AskMakyx(string question) =>
@@ -127,7 +137,7 @@ public partial class MainWindow
         if (dialog.ShowDialog() != true) return;
         var items = MakyxControl.RunItems(dialog.Text);
         if (!AskMakyx($"Lauf in {project.Name} mit {items.Count} Punkt(en) starten?")) return;
-        await MakyxActionAsync("Lauf wird gestartet", c => c.StartRunAsync(project.Id, items, CancellationToken.None), "Lauf gestartet; er erscheint unter LÄUFE.");
+        await MakyxActionAsync("Lauf wird gestartet", c => c.StartRunAsync(project.Id, items, CancellationToken.None), "Lauf gestartet; er erscheint unter MAKYX beim Projekt.");
     }
 
     private async Task AnswerMakyxAsync(MakyxWaiting item, MakyxDecision decision)

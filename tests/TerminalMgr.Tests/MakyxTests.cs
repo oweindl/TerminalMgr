@@ -49,6 +49,28 @@ internal static class MakyxTests
             check(hello.Version == "v1" && hello.Client == "Desktop", "Hallo-Antwort");
         });
 
+        test("Makyx: Baum Rechner › Projekt › laufende Instanz", () =>
+        {
+            var term = new MakyxTerminal(true, null, "rechner-a", "benutzer@host-a", "makyx", "makyx", "worker-1");
+            MakyxRun Run(string id, MakyxStatus status, string project, string? machine, string window = "worker-1") =>
+                new(id, "u-" + id, "session", "Titel " + id, status, project, machine, DateTimeOffset.Parse("2026-01-02T10:00:00Z"), null, 60, null, "https://makyx.example/" + id, null,
+                    machine is null ? MakyxTerminal.None("strukturiert") : term with { Machine = machine, TmuxWindow = window });
+            var machines = new List<MakyxMachine> { new("r1", "rechner-a", "verbunden", true, null, null, "makyx"), new("r2", "rechner-b", "getrennt", false, null, null, null), new("r1", "rechner-a", "verbunden", true, null, null, "makyx") };
+            var projects = new List<MakyxProject> { new("p1", "Beispiel", null, null, "r1", 1, 1, ""), new("p2", "[Test] Probe", null, null, "rechner-a", 0, 0, ""), new("p3", "Ohne", null, null, null, 0, 0, "") };
+            var runs = new List<MakyxRun> { Run("S-1", MakyxStatus.Working, "Beispiel", "rechner-a"), Run("S-2", MakyxStatus.Done, "Beispiel", "rechner-a"), Run("S-3", MakyxStatus.Waiting, "Beispiel", "rechner-b", "worker-3"), Run("S-4", MakyxStatus.Working, "", "rechner-a", "worker-4") };
+            var tree = MakyxTree.Build(machines, projects, runs);
+            check(tree.Select(m => m.Name).SequenceEqual(["rechner-a", "rechner-b", "Ohne Rechner"]), "verbundene Rechner zuerst, doppelte nur einmal, ohne Rechner zuletzt: " + string.Join(",", tree.Select(m => m.Name)));
+            var a = tree[0];
+            check(a.Connected && a.ActiveCount == 2 && a.Projects[0].Name == "Beispiel" && a.Projects[0].Active.Select(r => r.Id).SequenceEqual(["S-1"]), "fertige Läufe fehlen, die laufende Instanz hängt am Projekt");
+            check(a.Projects.Any(p => p.Name == "Freie Sessions" && p.Active.Count == 1) && a.Projects[^1].Name == "[Test] Probe", "freie Session als eigene Gruppe, Testprojekte zuletzt");
+            check(tree[1] is { Connected: false, ActiveCount: 1 } && tree[1].Projects[0].Name == "Beispiel", "ein Lauf auf einem anderen Rechner zeigt das Projekt dort auch");
+            check(tree[2].Machine is null && tree[2].Projects.Single().Name == "Ohne", "Projekt ohne Rechner in eigener Gruppe");
+            var wait = new MakyxWaiting("session:3", "rueckfrage", "", "Frage", "Beispiel", null, null, "", "S-3");
+            check(MakyxTree.WaitingFor(runs[2], [wait]) == wait && MakyxTree.WaitingFor(runs[0], [wait]) is null, "Rückfrage gehört zur Instanz");
+            check(MakyxTree.InstanceName(runs[2]) == "worker-3" && MakyxTree.InstanceName(Run("E-9", MakyxStatus.Working, "", null)) == "Titel E-9", "Name der Instanz: tmux-Fenster, sonst Titel");
+            check(MakyxTree.Build([], [], []).Count == 0, "leer ohne Daten");
+        });
+
         test("Makyx: Ereignisstrom-Parser setzt zerstückelte Blöcke richtig zusammen", () =>
         {
             string stream = ": keepalive\n\n" + Event("hallo", """{"schnittstelle":"v1"}""", 1) + "id: 2\r\nevent: lauf\r\ndata: {\"id\":\"E-1\"}\r\n\r\n" + "data: a\ndata: b\n\n";

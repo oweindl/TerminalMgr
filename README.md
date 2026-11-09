@@ -17,7 +17,7 @@ Windows-Arbeitsplatz für mehrere SSH-Verbindungen mit tmux, schnellem Session-W
 - Klick auf ein Fenster wechselt den eigenen tmux-Client dorthin (auch in eine andere Session, die bisherige läuft weiter). Ist der Server nicht verbunden, wird verbunden und direkt an dieses Fenster angehängt. Es werden Session- und Fenster-IDs verwendet, nicht Namen.
 - Clipboard mit Herkunft, Suche, Anheften, gezieltem Einfügen und Drag-and-drop.
 - Kompakte KI-Abos unter der Serverliste: Claude-/Codex-Limits je Maschine, Details und Einrichtung über **Einstellungen → KI-Anbieter**. OpenRouter-Key-Verbrauch unter **Dieser PC**; Zugang geschützt in Windows gespeichert. [Einrichtung und Grenzen](docs/ai-subscriptions.md).
-- **Makyx-Leitstand:** Leiste LÄUFE unter KI-ABOS mit Läufen und Einzelaufträgen aus Makyx, Meldung bei „Wartet auf dich“, Sprung zur Makyx-Seite oder ins tmux-Fenster der Instanz (nur lesend). [Einrichtung](docs/makyx-leitstand.md).
+- **Makyx-Leitstand:** Baum MAKYX in der Seitenleiste: Rechner › Projekt › laufende Instanz. Klick auf eine Instanz öffnet ihr Terminal (tmux), „+ Neue Session“ startet einen Agenten auf diesem Rechner, „Shell öffnen“ eine normale SSH-Verbindung; Meldung bei „Wartet auf dich“. Fertige Läufe stehen nur in Makyx. [Einrichtung](docs/makyx-leitstand.md).
 - Gewähltes Icon: Vorschlag 3 „Sessions“, in sieben Auflösungen von 16 bis 256 Pixeln.
 
 ## Installation für Einsteiger

@@ -116,12 +116,12 @@
      <DockPanel DockPanel.Dock="Top" Margin="8,3,8,2">
       <Button DockPanel.Dock="Right" Content="⋯" Width="26" Height="26" Padding="0" Margin="0" Style="{StaticResource FlatButton}" Click="MakyxMenu" ToolTip="Makyx neu verbinden und Einstellungen" AutomationProperties.Name="Makyx-Menü"/>
       <TextBlock x:Name="MakyxCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="4,0"/>
-      <Button x:Name="MakyxCollapseButton" Content="›  LÄUFE" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleMakyxPanel" AutomationProperties.Name="Läufe aus Makyx ein- oder ausklappen"/>
+      <Button x:Name="MakyxCollapseButton" Content="›  MAKYX" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleMakyxPanel" AutomationProperties.Name="Makyx-Rechner und -Projekte ein- oder ausklappen"/>
      </DockPanel>
      <DockPanel x:Name="MakyxPanelBody" Visibility="Collapsed">
       <TextBlock x:Name="MakyxStateLabel" DockPanel.Dock="Top" FontSize="11" Foreground="{DynamicResource Text2Brush}" Margin="12,0,12,4" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
       <ScrollViewer x:Name="MakyxScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-       <local:MakyxRunsPanel x:Name="MakyxRuns"/>
+       <local:MakyxTreePanel x:Name="MakyxRuns"/>
       </ScrollViewer>
      </DockPanel>
     </DockPanel>

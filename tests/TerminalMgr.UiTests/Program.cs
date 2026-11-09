@@ -40,35 +40,59 @@ internal static class Program
         MakyxRun Run(string id, MakyxStatus status, bool terminal, int minutes) => new(id, "u-" + id, "einzelauftrag", "Titel " + id, status, "Beispiel", "rechner-a", DateTimeOffset.UnixEpoch.AddMinutes(minutes), null, 125, 0.0121,
             "https://makyx.example/v/m/auftrag/" + id, null, terminal ? new MakyxTerminal(true, null, "rechner-a", "benutzer@host-a", "makyx", "makyx", "auftrag-" + id) : MakyxTerminal.None("strukturiert"));
         var opened = new List<string>(); var terminals = new List<string>();
-        var panel = new MakyxRunsPanel { TerminalProblem = run => run.Id == "E-2" ? "kein SSH-Profil für rechner-a" : null };
+        var panel = new MakyxTreePanel { TerminalProblem = run => run.Id == "E-2" ? "kein SSH-Profil für rechner-a" : null, ShellProblem = _ => null };
         panel.OpenRequested += run => opened.Add(run.Id); panel.TerminalRequested += run => terminals.Add(run.Id);
-        panel.Render([Run("E-1", MakyxStatus.Waiting, true, 3), Run("E-2", MakyxStatus.Working, true, 2), Run("E-3", MakyxStatus.Done, false, 1)], "leer");
+        var machine = new MakyxMachine("r1", "rechner-a", "verbunden", true, null, null, "makyx");
+        var treeProject = new MakyxProject("p1", "Beispiel", null, null, "r1", 3, 0, "https://makyx.example/p1");
+        var question = new MakyxWaiting("session:1", "rueckfrage", "", "Frage", "Beispiel", null, null, "https://makyx.example/w", "E-1");
+        var runs = new List<MakyxRun> { Run("E-1", MakyxStatus.Waiting, true, 1), Run("E-2", MakyxStatus.Working, true, 2), Run("E-3", MakyxStatus.Done, false, 1), Run("E-4", MakyxStatus.Working, false, 4) };
+        panel.Render(MakyxTree.Build([machine], [treeProject], runs), [question], "leer");
         panel.Measure(new Size(260, double.PositiveInfinity));
-        Check(panel.Children.Count == 3, "three rows expected");
-        Check(panel.DesiredSize.Height <= 3 * 52, "rows are too tall: " + panel.DesiredSize.Height);
-        var first = (Border)panel.Children[0];
+        // machine, shell, project, E-1, E-2, E-4 (E-3 is finished and not listed), "+ Neue Session"
+        Check(panel.Children.Count == 7, "tree rows: " + panel.Children.Count);
+        Check(panel.DesiredSize.Height <= 7 * 32, "rows are too tall: " + panel.DesiredSize.Height);
+        if (Environment.GetEnvironmentVariable("TERMINALMGR_MAKYX_RENDER_DIR") is { Length: > 0 } treeDirectory)
+        {
+            var host = new Border { Width = 300, Child = panel };
+            host.SetResourceReference(Border.BackgroundProperty, "BarBrush");
+            host.Measure(new Size(300, double.PositiveInfinity)); host.Arrange(new Rect(0, 0, 300, host.DesiredSize.Height)); host.UpdateLayout();
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(300, (int)Math.Ceiling(host.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(host); var png = new System.Windows.Media.Imaging.PngBitmapEncoder(); png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            Directory.CreateDirectory(treeDirectory); using (var file = File.Create(Path.Combine(treeDirectory, "makyx-tree.png"))) png.Save(file);
+            host.Child = null;
+        }
+        string NameOf(int i) => System.Windows.Automation.AutomationProperties.GetName(panel.Children[i]);
+        Check(NameOf(0).StartsWith("Rechner rechner-a") && NameOf(0).Contains("3 aktiv") && NameOf(1).StartsWith("Shell auf") && NameOf(2).StartsWith("Projekt Beispiel") && NameOf(6).StartsWith("Neue Session"), "machine › shell › project › instances › new session: " + NameOf(0));
+        Check(!Enumerable.Range(0, 7).Any(i => NameOf(i).Contains("E-3")), "finished runs are not in the tree");
+        var first = (Border)panel.Children[3];
+        Check(NameOf(3).Contains("wartet auf dich"), "the instance with an open question says so: " + NameOf(3));
         var browserRuns = new List<string>(); panel.BrowserRequested += run => browserRuns.Add(run.Id);
-        Check(first.ContextMenu!.Items.Count == 7 && ((MenuItem)first.ContextMenu.Items[2]).Header.ToString() == "Im Browser öffnen", "menu: open in Makyx window, terminal, browser, copy link, then stop and emergency stop");
+        var answers = new List<string>(); panel.AnswerRequested += w => answers.Add(w.Id);
+        var menu = first.ContextMenu!.Items;
+        Check(menu.Count == 8 && ((MenuItem)menu[0]).Header.ToString() == "Im Terminal öffnen" && ((MenuItem)menu[1]).Header.ToString() == "Antworten …" && ((MenuItem)menu[3]).Header.ToString() == "Im Browser öffnen", "instance menu: terminal, answer, Makyx, browser, copy link, then stop and emergency stop");
         var stops = new List<string>(); var emergencies = new List<string>();
         panel.StopRequested += run => stops.Add(run.Id); panel.EmergencyRequested += run => emergencies.Add(run.Id);
-        ((MenuItem)first.ContextMenu.Items[5]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)first.ContextMenu.Items[6]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Check(stops.SequenceEqual(["E-1"]) && emergencies.SequenceEqual(["E-1"]) && ((MenuItem)first.ContextMenu.Items[5]).IsEnabled, "stop entries raise their events for an active run");
-        Check(!((MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[5]).IsEnabled && !((MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[6]).IsEnabled, "a finished run can not be stopped");
-        ((MenuItem)first.ContextMenu.Items[2]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Check(browserRuns.SequenceEqual(["E-1"]), "browser entry raises its event");
-        Check(((MenuItem)first.ContextMenu.Items[1]).IsEnabled && ((MenuItem)first.ContextMenu.Items[1]).Header.ToString() == "Im Terminal öffnen", "terminal entry is enabled for a tmux window with a profile");
-        var noProfile = (MenuItem)((Border)panel.Children[1]).ContextMenu!.Items[1];
+        ((MenuItem)menu[6]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)menu[7]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(stops.SequenceEqual(["E-1"]) && emergencies.SequenceEqual(["E-1"]), "stop entries raise their events for an active run");
+        ((MenuItem)menu[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)menu[3]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(answers.SequenceEqual(["session:1"]) && browserRuns.SequenceEqual(["E-1"]), "answer and browser entries raise their events");
+        var noProfile = (MenuItem)((Border)panel.Children[4]).ContextMenu!.Items[0];
         Check(!noProfile.IsEnabled && noProfile.Header.ToString()!.Contains("kein SSH-Profil"), "terminal entry is disabled with the reason when no profile matches");
-        var structured = (MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[1];
+        var structured = (MenuItem)((Border)panel.Children[5]).ContextMenu!.Items[0];
         Check(!structured.IsEnabled && structured.Header.ToString()!.Contains("strukturierte Session"), "a structured session has no terminal, said explicitly");
-        ((MenuItem)first.ContextMenu.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)first.ContextMenu.Items[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Check(opened.SequenceEqual(["E-1"]) && terminals.SequenceEqual(["E-1"]), "menu entries raise the events");
-        Check(System.Windows.Automation.AutomationProperties.GetName(first).Contains("E-1") && System.Windows.Automation.AutomationProperties.GetName(first).Contains("wartet"), "rows have an accessible name with the status");
-        panel.Render([], "Makyx nicht eingerichtet");
+        first.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+        ((Border)panel.Children[5]).RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+        Check(terminals.SequenceEqual(["E-1"]) && opened.SequenceEqual(["E-4"]), "a click opens the terminal, or the Makyx page when there is none");
+        var sessions = new List<string>(); panel.NewSessionRequested += (p, m) => sessions.Add(p.Name + "@" + m?.Name);
+        ((Border)panel.Children[6]).RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+        Check(sessions.SequenceEqual(["Beispiel@rechner-a"]), "\"+ Neue Session\" carries the machine of its branch");
+        ((Border)panel.Children[2]).RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+        Check(panel.Children.Count == 3, "a click on the project folds it: " + panel.Children.Count);
+        panel.Render([], [], "Makyx nicht eingerichtet");
         Check(panel.Children.Count == 1 && ((TextBlock)panel.Children[0]).Text == "Makyx nicht eingerichtet", "empty text is shown");
-        Check(MakyxRunsPanel.Duration(45) == "45 s" && MakyxRunsPanel.Duration(409) == "6:49 min" && MakyxRunsPanel.Duration(7500) == "2 h 5 min" && MakyxRunsPanel.Duration(null) == "", "duration text");
-        Check(MakyxRunsPanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)) == "Beispiel · rechner-a · 2:05 min · 0,01 USD", "detail line: " + MakyxRunsPanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)));
-        var colors = Enum.GetValues<MakyxStatus>().Select(s => ((System.Windows.Media.SolidColorBrush)MakyxRunsPanel.DotBrush(s)).Color.ToString()).ToList();
+        Check(MakyxTreePanel.Duration(45) == "45 s" && MakyxTreePanel.Duration(409) == "6:49 min" && MakyxTreePanel.Duration(7500) == "2 h 5 min" && MakyxTreePanel.Duration(null) == "", "duration text");
+        Check(MakyxTreePanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)) == "Beispiel · rechner-a · 2:05 min · 0,01 USD", "detail line: " + MakyxTreePanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)));
+        var colors = Enum.GetValues<MakyxStatus>().Select(s => ((System.Windows.Media.SolidColorBrush)MakyxTreePanel.DotBrush(s)).Color.ToString()).ToList();
         Check(colors.Distinct().Count() >= 5, "each status has its own dot color");
 
         // Toast: never takes the focus, at most three at once, closes with the click
@@ -83,10 +107,10 @@ internal static class Program
         // Main window: the strip exists, is collapsed without setup and says so
         var main = new MainWindow();
         main.Measure(new Size(1480, 940)); main.Arrange(new Rect(0, 0, 1480, 940)); main.UpdateLayout();
-        var strip = (MakyxRunsPanel)main.FindName("MakyxRuns");
+        var strip = (MakyxTreePanel)main.FindName("MakyxRuns");
         var body = (DockPanel)main.FindName("MakyxPanelBody");
         var button = (Button)main.FindName("MakyxCollapseButton");
-        Check(strip is not null && body.Visibility == Visibility.Collapsed && button.Content.ToString()!.Contains("LÄUFE"), "the LÄUFE strip is there and collapsed by default");
+        Check(strip is not null && body.Visibility == Visibility.Collapsed && button.Content.ToString()!.Contains("MAKYX"), "the MAKYX tree is there and collapsed without setup");
         Check(strip!.Children.OfType<TextBlock>().Any(t => t.Text.Contains("nicht eingerichtet")), "without setup the strip says that Makyx is not set up");
         var dialog = new SettingsDialog(new AppSettings { Makyx = new MakyxOptions { Address = "https://makyx.example:8801" } });
         dialog.Measure(new Size(620, 900));

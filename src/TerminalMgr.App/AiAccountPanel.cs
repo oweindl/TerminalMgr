@@ -49,7 +49,7 @@ public sealed class AiAccountPanel : StackPanel
             if (State(account, now) is not null)
             {
                 var mark = Text("!", size: 12); mark.FontWeight = FontWeights.Bold; mark.Margin = new Thickness(4, 0, 2, 0);
-                mark.Foreground = MakyxRunsPanel.DotBrush(account.Error is null ? MakyxStatus.Waiting : MakyxStatus.Failed);
+                mark.Foreground = MakyxTreePanel.DotBrush(account.Error is null ? MakyxStatus.Waiting : MakyxStatus.Failed);
                 DockPanel.SetDock(mark, Dock.Right); row.Children.Add(mark);
             }
             // Limits from the right: "5h ▬ 0%  7d ▬ 45%".

@@ -23,8 +23,16 @@ public partial class MainWindow
         MakyxRuns.CopyRequested += run => { try { Clipboard.SetText(run.Link); StatusText.Text = "Link kopiert."; } catch (System.Runtime.InteropServices.ExternalException) { StatusText.Text = "Der Link ließ sich nicht kopieren."; } };
         MakyxRuns.TerminalRequested += run => _ = OpenMakyxTerminalAsync(run);
         MakyxRuns.TerminalProblem = TerminalProblem;
+        MakyxRuns.ShellProblem = machine => ShellProfileFor(machine) is null ? "kein SSH-Profil" : null;
+        MakyxRuns.ShellRequested += machine => _ = OpenMakyxShellAsync(machine);
         InitializeMakyxControl();
-        _makyxClock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => { if (_makyx is not null && !Makyx.Collapsed) RenderMakyx(); }, Dispatcher);
+        // Machines (connected or not) and projects change without an event: reload them with the clock.
+        _makyxClock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, async (_, _) =>
+        {
+            if (_makyx is not { } monitor || Makyx.Collapsed) return;
+            await monitor.RefreshProjectsAsync();
+            if (ReferenceEquals(_makyx, monitor)) RenderMakyx();
+        }, Dispatcher);
         _makyxClock.Start();
         RenderMakyx();      // shows "nicht eingerichtet" until the settings are loaded and the monitor starts
     }
@@ -65,13 +73,31 @@ public partial class MainWindow
     {
         if (MakyxRuns is null) return;
         var runs = _makyx?.Runs() ?? [];
-        int waiting = _makyx?.Waiting().Count ?? 0;
-        MakyxCount.Text = waiting > 0 ? waiting + " wartet" : runs.Count > 0 ? runs.Count.ToString() : "";
-        MakyxCount.Foreground = waiting > 0 ? MakyxRunsPanel.DotBrush(MakyxStatus.Waiting) : (System.Windows.Media.Brush)FindResource("Text2Brush");
+        var waitingItems = _makyx?.Waiting() ?? [];
+        int waiting = waitingItems.Count;
+        int active = runs.Count(r => r.IsActive);
+        MakyxCount.Text = waiting > 0 ? waiting + " wartet" : active > 0 ? active + " aktiv" : "";
+        MakyxCount.Foreground = waiting > 0 ? MakyxTreePanel.DotBrush(MakyxStatus.Waiting) : (System.Windows.Media.Brush)FindResource("Text2Brush");
         MakyxStateLabel.Text = StateText();
         MakyxStateLabel.Visibility = MakyxStateLabel.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        string empty = !Makyx.Enabled ? "Makyx nicht eingerichtet · Einstellungen › Makyx-Leitstand" : _makyx is null ? "Makyx nicht verbunden." : "Keine Läufe.";
-        MakyxRuns.Render(runs, empty);
+        string empty = !Makyx.Enabled ? "Makyx nicht eingerichtet · Einstellungen › Makyx-Leitstand" : _makyx is null ? "Makyx nicht verbunden." : "Makyx meldet keine Rechner und Projekte.";
+        var tree = _makyx is { } monitor ? MakyxTree.Build(monitor.Machines(), monitor.Projects(), runs) : [];
+        MakyxRuns.Render(tree, waitingItems, empty);
+    }
+
+    /// <summary>The SSH profile of a Makyx machine (same rule as for the terminal of an instance).</summary>
+    private ProfileItem? ShellProfileFor(MakyxMachine machine)
+    {
+        var profile = MakyxProfileMatcher.Match(_profiles.Where(p => !p.Temporary).Select(p => p.Profile).ToList(), MakyxControl.MachineValue(machine), machine.SshTarget, Makyx.MachineProfiles);
+        return profile is null ? null : _profiles.FirstOrDefault(p => ReferenceEquals(p.Profile, profile) || p.Profile.Id == profile.Id);
+    }
+
+    /// <summary>"Shell öffnen" in the MAKYX tree: the server's own entry, connected (or just selected when it already runs).</summary>
+    private async Task OpenMakyxShellAsync(MakyxMachine machine)
+    {
+        if (ShellProfileFor(machine) is not { } item) { StatusText.Text = "Es gibt kein SSH-Profil für " + MakyxControl.MachineValue(machine) + "."; return; }
+        ProfilesList.SelectedItem = item;
+        if (!_sessions.ContainsKey(item.Profile.Id)) await ConnectAsync(item);
     }
 
     private string StateText()
