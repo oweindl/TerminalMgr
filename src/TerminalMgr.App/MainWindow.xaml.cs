@@ -62,6 +62,7 @@ public partial class MainWindow : Window
         _dataDirectory = AppPaths.DataDirectory();
         _store = new SettingsStore(_dataDirectory);
         ProfilesList.ItemsSource = _profiles;
+        _profiles.CollectionChanged += (_, _) => ApplySidebarLayout();   // the server list fits its rows
         InitializeLayout();
         InitializeSubscriptions();
         InitializeMakyx();
@@ -869,7 +870,7 @@ public partial class MainWindow : Window
     {
         var shortcuts = _settings.Shortcuts.Normalized();
         DictationButton.ToolTip = "Diktat starten (" + DictationSettings.Shortcut + ")";
-        SessionHint.Text = $"{shortcuts.SessionModifier}+1 … {shortcuts.SessionModifier}+9 · Session wechseln";
+        ServerHeader.ToolTip = $"Doppelklick verbindet · Rechtsklick: Trennen, Profil bearbeiten, tmux · {shortcuts.SessionModifier}+1 … {shortcuts.SessionModifier}+9 wechselt die Session";
         ApplyPaletteHint();
         string? exe = Environment.ProcessPath;
         // Only the installed/published app registers itself, never "dotnet run" or a test host.

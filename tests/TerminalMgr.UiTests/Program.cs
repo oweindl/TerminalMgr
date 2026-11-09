@@ -84,7 +84,7 @@ internal static class Program
         var main = new MainWindow();
         main.Measure(new Size(1480, 940)); main.Arrange(new Rect(0, 0, 1480, 940)); main.UpdateLayout();
         var strip = (MakyxRunsPanel)main.FindName("MakyxRuns");
-        var body = (StackPanel)main.FindName("MakyxPanelBody");
+        var body = (DockPanel)main.FindName("MakyxPanelBody");
         var button = (Button)main.FindName("MakyxCollapseButton");
         Check(strip is not null && body.Visibility == Visibility.Collapsed && button.Content.ToString()!.Contains("LÄUFE"), "the LÄUFE strip is there and collapsed by default");
         Check(strip!.Children.OfType<TextBlock>().Any(t => t.Text.Contains("nicht eingerichtet")), "without setup the strip says that Makyx is not set up");
@@ -101,7 +101,9 @@ internal static class Program
         var panel = new AiAccountPanel();
         panel.Render([Example("Claude Code"), Example("Codex")], now);
         panel.Measure(new Size(260, double.PositiveInfinity));
-        Check(panel.DesiredSize.Height <= 190, "Two subscription summaries are too tall: " + panel.DesiredSize.Height);
+        Check(panel.DesiredSize.Height <= 2 * WindowLayout.AiRowHeight + 2, "Two subscription summaries are not one line each: " + panel.DesiredSize.Height);
+        var tip = AiAccountPanel.Summary(Example("Codex"), now);
+        Check(tip.Contains("Codex · Pro") && tip.Contains("5h: 38 % verbraucht") && tip.Contains("7d: 64 %"), "The tooltip carries the details: " + tip);
         if (Environment.GetEnvironmentVariable("TERMINALMGR_AI_RENDER_DIR") is { Length: > 0 } renderDirectory)
         {
             panel.Arrange(new Rect(0, 0, 260, panel.DesiredSize.Height)); panel.UpdateLayout();
@@ -584,7 +586,7 @@ internal static class Program
         root.Measure(new Size(1480, 940)); root.Arrange(new Rect(0, 0, 1480, 940)); root.UpdateLayout();
 
         // Names the code and the old tests rely on are still there; everything the old header and status bar offered is reachable.
-        foreach (string name in new[] { "ServerButton", "ClipboardButton", "DictationButton", "SettingsButton", "ServerPanel", "ProfilesList", "SessionTabs", "TerminalView", "ClipboardPanel", "ClipsList", "DictationPanel", "ConnectButton", "DisconnectButton", "TabHint" })
+        foreach (string name in new[] { "ServerButton", "ClipboardButton", "DictationButton", "SettingsButton", "ServerPanel", "ProfilesList", "SessionTabs", "TerminalView", "ClipboardPanel", "ClipsList", "DictationPanel", "AutostartButton", "ServerHeader", "ServerListSplitter", "AiSplitter", "TabHint" })
             Check(main.FindName(name) is not null, "Missing element " + name);
         Check(((TextBlock)main.FindName("TabHint")).Text.Contains("K alles finden"), "Palette hint: " + ((TextBlock)main.FindName("TabHint")).Text);
 

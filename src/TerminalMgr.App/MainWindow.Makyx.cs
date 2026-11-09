@@ -47,7 +47,7 @@ public partial class MainWindow
             _makyx = monitor;
             monitor.Start();
         }
-        ApplyMakyxHeight();
+        ApplySidebarLayout();
         RenderMakyx();
     }
 
@@ -87,8 +87,8 @@ public partial class MainWindow
 
     private void ToggleMakyxPanel(object sender, RoutedEventArgs e)
     {
-        _settings = _settings with { Makyx = Makyx with { Collapsed = !Makyx.Collapsed } };
-        ApplyMakyxHeight(); SaveSettings(); RenderMakyx();
+        _settings = _settings with { Makyx = Makyx with { RunsOpen = Makyx.Collapsed } };
+        ApplySidebarLayout(); SaveSettings(); RenderMakyx();
     }
 
     private void MakyxMenu(object sender, RoutedEventArgs e)
@@ -105,16 +105,6 @@ public partial class MainWindow
         var settings = new MenuItem { Header = "Makyx-Einstellungen …" };
         settings.Click += (_, _) => OpenSettings(this, new RoutedEventArgs()); menu.Items.Add(settings);
         menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
-    }
-
-    private void ApplyMakyxHeight()
-    {
-        if (MakyxPanelRow is null || MakyxPanelBody is null) return;
-        bool collapsed = Makyx.Collapsed;
-        MakyxPanelRow.Height = collapsed ? new GridLength(36) : new GridLength(Math.Min(Makyx.Height, Math.Max(80, ServerContent.ActualHeight - 150)));
-        MakyxPanelBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
-        MakyxCollapseButton.Content = (collapsed ? "›" : "⌄") + "  LÄUFE";
-        MakyxScroll.MaxHeight = Math.Max(0, MakyxPanelRow.Height.Value - 62);
     }
 
     /// <summary>Opens a Makyx page in the Makyx window of TerminalMgr (note 15, stage 1); only http and https.</summary>

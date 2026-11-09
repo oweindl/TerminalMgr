@@ -44,7 +44,7 @@ public partial class MainWindow
             ClipboardOpen = _focusMode ? _focusRestoreClipboard : ClipboardOpen,
             ClipboardWidth = ClipboardOpen ? ClipboardColumn.ActualWidth : _clipWidth,
             StripOpen = _stripOpen,
-            AiPanelHeight = _aiHeight, AiPanelCollapsed = _aiCollapsed
+            AiPanelCollapsed = _aiCollapsed, AiAreaHeight = _aiHeight, ServerListHeight = _serverListHeight
         };
     }
 
@@ -58,9 +58,10 @@ public partial class MainWindow
         if (layout?.ClipboardOpen is { } clipboard) SetClipboard(clipboard);
         SetStrip(layout?.StripOpen ?? true);
         _layoutReady = true;
-        _aiHeight = WindowLayout.PanelWidth(layout?.AiPanelHeight ?? 0, 220, 80);
+        _aiHeight = WindowLayout.PanelWidth(layout?.AiAreaHeight ?? 0, 0, 40);
+        _serverListHeight = WindowLayout.PanelWidth(layout?.ServerListHeight ?? 0, 0, 30);
         _aiCollapsed = layout?.AiPanelCollapsed ?? false;
-        ApplyAiHeight();
+        ApplySidebarLayout();
         ChangeAiSource();
         ApplyMakyxSettings();
     }

@@ -31,8 +31,27 @@ public sealed record WindowLayout
     public double ClipboardWidth { get; init; }
     /// <summary>The strip of tmux windows below the title bar; null (never saved) means on.</summary>
     public bool? StripOpen { get; init; }
+    /// <summary>Old fixed height of the AI area (before the compact sidebar); no longer used.</summary>
     public double AiPanelHeight { get; init; } = 220;
     public bool AiPanelCollapsed { get; init; }
+    /// <summary>Height of the server list and of the AI area as the user dragged them; 0 means "fit the content".</summary>
+    public double ServerListHeight { get; init; }
+    public double AiAreaHeight { get; init; }
+
+    /// <summary>Height of one server row and one AI row in the compact sidebar.</summary>
+    public const double ServerRowHeight = 30, AiRowHeight = 28;
+
+    /// <summary>
+    /// Height of a list area in the sidebar: what the user dragged, otherwise just enough for the rows; never below one row and never
+    /// so tall that the area in the middle (the runs) gets less than <paramref name="keepFree"/>.
+    /// </summary>
+    public static double ListHeight(double saved, int rows, double rowHeight, double chrome, double available, double keepFree)
+    {
+        double fit = chrome + Math.Max(1, rows) * rowHeight;
+        double wanted = double.IsFinite(saved) && saved > 0 ? saved : fit;
+        double min = chrome + rowHeight;
+        return Math.Clamp(wanted, min, Math.Max(min, available - keepFree));
+    }
 
     public const double MinWidth = 880, MinHeight = 540;
     private const double VisibleWidth = 160, VisibleHeight = 60;
