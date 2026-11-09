@@ -76,14 +76,15 @@
      <RowDefinition x:Name="AiSplitterRow" Height="4"/>
      <RowDefinition x:Name="AiPanelRow" Height="Auto"/>
     </Grid.RowDefinitions>
-   <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
+   <ListBox x:Name="ProfilesList" ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
     <ListBox.ItemContainerStyle>
      <!-- 23 + 2 × 3 padding + 1 line = 30 (WindowLayout.ServerRowHeight) -->
      <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="12,3,10,3"/></Style>
     </ListBox.ItemContainerStyle>
     <ListBox.ItemTemplate><DataTemplate>
      <Grid Height="23" ToolTip="{Binding Status}">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <!-- The name column shrinks (star) so a long name ends in "…" and the Alt label stays visible; the tooltip and the tab show it whole. -->
+      <Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Ellipse x:Name="Dot" Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="Transparent" Stroke="{DynamicResource LineStrongBrush}" StrokeThickness="1.5"/>
       <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
       <TextBlock Grid.Column="2" x:Name="AutoMark" Text="⟳" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="5,0,0,0" Visibility="Collapsed" ToolTip="Autostart"/>
