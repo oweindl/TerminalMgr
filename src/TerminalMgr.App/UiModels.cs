@@ -46,6 +46,13 @@ public sealed class ProfileItem(Profile profile) : INotifyPropertyChanged
     public bool Temporary { get; init; }
     /// <summary>The tmux server of this entry when it is not the default one (an entry "Makyx · server" runs on the socket of Makyx).</summary>
     public string? TmuxSocket { get; init; }
+    /// <summary>
+    /// The own grouped tmux session ("tm-…") this entry looks through at the Makyx session, so switching windows here never moves another tab
+    /// (note 16). Null for entries on the normal tmux server.
+    /// </summary>
+    public string? TmuxView { get; init; }
+    /// <summary>The Makyx run this entry shows (for the context bar above the terminal), null for normal servers.</summary>
+    public string? MakyxRunId { get; set; }
     public string Name => Profile.Name;
     private string _status = profile.AutoConnect ? "Autostart · getrennt" : "Getrennt";
     /// <summary>The Alt number of this server in the list ("Alt 1" to "Alt 9"), empty beyond the ninth.</summary>

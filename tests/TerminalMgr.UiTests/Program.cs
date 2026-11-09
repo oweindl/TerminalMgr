@@ -39,32 +39,42 @@ internal static class Program
     {
         MakyxRun Run(string id, MakyxStatus status, bool terminal, int minutes) => new(id, "u-" + id, "einzelauftrag", "Titel " + id, status, "Beispiel", "rechner-a", DateTimeOffset.UnixEpoch.AddMinutes(minutes), null, 125, 0.0121,
             "https://makyx.example/v/m/auftrag/" + id, null, terminal ? new MakyxTerminal(true, null, "rechner-a", "benutzer@host-a", "makyx", "makyx", "auftrag-" + id) : MakyxTerminal.None("strukturiert"));
-        var opened = new List<string>(); var terminals = new List<string>();
+        var opened = new List<string>(); var terminals = new List<string>(); var activated = new List<string>(); var newSessions = new List<string>();
         var panel = new MakyxRunsPanel { TerminalProblem = run => run.Id == "E-2" ? "kein SSH-Profil für rechner-a" : null };
-        panel.OpenRequested += run => opened.Add(run.Id); panel.TerminalRequested += run => terminals.Add(run.Id);
-        panel.Render([Run("E-1", MakyxStatus.Waiting, true, 3), Run("E-2", MakyxStatus.Working, true, 2), Run("E-3", MakyxStatus.Done, false, 1)], "leer");
+        panel.OpenRequested += run => opened.Add(run.Id); panel.TerminalRequested += run => terminals.Add(run.Id); panel.ActivateRequested += run => activated.Add(run.Id);
+        panel.NewSessionRequested += p => newSessions.Add(p.Id);
+        var beispiel = new MakyxProject("Beispiel", "Beispiel", null, null, null, 2, 0, "");
+        panel.Render([Run("E-1", MakyxStatus.Waiting, true, 3), Run("E-2", MakyxStatus.Working, true, 2), Run("E-3", MakyxStatus.Done, false, 1)], [beispiel], "leer", run => run.Id == "E-1" ? "Alt 8" : null);
         panel.Measure(new Size(260, double.PositiveInfinity));
-        Check(panel.Children.Count == 3, "three rows expected");
-        Check(panel.DesiredSize.Height <= 3 * 52, "rows are too tall: " + panel.DesiredSize.Height);
-        var first = (Border)panel.Children[0];
+        // Note 16: project line, its two active runs (waiting first), "ZULETZT" and the finished run.
+        Check(panel.Children.Count == 5 && panel.Children[3] is TextBlock { Text: "ZULETZT" }, "project, two active runs, recent heading, finished run: " + panel.Children.Count);
+        Check(panel.DesiredSize.Height <= 5 * 52, "rows are too tall: " + panel.DesiredSize.Height);
+        var header = (Border)panel.Children[0];
+        Check(System.Windows.Automation.AutomationProperties.GetName(header).Contains("Beispiel") && header.ContextMenu!.Items.Count == 3, "project line with name and menu (page, new session, run)");
+        ((MenuItem)header.ContextMenu.Items[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(newSessions.SequenceEqual(["Beispiel"]), "new session from the project menu");
+        var first = (Border)panel.Children[1];
+        Check(System.Windows.Automation.AutomationProperties.GetName(first).Contains("auftrag-E-1") && System.Windows.Automation.AutomationProperties.GetName(first).Contains("wartet"), "session line: short name and status");
+        first.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+        Check(activated.SequenceEqual(["E-1"]), "a click on a session activates it (terminal or page)");
         var browserRuns = new List<string>(); panel.BrowserRequested += run => browserRuns.Add(run.Id);
         Check(first.ContextMenu!.Items.Count == 7 && ((MenuItem)first.ContextMenu.Items[2]).Header.ToString() == "Im Browser öffnen", "menu: open in Makyx window, terminal, browser, copy link, then stop and emergency stop");
         var stops = new List<string>(); var emergencies = new List<string>();
         panel.StopRequested += run => stops.Add(run.Id); panel.EmergencyRequested += run => emergencies.Add(run.Id);
         ((MenuItem)first.ContextMenu.Items[5]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)first.ContextMenu.Items[6]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Check(stops.SequenceEqual(["E-1"]) && emergencies.SequenceEqual(["E-1"]) && ((MenuItem)first.ContextMenu.Items[5]).IsEnabled, "stop entries raise their events for an active run");
-        Check(!((MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[5]).IsEnabled && !((MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[6]).IsEnabled, "a finished run can not be stopped");
+        Check(!((MenuItem)((Border)panel.Children[4]).ContextMenu!.Items[5]).IsEnabled && !((MenuItem)((Border)panel.Children[4]).ContextMenu!.Items[6]).IsEnabled, "a finished run can not be stopped");
         ((MenuItem)first.ContextMenu.Items[2]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Check(browserRuns.SequenceEqual(["E-1"]), "browser entry raises its event");
         Check(((MenuItem)first.ContextMenu.Items[1]).IsEnabled && ((MenuItem)first.ContextMenu.Items[1]).Header.ToString() == "Im Terminal öffnen", "terminal entry is enabled for a tmux window with a profile");
-        var noProfile = (MenuItem)((Border)panel.Children[1]).ContextMenu!.Items[1];
+        var noProfile = (MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[1];
         Check(!noProfile.IsEnabled && noProfile.Header.ToString()!.Contains("kein SSH-Profil"), "terminal entry is disabled with the reason when no profile matches");
-        var structured = (MenuItem)((Border)panel.Children[2]).ContextMenu!.Items[1];
+        var structured = (MenuItem)((Border)panel.Children[4]).ContextMenu!.Items[1];
         Check(!structured.IsEnabled && structured.Header.ToString()!.Contains("strukturierte Session"), "a structured session has no terminal, said explicitly");
         ((MenuItem)first.ContextMenu.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); ((MenuItem)first.ContextMenu.Items[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Check(opened.SequenceEqual(["E-1"]) && terminals.SequenceEqual(["E-1"]), "menu entries raise the events");
-        Check(System.Windows.Automation.AutomationProperties.GetName(first).Contains("E-1") && System.Windows.Automation.AutomationProperties.GetName(first).Contains("wartet"), "rows have an accessible name with the status");
-        panel.Render([], "Makyx nicht eingerichtet");
+        Check(System.Windows.Automation.AutomationProperties.GetName((Border)panel.Children[4]).Contains("E-3"), "finished rows have an accessible name with the id");
+        panel.Render([], [], "Makyx nicht eingerichtet");
         Check(panel.Children.Count == 1 && ((TextBlock)panel.Children[0]).Text == "Makyx nicht eingerichtet", "empty text is shown");
         Check(MakyxRunsPanel.Duration(45) == "45 s" && MakyxRunsPanel.Duration(409) == "6:49 min" && MakyxRunsPanel.Duration(7500) == "2 h 5 min" && MakyxRunsPanel.Duration(null) == "", "duration text");
         Check(MakyxRunsPanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)) == "Beispiel · rechner-a · 2:05 min · 0,01 USD", "detail line: " + MakyxRunsPanel.Detail(Run("E-9", MakyxStatus.Done, false, 0)));
@@ -92,12 +102,19 @@ internal static class Program
         dialog.Measure(new Size(620, 900));
         // "Neue Session": the machine list is a plain list (the dark template has no text box) with the machine preselected.
         var project = new MakyxProject("p1", "ProtyxPulse", null, null, null, 0, 0, "");
-        var session = new MakyxSessionDialog(project, [new MakyxMachine("r1", "rechner-a", "online", true, null, null, null)]);
+        var session = new MakyxSessionDialog([project, new MakyxProject("p2", "Zweites", null, null, null, 1, 0, "")], project, [new MakyxMachine("r1", "rechner-a", "online", true, null, null, null)]);
         var machineBox = FindDescendant<ComboBox>((DependencyObject)session.Content)!;
         Check(!machineBox.IsEditable && machineBox.IsEnabled && machineBox.SelectedIndex == 0 && session.Machine == "rechner-a", "the only machine is chosen and selectable");
         Check(!MainWindow.IsAppProcess() && MainWindow.IsAppProcess(@"C:\Programme\TerminalMgr\TerminalMgr.App.exe"), "tests never run the update check at start");
-        var noMachine = new MakyxSessionDialog(project, []);
-        Check(noMachine.Machine is null, "without machines Makyx chooses");
+        Check(session.Project?.Id == "p1" && !session.IsRun && session.Folder == MakyxFolder.Worktree && session.ShortName is null, "preselected project, interactive, new worktree, no name");
+        var noMachine = new MakyxSessionDialog([project], null, []);
+        Check(noMachine.Machine is null && noMachine.Project?.Id == "p1", "without machines Makyx chooses; the first project is chosen");
+        // The server list cuts long names, never the Alt number; the context bar and the runs icon exist.
+        Check(main.FindName("ContextBar") is Border { Visibility: Visibility.Collapsed } && main.FindName("RunsButton") is System.Windows.Controls.Primitives.ToggleButton && main.FindName("NewSessionButton") is Button, "context bar hidden for normal servers, runs icon and + Session there");
+        var switcher = new TmuxSwitcherWindow("rechner-a", TmuxSwitcher.PlainEntries(TmuxWindowParser.Group(TmuxWindowParser.Parse("$1\t@1\t0\t1\tmain\tbash\tbash\n$1\t@2\t1\t0\tmain\tlogs\ttail")), w => w.Index == 0), "Ctrl+Shift+W");
+        var switchList = FindDescendant<ListBox>((DependencyObject)switcher.Content)!;
+        Check(switchList.Items.Count == 3 && switchList.SelectedIndex == 1, "switcher: group heading and two windows, this tab's window selected");
+        switcher.Close();
         Console.WriteLine("PASS Makyx dashboard strip, context menu states, toast and settings fields");
     }
 

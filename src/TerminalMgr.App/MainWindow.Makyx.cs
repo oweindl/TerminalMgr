@@ -19,6 +19,10 @@ public partial class MainWindow
     private void InitializeMakyx()
     {
         MakyxRuns.OpenRequested += run => OpenMakyxLink(run.Link);
+        // A session with a terminal opens its terminal on click (note 16); everything else its Makyx page.
+        MakyxRuns.ActivateRequested += run => { if (run.Terminal.Available && TerminalProblem(run) is null) _ = OpenMakyxTerminalAsync(run); else OpenMakyxLink(run.Link); };
+        MakyxRuns.NewSessionRequested += project => OpenNewMakyxSession(project);
+        MakyxRuns.ProjectPageRequested += project => OpenMakyxLink(project.Link);
         MakyxRuns.BrowserRequested += run => OpenMakyxInBrowser(run.Link);
         MakyxRuns.CopyRequested += run => { try { Clipboard.SetText(run.Link); StatusText.Text = "Link kopiert."; } catch (System.Runtime.InteropServices.ExternalException) { StatusText.Text = "Der Link ließ sich nicht kopieren."; } };
         MakyxRuns.TerminalRequested += run => _ = OpenMakyxTerminalAsync(run);
@@ -71,7 +75,9 @@ public partial class MainWindow
         MakyxStateLabel.Text = StateText();
         MakyxStateLabel.Visibility = MakyxStateLabel.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         string empty = !Makyx.Enabled ? "Makyx nicht eingerichtet · Einstellungen › Makyx-Leitstand" : _makyx is null ? "Makyx nicht verbunden." : "Keine Läufe.";
-        MakyxRuns.Render(runs, empty);
+        MakyxRuns.Render(runs, _makyx?.Projects() ?? [], empty, AltLabelForRun);
+        UpdateRunsBadge(waiting);
+        UpdateContextBar();
     }
 
     private string StateText()
@@ -149,28 +155,34 @@ public partial class MainWindow
         ? (ProfileFor(run) is null ? "kein SSH-Profil für " + (run.Terminal.Machine ?? "diesen Rechner") : null)
         : "kein Terminal";
 
-    /// <summary>"Im Terminal öffnen": a second SSH connection with the profile of the machine, attached to the tmux window of the instance. It appears as its own entry "Makyx · window" and is not saved.</summary>
-    private async Task OpenMakyxTerminalAsync(MakyxRun run)
+    /// <summary>
+    /// "Im Terminal öffnen": a second SSH connection with the profile of the machine, looking at the tmux window of the instance through an own
+    /// grouped session (so other tabs stay where they are). It appears as its own entry "Projekt · Kurzname" (note 16) and is not saved.
+    /// With <paramref name="newTab"/> a further entry is opened even when one exists (Ctrl+Enter in the window switcher).
+    /// </summary>
+    private async Task<ProfileItem?> OpenMakyxTerminalAsync(MakyxRun run, bool newTab = false)
     {
-        if (!run.Terminal.Available || run.Terminal is not { TmuxSocket: { } socket, TmuxSession: { } session, TmuxWindow: { } window }) { StatusText.Text = "Diese Instanz hat kein Terminal."; return; }
+        if (!run.Terminal.Available || run.Terminal is not { TmuxSocket: { } socket, TmuxSession: { } session, TmuxWindow: { } window }) { StatusText.Text = "Diese Instanz hat kein Terminal."; return null; }
         var basis = ProfileFor(run);
-        if (basis is null) { StatusText.Text = "Es gibt kein SSH-Profil für " + (run.Terminal.Machine ?? "diesen Rechner") + " (Profil mit gleichem Namen oder Ziel anlegen)."; return; }
+        if (basis is null) { StatusText.Text = "Es gibt kein SSH-Profil für " + (run.Terminal.Machine ?? "diesen Rechner") + " (Profil mit gleichem Namen oder Ziel anlegen)."; return null; }
         try
         {
-            var args = SshCommand.MakyxTmuxAttachArguments(basis, socket, session, window); // validates the names
-            string command = args[^1];
-            // The same tmux window opens the same entry again; a second instance of the same project on the same machine gets its id appended.
-            var existing = _profiles.FirstOrDefault(p => p.Temporary && p.Profile.Command == command && p.Profile.Destination == basis.Destination);
-            if (existing is not null) { ProfilesList.SelectedItem = existing; await ConnectAsync(existing); return; }
+            // The same instance opens the same entry again (unless a further tab is wanted).
+            var existing = newTab ? null : _profiles.FirstOrDefault(p => p.Temporary && p.MakyxRunId == run.Id && p.TmuxSocket == socket && p.Profile.Destination == basis.Destination);
+            if (existing is not null) { ProfilesList.SelectedItem = existing; if (!_sessions.ContainsKey(existing.Profile.Id)) await ConnectAsync(existing); FocusTerminal(existing.Profile.Id); return existing; }
+            string view = MakyxTmux.NewViewName();
+            string command = SshCommand.MakyxViewAttachArguments(basis, socket, session, window, view)[^1]; // validates the names
             string name = MakyxControl.TerminalName(run);
-            if (_profiles.Any(p => p.Profile.Name == name)) name += " · " + run.Id;
+            for (int n = 2; _profiles.Any(p => p.Profile.Name == name); n++) name = MakyxControl.TerminalName(run) + " (" + n + ")";
             var profile = basis with { Id = Guid.NewGuid().ToString("N"), Name = name, Mode = StartMode.Command, Command = command, AutoConnect = false, AutoReconnect = false };
-            var item = new ProfileItem(profile) { Temporary = true };
+            var item = new ProfileItem(profile) { Temporary = true, TmuxSocket = socket, TmuxView = view, MakyxRunId = run.Id };
             _profiles.Add(item);
             ProfilesList.SelectedItem = item;
             await ConnectAsync(item);
+            RenderMakyx();   // the line of the run shows the Alt number of its new tab
+            return item;
         }
-        catch (ArgumentException) { StatusText.Text = "Der tmux-Name von Makyx ist ungültig."; }
+        catch (ArgumentException) { StatusText.Text = "Der tmux-Name von Makyx ist ungültig."; return null; }
     }
 
     /// <summary>
@@ -198,17 +210,26 @@ public partial class MainWindow
     /// Opens a Makyx window from the server menu: one entry "Makyx · server" per server and socket (not saved), attached to the session of
     /// that window; further windows switch inside it, and the window strip shows all windows of the Makyx session.
     /// </summary>
-    private async Task OpenMakyxWindowAsync(ProfileItem basis, string socket, TmuxWindowRecord window)
+    private async Task OpenMakyxWindowAsync(ProfileItem basis, string socket, TmuxWindowRecord window, bool newTab = false)
     {
         try
         {
+            // A window with a known instance opens as that instance ("Projekt · Kurzname"); any other window in the entry "Makyx · server".
+            string bare = window.SessionName;
+            if (_makyx is not null && TmuxSwitcher.RunFor(window, bare, socket, _makyx.Runs()) is { } run && ProfileFor(run)?.Destination == basis.Profile.Destination)
+            {
+                await OpenMakyxTerminalAsync(run, newTab);
+                return;
+            }
             string name = MakyxTmux.GroupPrefix + basis.Name;
-            var item = _profiles.FirstOrDefault(p => p.Temporary && p.TmuxSocket == socket && p.Profile.Name == name && p.Profile.Destination == basis.Profile.Destination);
+            var item = newTab ? null : _profiles.FirstOrDefault(p => p.Temporary && p.TmuxSocket == socket && p.Profile.Name == name && p.Profile.Destination == basis.Profile.Destination);
             if (item is null)
             {
-                string command = SshCommand.TmuxAttachArguments(basis.Profile, window.SessionId, window.WindowId, socket)[^1]; // validates socket and IDs
+                string view = MakyxTmux.NewViewName();
+                string command = SshCommand.MakyxViewAttachArguments(basis.Profile, socket, window.SessionId, window.WindowId, view)[^1]; // validates socket and IDs
+                if (newTab) for (int n = 2; _profiles.Any(p => p.Profile.Name == name); n++) name = MakyxTmux.GroupPrefix + basis.Name + " (" + n + ")";
                 var profile = basis.Profile with { Id = Guid.NewGuid().ToString("N"), Name = name, Mode = StartMode.Command, Command = command, AutoConnect = false, AutoReconnect = false };
-                item = new ProfileItem(profile) { Temporary = true, TmuxSocket = socket };
+                item = new ProfileItem(profile) { Temporary = true, TmuxSocket = socket, TmuxView = view };
                 _profiles.Add(item);
             }
             await SwitchToTmuxWindowAsync(item, window);

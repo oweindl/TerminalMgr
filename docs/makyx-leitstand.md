@@ -20,6 +20,15 @@ Das Token liegt immer im Windows-Anmeldeinformationsspeicher (Ziel `TerminalMgr/
 - Toast „Wartet auf dich“ bei neuem Wartenden (abschaltbar); beim Start keine Meldungen für Bestehendes.
 - Befehlspalette (Ctrl+Shift+K): Gruppe **Makyx** mit den laufenden Aufträgen.
 
+## Sessions und tmux (Notiz 16, ab 09.11.2026)
+- **LÄUFE nach Projekt:** je Projekt eine Zeile mit Zähler und **+** (neue Session), darunter die aktiven Sessions als „kurzname · Rolle“ mit Status und Alt-Nummer ihres Tabs; Klick öffnet das Terminal. Darunter **ZULETZT** mit den beendeten Läufen.
+- **Neue Claude-Session** (Ctrl+N, „+ Session“, „+“ am Projekt): Projekt mit Suche, Name, Art (interaktiv oder Lauf), Ziel-Host mit freiem RAM, Arbeitsordner (Worktree oder Hauptordner), Agent und Modell, erste Nachricht.
+- **Namen:** Tab und Eintrag heißen „Projekt · kurzname“. Ohne `kurzname` von Makyx gilt der Name des tmux-Fensters, sonst die Kennung.
+- **Eigene Ansicht je Tab:** Ein Makyx-Tab hängt über eine eigene gruppierte Session (`tm-xxxxxxxx`, `destroy-unattached`) an der Makyx-Session. Fensterwechsel bewegen nie einen anderen Tab.
+- **Fenster wechseln** (Ctrl+Shift+W, Kontextmenü, Kontextleiste): alle Fenster des Servers, normaler tmux und Makyx-Socket, gruppiert; Ansichts-Sessions ausgeblendet. Enter hier, Ctrl+Enter neuer Tab, N neues Fenster, R umbenennen (Makyx-Sessions über `PATCH sessions/{id}`).
+- **Kontextleiste** über dem Terminal eines Makyx-Tabs: Projekt, Session, Rechner, tmux-Ziel, Status; „Auftrag senden“ beantwortet, was für die Session wartet.
+- **Icon „Läufe“** in der linken Leiste (Ctrl+Shift+L) mit Zähler der Wartenden.
+
 ## Technik
 Abfrage von `/laeufe`, `/wartet` beim Start, danach der Ereignisstrom `/ereignisse` (Server-Sent Events); bei Abbruch Wiederverbindung nach 2/4/8/16/30 s und Nachholen mit `seit`. Die CA des Runner-Kanals wird über ihren SHA-256-Fingerprint festgelegt; der Servername wird weiter geprüft. Schnittstelle: `docs/leitstand-api.yaml` im Makyx-Repository.
 Tests: `tests/TerminalMgr.Tests/MakyxTests.cs` und `MakyxClientTests.cs` (Konsolenprüfungen, nur neutrale Namen), `TestMakyxDashboard` in den UI-Prüfungen.

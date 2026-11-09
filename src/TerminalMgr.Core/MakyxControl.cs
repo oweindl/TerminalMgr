@@ -3,7 +3,13 @@ using System.Text.Json;
 namespace TerminalMgr.Core;
 
 /// <summary>A Makyx project (GET projekte): where it lives, how many instances run and how many gates wait.</summary>
-public sealed record MakyxProject(string Id, string Name, string? Repository, string? Source, string? Machine, int Running, int GatesOpen, string Link);
+/// <param name="LastActive">When the project was last active (zuletzt_aktiv), for sorting the list of "Neue Session".</param>
+/// <param name="DefaultModel">The model Makyx uses for the project when none is chosen.</param>
+public sealed record MakyxProject(string Id, string Name, string? Repository, string? Source, string? Machine, int Running, int GatesOpen, string Link,
+    DateTimeOffset? LastActive = null, string? DefaultModel = null);
+
+/// <summary>Where a new session works: a new git worktree (default) or the main folder of the project.</summary>
+public enum MakyxFolder { Worktree, Main }
 
 /// <summary>Answer to a gate or a question (POST wartet/{id}/antwort).</summary>
 public enum MakyxDecision { Approve, Reject, Return }
@@ -37,11 +43,19 @@ public static class MakyxControl
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    /// <summary>POST sessions: {projekt, rechner?, agent, modell?, modus: "terminal"}.</summary>
-    public static string SessionBody(string project, string? machine, string? agent, string? model)
+    /// <summary>
+    /// POST sessions: {projekt, rechner?, agent, modell?, modus: "terminal", name?, arbeitsordner?, erste_nachricht?}. The last three are new
+    /// (Makyx-PoC/17); they are only sent when set, so an older Makyx sees the same body as before. The name is normalized
+    /// (<see cref="MakyxNames.Normalize"/>); a name that stays empty is left out (Makyx then names the session itself).
+    /// </summary>
+    public static string SessionBody(string project, string? machine, string? agent, string? model,
+        string? name = null, MakyxFolder? folder = null, string? firstMessage = null)
     {
         if (string.IsNullOrWhiteSpace(project)) throw new ArgumentException("Projekt fehlt.");
         string runtime = agent is { Length: > 0 } a && Agents.Contains(a) ? a : Agents[0];
+        string? shortName = MakyxNames.Normalize(name);
+        string? message = string.IsNullOrWhiteSpace(firstMessage) ? null : firstMessage.Trim();
+        if (message is { Length: > 20_000 }) throw new ArgumentException("Die erste Nachricht ist zu lang.");
         return Json(w =>
         {
             w.WriteString("projekt", project.Trim());
@@ -49,8 +63,15 @@ public static class MakyxControl
             w.WriteString("agent", runtime);
             if (model is { Length: > 0 } mo && !string.IsNullOrWhiteSpace(mo)) w.WriteString("modell", mo.Trim());
             w.WriteString("modus", "terminal");
+            if (shortName is not null) w.WriteString("name", shortName);
+            if (folder is { } f) w.WriteString("arbeitsordner", f == MakyxFolder.Main ? "haupt" : "worktree");
+            if (message is not null) w.WriteString("erste_nachricht", message);
         });
     }
+
+    /// <summary>PATCH sessions/{id}: {name} (rename; Makyx renames the tmux window with it).</summary>
+    public static string RenameBody(string? name) =>
+        MakyxNames.Normalize(name) is { } shortName ? Json(w => w.WriteString("name", shortName)) : throw new ArgumentException("Bitte einen Namen angeben (Buchstaben, Ziffern und -).");
 
     /// <summary>POST wartet/{id}/antwort: {entscheidung, text?}. "Zurückgeben" needs a text (it goes back to the agent).</summary>
     public static string AnswerBody(MakyxDecision decision, string? text)
@@ -119,20 +140,36 @@ public static class MakyxControl
     /// <summary>Can this run be stopped? Active runs and jobs; free sessions are ended in their terminal.</summary>
     public static bool IsStoppable(MakyxRun run) => run.IsActive && run.Kind != "session";
 
-    /// <summary>The menu text of a project: "Name · 2 laufen · 1 Gate".</summary>
-    /// <summary>Name of the terminal entry of a Makyx instance, "Makyx · Projekt · Rechner", so the server list shows where it runs.</summary>
-    public static string TerminalName(MakyxRun run)
-    {
-        string project = run.Project.Length > 0 ? run.Project : run.Kind == "session" ? "freie Session" : run.Id;
-        string? machine = run.Terminal.Machine ?? run.Machine;
-        return MakyxTmux.GroupPrefix + project + (machine is { Length: > 0 } ? " · " + machine : "");
-    }
+    /// <summary>Name of the terminal entry and tab of a Makyx instance: "Projekt · Kurzname" (note 16), short enough for the server list.</summary>
+    public static string TerminalName(MakyxRun run) => MakyxNames.TabName(run);
 
     /// <summary>What "Neue Session" sends as rechner: the machine's name, its id when it has none.</summary>
     public static string MachineValue(MakyxMachine machine) => machine.Name.Length > 0 ? machine.Name : machine.Id;
 
-    /// <summary>The line in the machine list of "Neue Session".</summary>
-    public static string MachineLabel(MakyxMachine machine) => MachineValue(machine) + (machine.Connected ? "" : " · nicht verbunden");
+    /// <summary>The line in the machine list of "Neue Session", with free memory when Makyx reports it ("linuxdev · RAM 9,8 / 16 GB frei").</summary>
+    public static string MachineLabel(MakyxMachine machine) => MachineValue(machine) + (machine.Connected ? "" : " · nicht verbunden")
+        + (machine.RamFreeMb is { } free ? " · RAM " + Gb(free) + (machine.RamTotalMb is { } total ? " / " + Gb(total) : "") + " GB frei" : "");
+
+    private static string Gb(int mb) => (mb / 1024.0).ToString(mb % 1024 == 0 ? "0" : "0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
+
+    /// <summary>Projects for the list of "Neue Session": active ones first, then the most recently used, then by name.</summary>
+    public static IReadOnlyList<MakyxProject> SortProjects(IEnumerable<MakyxProject> projects) =>
+        projects.OrderByDescending(p => p.Running > 0).ThenByDescending(p => p.LastActive ?? DateTimeOffset.MinValue)
+            .ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    /// <summary>The detail line of a project in that list: "2 Läufe aktiv · zuletzt vor 33 min".</summary>
+    public static string ProjectDetail(MakyxProject p, DateTimeOffset now)
+    {
+        var parts = new List<string> { p.Running switch { 0 => "keine aktiv", 1 => "1 Lauf aktiv", _ => p.Running + " Läufe aktiv" } };
+        if (p.GatesOpen > 0) parts.Add(p.GatesOpen == 1 ? "1 Gate" : p.GatesOpen + " Gates");
+        if (p.LastActive is { } last) parts.Add("zuletzt " + Ago(now - last));
+        return string.Join(" · ", parts);
+    }
+
+    public static string Ago(TimeSpan span) => span.TotalSeconds < 60 ? "gerade eben" : span.TotalMinutes < 60 ? $"vor {(int)span.TotalMinutes} min"
+        : span.TotalHours < 24 ? $"vor {(int)span.TotalHours} h" : $"vor {(int)span.TotalDays} Tagen";
+
+    /// <summary>The menu text of a project: "Name · 2 laufen · 1 Gate".</summary>
 
     /// <summary>
     /// The machine "Neue Session" preselects: the project's machine (by id or name), otherwise the only connected one, otherwise the

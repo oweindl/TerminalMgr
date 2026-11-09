@@ -44,6 +44,15 @@
      <ToggleButton x:Name="ServerButton" Style="{StaticResource IconBarButton}" Click="ToggleServerPanel" ToolTip="Server: Liste auf- und zuklappen" AutomationProperties.Name="Server">
       <Path Style="{StaticResource IconPath}" Data="{StaticResource IconServer}"/>
      </ToggleButton>
+     <ToggleButton x:Name="RunsButton" Style="{StaticResource IconBarButton}" Click="ShowRunsClick" ToolTip="Läufe (Ctrl+Shift+L)" AutomationProperties.Name="Läufe">
+      <Grid Width="24" Height="24">
+       <Path Style="{StaticResource IconPath}" Data="{StaticResource IconRuns}"/>
+       <!-- Number of runs waiting for you; hidden when nothing waits. -->
+       <Border x:Name="RunsBadge" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-8,0" MinWidth="16" Height="16" CornerRadius="8" Padding="4,0" Background="#E0A11B">
+        <TextBlock x:Name="RunsBadgeText" FontSize="10" FontWeight="Bold" Foreground="#16130A" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+       </Border>
+      </Grid>
+     </ToggleButton>
      <ToggleButton x:Name="ClipboardButton" Style="{StaticResource IconBarButton}" Click="ToggleClipboard" ToolTip="Clipboard: rechte Spalte ein- und ausblenden" AutomationProperties.Name="Clipboard" IsChecked="True">
       <Path Style="{StaticResource IconPath}" Data="{StaticResource IconClipboard}"/>
      </ToggleButton>
@@ -76,16 +85,17 @@
      <RowDefinition x:Name="AiSplitterRow" Height="4"/>
      <RowDefinition x:Name="AiPanelRow" Height="Auto"/>
     </Grid.RowDefinitions>
-   <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
+   <ListBox x:Name="ProfilesList" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
     <ListBox.ItemContainerStyle>
-     <!-- 23 + 2 × 3 padding + 1 line = 30 (WindowLayout.ServerRowHeight) -->
-     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="12,3,10,3"/></Style>
+     <!-- 23 + 2 × 3 padding + 1 line = 30 (WindowLayout.ServerRowHeight). No horizontal scrolling and stretched rows: long names are cut, not the Alt number. -->
+     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="12,3,10,3"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
     </ListBox.ItemContainerStyle>
     <ListBox.ItemTemplate><DataTemplate>
      <Grid Height="23" ToolTip="{Binding Status}">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <!-- The name takes the rest and is cut with "…"; autostart mark and Alt number keep their width, so the Alt number is always visible (note 16). -->
+      <Grid.ColumnDefinitions><ColumnDefinition Width="16"/><ColumnDefinition Width="*" MinWidth="0"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Ellipse x:Name="Dot" Width="9" Height="9" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="Transparent" Stroke="{DynamicResource LineStrongBrush}" StrokeThickness="1.5"/>
-      <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+      <TextBlock Grid.Column="1" Text="{Binding Name}" ToolTip="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
       <TextBlock Grid.Column="2" x:Name="AutoMark" Text="⟳" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="5,0,0,0" Visibility="Collapsed" ToolTip="Autostart"/>
       <TextBlock Grid.Column="3" Text="{Binding AltLabel}" Visibility="{Binding AltVisibility}" FontFamily="{DynamicResource MonoFont}" FontSize="10" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="6,0,0,0" ToolTip="Mit dieser Taste zu diesem Server wechseln"/>
      </Grid>
@@ -114,6 +124,7 @@
     <DockPanel Grid.Row="2" Background="{DynamicResource BarBrush}">
      <DockPanel DockPanel.Dock="Top" Margin="8,3,8,2">
       <Button DockPanel.Dock="Right" Content="⋯" Width="26" Height="26" Padding="0" Margin="0" Style="{StaticResource FlatButton}" Click="MakyxMenu" ToolTip="Makyx neu verbinden und Einstellungen" AutomationProperties.Name="Makyx-Menü"/>
+      <Button x:Name="NewSessionButton" DockPanel.Dock="Right" Content="+ Session" Padding="6,2" Margin="0,0,2,0" FontSize="12" Style="{StaticResource FlatButton}" Click="NewSessionClick" ToolTip="Neue Claude-Session (Ctrl+N)" AutomationProperties.Name="Neue Claude-Session"/>
       <TextBlock x:Name="MakyxCount" DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource Text2Brush}" VerticalAlignment="Center" Margin="4,0"/>
       <Button x:Name="MakyxCollapseButton" Content="›  LÄUFE" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Style="{StaticResource FlatButton}" Padding="4,3" Margin="0" FontSize="12" FontWeight="SemiBold" Click="ToggleMakyxPanel" AutomationProperties.Name="Läufe aus Makyx ein- oder ausklappen"/>
      </DockPanel>
@@ -130,7 +141,7 @@
 
   <!-- Session tabs and terminal -->
   <Grid Grid.Column="3">
-   <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="44"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
    <Border Background="{DynamicResource BarBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
     <DockPanel>
      <Grid>
@@ -207,8 +218,25 @@
      </Grid>
     </DockPanel>
    </Border>
-   <wv:WebView2 x:Name="TerminalView" Grid.Row="1" DefaultBackgroundColor="#0E0F11"/>
-   <Border x:Name="LoadingOverlay" Grid.Row="1" Background="{DynamicResource BgBrush}">
+   <!-- Context bar of a Makyx tab (note 16, point 5): where it is, which tmux window, status; switch window and send an order. -->
+   <Border x:Name="ContextBar" Grid.Row="1" Visibility="Collapsed" Background="{DynamicResource BarBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="16,6,12,6">
+    <DockPanel>
+     <Button x:Name="ContextOrderButton" DockPanel.Dock="Right" Content="Auftrag senden" Padding="10,3" Margin="6,0,0,0" FontSize="12" Click="ContextOrderClick" ToolTip="Antwort oder Auftrag an diese Session (über Makyx)"/>
+     <Button DockPanel.Dock="Right" Padding="10,3" Margin="6,0,0,0" FontSize="12" Style="{StaticResource FlatButton}" Click="ContextSwitcherClick" ToolTip="Alle tmux-Fenster, gruppiert nach Session">
+      <TextBlock x:Name="ContextSwitcherText" Text="Fenster wechseln"/>
+     </Button>
+     <TextBlock x:Name="ContextPath" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Text2Brush}"/>
+     <TextBlock x:Name="ContextTarget" FontSize="12" VerticalAlignment="Center" Margin="14,0,0,0" Foreground="{DynamicResource Text2Brush}" FontFamily="{DynamicResource MonoFont}"/>
+     <Border x:Name="ContextStatus" CornerRadius="9" Padding="8,1" Margin="14,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{DynamicResource RaisedBrush}">
+      <StackPanel Orientation="Horizontal">
+       <Ellipse x:Name="ContextStatusDot" Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center"/>
+       <TextBlock x:Name="ContextStatusText" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+      </StackPanel>
+     </Border>
+    </DockPanel>
+   </Border>
+   <wv:WebView2 x:Name="TerminalView" Grid.Row="2" DefaultBackgroundColor="#0E0F11"/>
+   <Border x:Name="LoadingOverlay" Grid.Row="2" Background="{DynamicResource BgBrush}">
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="480">
      <TextBlock Text="Deine Server. Ein Arbeitsplatz." FontSize="26" FontWeight="SemiBold" Margin="0,0,0,15"/>
      <TextBlock x:Name="LoadingText" Text="Terminal wird vorbereitet …" TextWrapping="Wrap" Foreground="{DynamicResource Text2Brush}"/>

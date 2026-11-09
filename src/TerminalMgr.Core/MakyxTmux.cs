@@ -21,8 +21,17 @@ public static class MakyxTmux
         return TmuxWindowParser.Group(unique).Select(s => s with { Name = GroupPrefix + s.Name }).ToList();
     }
 
-    /// <summary>A grouped viewing session of the runner, not a session of its own.</summary>
-    public static bool IsView(string session) => session.StartsWith("ansicht-", StringComparison.Ordinal);
+    /// <summary>A grouped viewing session (of the runner, "ansicht-…", or of a TerminalMgr tab, "tm-…"), not a session of its own.</summary>
+    public static bool IsView(string session) => session.StartsWith("ansicht-", StringComparison.Ordinal) || IsOwnView(session);
+
+    /// <summary>The viewing session of a TerminalMgr tab: "tm-" and eight hex digits.</summary>
+    public static bool IsOwnView(string? session) => session is { Length: 11 } && session.StartsWith("tm-", StringComparison.Ordinal) && session[3..].All(char.IsAsciiHexDigitLower);
+
+    /// <summary>
+    /// A new name for the viewing session of one tab. Every Makyx tab looks at the Makyx session through a grouped session of its own, so
+    /// switching windows in one tab never moves another (note 16, point 4); tmux removes it when the tab disconnects (destroy-unattached).
+    /// </summary>
+    public static string NewViewName() => "tm-" + Guid.NewGuid().ToString("N")[..8];
 
     /// <summary>The tmux sockets of the Makyx machines that belong to this profile (same rules as "Im Terminal öffnen").</summary>
     public static IReadOnlyList<string> SocketsFor(Profile profile, IReadOnlyList<Profile> profiles, IEnumerable<MakyxMachine> machines, IReadOnlyDictionary<string, string>? map = null) =>

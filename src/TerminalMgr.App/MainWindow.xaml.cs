@@ -272,6 +272,7 @@ public partial class MainWindow : Window
             _sessions[id] = pty;
             var arguments = tmuxSessionId is null ? SshCommand.Arguments(item.Profile)
                 : tmuxWindowId is null ? SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId)
+                : item is { TmuxSocket: { } viewSocket, TmuxView: { } view } ? SshCommand.MakyxViewAttachArguments(item.Profile, viewSocket, tmuxSessionId, tmuxWindowId, view)
                 : SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId, tmuxWindowId, item.TmuxSocket);
             ForgetTmux(id);
             if (tmuxSessionId is not null) _tmuxAttached[id] = (tmuxSessionId, null);
@@ -408,6 +409,7 @@ public partial class MainWindow : Window
         StripSelectionChanged();
         UpdateDimensions(item.Profile.Id);
         RefreshTabs();
+        UpdateContextBar();
     }
     private string TitleFor(ProfileItem item) => _tmuxLabel.TryGetValue(item.Profile.Id, out var label)
         ? item.Name + " · " + label : item.Name + " · " + item.Profile.Destination;
@@ -446,7 +448,8 @@ public partial class MainWindow : Window
             entry.Click += click;
             menu.Items.Add(entry);
         }
-        Add("tmux-Session auswählen …", ChooseTmuxSession);
+        Add("Fenster wechseln … (" + _settings.Shortcuts.Normalized().WindowSwitcher + ")", (_, _) => OpenWindowSwitcher(item));
+        if (item.TmuxView is null) Add("tmux-Session auswählen …", ChooseTmuxSession);
         Add("tmux-Fensterwahl öffnen (Ctrl+B w)", OpenTmuxWindowPicker);
         menu.Items.Add(new Separator());
         // The menu opens at once; the window list is inserted here when the separate SSH query answers.
@@ -552,7 +555,9 @@ public partial class MainWindow : Window
             }
             if (_sessions.TryGetValue(id, out var pty))
             {
-                await TmuxClient.SwitchToWindowAsync(pty, window.SessionId, window.WindowId, _shutdown.Token);
+                // An entry with its own view (Makyx) selects the window inside that view: switch-client would move it onto the shared session.
+                if (item.TmuxView is not null) await TmuxClient.RunCommandAsync(pty, "select-window -t :" + window.Index.ToString(System.Globalization.CultureInfo.InvariantCulture), _shutdown.Token);
+                else await TmuxClient.SwitchToWindowAsync(pty, window.SessionId, window.WindowId, _shutdown.Token);
                 _tmuxAttached[id] = (window.SessionId, null);
                 StripSessionChanged(id, window.SessionId);
             }
