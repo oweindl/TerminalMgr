@@ -19,6 +19,7 @@ public partial class MainWindow
     {
         MakyxRuns.StopRequested += run => _ = StopMakyxRunAsync(run, emergency: false);
         MakyxRuns.EmergencyRequested += run => _ = StopMakyxRunAsync(run, emergency: true);
+        MakyxRuns.StartRunRequested += project => _ = StartMakyxRunAsync(project);
     }
 
     private bool AskMakyx(string question) =>
@@ -61,7 +62,7 @@ public partial class MainWindow
             var page = new MenuItem { Header = "Projektseite öffnen", IsEnabled = project.Link.Length > 0 };
             page.Click += (_, _) => OpenMakyxLink(project.Link);
             var session = new MenuItem { Header = "Neue Session …" };
-            session.Click += (_, _) => _ = StartMakyxSessionAsync(project);
+            session.Click += (_, _) => OpenNewMakyxSession(project);
             var run = new MenuItem { Header = "Lauf starten …" };
             run.Click += (_, _) => _ = StartMakyxRunAsync(project);
             entry.Items.Add(page); entry.Items.Add(session); entry.Items.Add(run);
@@ -98,18 +99,35 @@ public partial class MainWindow
         menu.Items.Add(waitingItem);
     }
 
-    private async Task StartMakyxSessionAsync(MakyxProject project)
+    /// <summary>"Neue Claude-Session" (Ctrl+N, "+ Session", "+" at a project, ⋯ › Projekte): one dialog for project, name, kind, machine and folder.</summary>
+    private void OpenNewMakyxSession(MakyxProject? project = null) => _ = StartMakyxSessionAsync(project);
+
+    private async Task StartMakyxSessionAsync(MakyxProject? preselected)
     {
-        var machines = (_makyx?.Machines() ?? []).GroupBy(MakyxControl.MachineValue, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
-        var dialog = new MakyxSessionDialog(project, machines) { Owner = this };
-        if (dialog.ShowDialog() != true) return;
+        if (_makyx is not { } monitor) { StatusText.Text = Makyx.Enabled ? "Makyx ist nicht verbunden." : "Makyx ist nicht eingerichtet (Einstellungen › Makyx-Leitstand)."; if (!Makyx.Enabled) OpenSettings(this, new RoutedEventArgs()); return; }
+        var projects = monitor.Projects();
+        if (projects.Count == 0) { _ = monitor.RefreshProjectsAsync(); StatusText.Text = "Makyx meldet (noch) keine Projekte. Bitte gleich noch einmal versuchen."; return; }
+        var machines = monitor.Machines().GroupBy(MakyxControl.MachineValue, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
+        var dialog = new MakyxSessionDialog(projects, preselected, machines) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Project is not { } project) return;
+        if (dialog.IsRun)
+        {
+            var items = dialog.Items;
+            await MakyxActionAsync("Lauf wird gestartet", c => c.StartRunAsync(project.Id, items, CancellationToken.None), "Lauf gestartet; er erscheint unter LÄUFE.");
+            return;
+        }
         MakyxRun? started = null;
-        bool ok = await MakyxActionAsync("Session wird gestartet", async c => started = await c.StartSessionAsync(project.Id, dialog.Machine, dialog.Agent, dialog.Model, CancellationToken.None),
+        bool ok = await MakyxActionAsync("Session wird gestartet",
+            async c => started = await c.StartSessionAsync(project.Id, dialog.Machine, dialog.Agent, dialog.Model, CancellationToken.None, dialog.ShortName, dialog.Folder, dialog.Message),
             "Session gestartet; das Terminal öffnet sich, sobald Makyx das tmux-Fenster meldet.");
         if (!ok) return;
         if (started is { Terminal.Available: true }) { await OpenMakyxTerminalAsync(started); return; }
         _makyxPendingSession = started?.Id;
     }
+
+    /// <summary>R in the window switcher on a Makyx window: renames the session in Makyx (which renames its tmux window).</summary>
+    private async Task<bool> RenameMakyxSessionAsync(MakyxRun run, string name) =>
+        await MakyxActionAsync("Session wird umbenannt", c => c.RenameSessionAsync(run.Id, name, CancellationToken.None), "Umbenannt in „" + MakyxNames.Normalize(name) + "“.");
 
     /// <summary>Called after every change of the monitor: opens the terminal of the session started from here once it has one.</summary>
     private void OpenPendingMakyxSession()

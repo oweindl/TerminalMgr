@@ -88,8 +88,17 @@ public sealed record ShortcutOptions
     public string Back { get; init; } = "Ctrl+<";
     /// <summary>Opens the command palette. Not Ctrl+K: that is "kill to end of line" in bash/readline.</summary>
     public string Palette { get; init; } = "Ctrl+Shift+K";
+    /// <summary>Opens "Neue Claude-Session" (note 16). Hides Ctrl+N (next history entry) from bash in the terminal; decided by Oliver on 09.11.2026.</summary>
+    public string NewSession { get; init; } = "Ctrl+N";
+    /// <summary>Shows the runs of Makyx (icon "Läufe").</summary>
+    public string Runs { get; init; } = "Ctrl+Shift+L";
+    /// <summary>Opens the window switcher of TerminalMgr (all tmux windows, grouped by session).</summary>
+    public string WindowSwitcher { get; init; } = "Ctrl+Shift+W";
 
     public ShortcutOptions Normalized() => this with {
+        NewSession = Shortcut.TryParse(NewSession, out var newSession) ? newSession.ToString() : "Ctrl+N",
+        Runs = Shortcut.TryParse(Runs, out var runs) ? runs.ToString() : "Ctrl+Shift+L",
+        WindowSwitcher = Shortcut.TryParse(WindowSwitcher, out var switcher) ? switcher.ToString() : "Ctrl+Shift+W",
         WindowModifier = ShortcutRules.WindowModifiers.Contains(WindowModifier) ? WindowModifier : "Ctrl",
         NextWindow = Shortcut.TryParse(NextWindow, out var next) ? next.ToString() : "Ctrl+Tab",
         PreviousWindow = Shortcut.TryParse(PreviousWindow, out var previous) ? previous.ToString() : "Ctrl+Shift+Tab",

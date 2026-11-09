@@ -218,9 +218,9 @@ internal static class MakyxTests
             var run = MakyxJson.ParseRuns(json, out _).Single();
             check(run.Id == "S-1a2b3c4d" && run.Kind == "session" && run.Project == "" && run.IsActive, "Session gelesen");
             check(run.Terminal.Available && run.Terminal.TmuxSocket == "makyx" && run.Terminal.TmuxWindow == "@3", "Terminal-Zuordnung");
-            check(MakyxControl.TerminalName(run) == "Makyx · freie Session · rechner-a", "Eintrag heißt nach Session und Rechner: " + MakyxControl.TerminalName(run));
-            check(MakyxControl.TerminalName(run with { Project = "ProtyxPulse" }) == "Makyx · ProtyxPulse · rechner-a", "Eintrag heißt nach Projekt und Rechner");
-            check(MakyxControl.TerminalName(run with { Project = "ProtyxPulse", Machine = null, Terminal = MakyxTerminal.None("x") }) == "Makyx · ProtyxPulse", "ohne Rechner nur das Projekt");
+            check(MakyxControl.TerminalName(run) == "freie Session · S-1a2b3c4d", "Eintrag heißt nach Session und Kennung (Fenster @3 ist kein Name): " + MakyxControl.TerminalName(run));
+            check(MakyxControl.TerminalName(run with { Project = "ProtyxPulse", ShortName = "ingest-api" }) == "ProtyxPulse · ingest-api", "Eintrag heißt nach Projekt und Kurzname");
+            check(MakyxControl.TerminalName(run with { Project = "p-7", ProjectName = "ProtyxPulse", Terminal = run.Terminal with { TmuxWindow = "worker-c64d" } }) == "ProtyxPulse · worker-c64d", "ohne Kurzname der Fenstername, Projektname vor Kennung");
         });
 
         test("Makyx: Neue Session – Rechner vorauswählen (Projekt-Rechner, sonst der einzige verbundene)", () =>

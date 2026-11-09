@@ -110,9 +110,10 @@ public sealed class MakyxClient : IDisposable
 
     // Writing actions (right "steuern"); Makyx logs each with the access. Ids are checked before they go into a path.
     /// <summary>Starts a terminal session; the answer is the session (with terminal) when Makyx returns it, else null.</summary>
-    public async Task<MakyxRun?> StartSessionAsync(string project, string? machine, string? agent, string? model, CancellationToken cancel)
+    public async Task<MakyxRun?> StartSessionAsync(string project, string? machine, string? agent, string? model, CancellationToken cancel,
+        string? name = null, MakyxFolder? folder = null, string? firstMessage = null)
     {
-        string body = await PostAsync("sessions", MakyxControl.SessionBody(project, machine, agent, model), cancel);
+        string body = await PostAsync("sessions", MakyxControl.SessionBody(project, machine, agent, model, name, folder, firstMessage), cancel);
         try { return MakyxJson.ParseStarted(body); } catch (System.Text.Json.JsonException) { return null; }
     }
 
@@ -126,14 +127,21 @@ public sealed class MakyxClient : IDisposable
 
     public Task EmergencyStopAsync(string runId, CancellationToken cancel) => PostAsync("laeufe/" + MakyxControl.PathId(runId) + "/nothalt", MakyxControl.EmergencyBody, cancel);
 
-    private async Task<string> PostAsync(string path, string json, CancellationToken cancel)
+    /// <summary>Renames a session (PATCH sessions/{id}, Makyx-PoC/17); Makyx renames its tmux window with it.</summary>
+    public Task RenameSessionAsync(string sessionId, string name, CancellationToken cancel) =>
+        SendAsync(HttpMethod.Patch, "sessions/" + MakyxControl.PathId(sessionId), MakyxControl.RenameBody(name), cancel);
+
+    private Task<string> PostAsync(string path, string json, CancellationToken cancel) => SendAsync(HttpMethod.Post, path, json, cancel);
+
+    private async Task<string> SendAsync(HttpMethod method, string path, string json, CancellationToken cancel)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
         try
         {
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var response = await _http.PostAsync(new Uri(_base, path), content, timeout.Token);
+            using var request = new HttpRequestMessage(method, new Uri(_base, path)) { Content = content };
+            using var response = await _http.SendAsync(request, timeout.Token);
             if (response.StatusCode is HttpStatusCode.Unauthorized) throw new MakyxException("Das Token wurde nicht angenommen (falsch oder widerrufen).", response.StatusCode);
             if (response.StatusCode is HttpStatusCode.TooManyRequests) throw new MakyxException("Makyx begrenzt die Abfragen; später erneut versuchen.", response.StatusCode);
             string body = await response.Content.ReadAsStringAsync(timeout.Token);

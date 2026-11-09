@@ -68,6 +68,24 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: true, $"tmux -L {ShellQuote(socket)} attach-session -t {ShellQuote(session + ":" + window)}");
     }
 
+    /// <summary>
+    /// Attach a tab to a window of the Makyx session through its own grouped viewing session (<see cref="MakyxTmux.NewViewName"/>):
+    /// <c>tmux -L s new-session -A -t session -s view ; set-option destroy-unattached on ; select-window -t view:window</c>. -A attaches when the
+    /// view still exists (reconnect). <paramref name="session"/> is a name or an id ($1), <paramref name="window"/> a name, an index or an id (@3).
+    /// </summary>
+    public static IReadOnlyList<string> MakyxViewAttachArguments(Profile profile, string socket, string session, string window, string view) =>
+        OverrideArguments(profile, interactive: true, MakyxViewCommand(socket, session, window, view));
+
+    public static string MakyxViewCommand(string socket, string session, string window, string view)
+    {
+        if (!MakyxName.IsMatch(socket)) throw new ArgumentException("Ungültiger tmux-Socket.");
+        if (!MakyxName.IsMatch(session) && !TmuxSessionParser.IsSessionId(session)) throw new ArgumentException("Ungültiger tmux-Name von Makyx.");
+        if (!MakyxName.IsMatch(window) && !TmuxWindowParser.IsWindowId(window)) throw new ArgumentException("Ungültiger tmux-Name von Makyx.");
+        if (!MakyxTmux.IsOwnView(view)) throw new ArgumentException("Ungültiger Name der Ansicht.");
+        string tmux = Tmux(socket);
+        return $"{tmux} new-session -A -t {ShellQuote(session)} -s {ShellQuote(view)} \\; set-option -t {ShellQuote(view)} destroy-unattached on \\; select-window -t {ShellQuote(view + ":" + window)}";
+    }
+
     /// <summary>Prints the effective OpenSSH settings (ssh -G), e.g. the RemoteCommand from the config.</summary>
     public static IReadOnlyList<string> EffectiveConfigArguments(Profile profile)
     {

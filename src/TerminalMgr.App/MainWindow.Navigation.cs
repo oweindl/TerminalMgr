@@ -32,6 +32,9 @@ public partial class MainWindow
     {
         if (_closing) return;
         if (action == "palette") { OpenPaletteFromHost(); return; }
+        if (action == "newSession") { OpenNewMakyxSession(); return; }
+        if (action == "runs") { ShowRuns(); return; }
+        if (action == "windowSwitcher") { if (Selected is { } current) OpenWindowSwitcher(current); else StatusText.Text = "Zuerst einen Server auswählen."; return; }
         await _navigationGate.WaitAsync(_shutdown.Token).ConfigureAwait(true);
         try
         {

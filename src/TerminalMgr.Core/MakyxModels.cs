@@ -12,15 +12,21 @@ public sealed record MakyxTerminal(bool Available, string? Reason, string? Machi
     public static MakyxTerminal None(string reason) => new(false, reason, null, null, null, null, null);
 }
 
+/// <param name="ShortName">Speaking short name of the session (kurzname, e.g. "ingest-api"); null when Makyx does not send one yet.</param>
+/// <param name="Role">Role of the agent (rolle: worker, planer …), null when unknown.</param>
+/// <param name="ProjectName">Display name of the project (projekt_name) when it differs from the project id.</param>
 public sealed record MakyxRun(string Id, string Uuid, string Kind, string Title, MakyxStatus Status, string Project, string? Machine, DateTimeOffset? Start,
-    DateTimeOffset? End, int? DurationSeconds, double? CostUsd, string Link, DateTimeOffset? Changed, MakyxTerminal Terminal)
+    DateTimeOffset? End, int? DurationSeconds, double? CostUsd, string Link, DateTimeOffset? Changed, MakyxTerminal Terminal,
+    string? ShortName = null, string? Role = null, string? ProjectName = null)
 {
     public bool IsActive => Status is MakyxStatus.Working or MakyxStatus.Waiting;
 }
 
 public sealed record MakyxWaiting(string Id, string Kind, string SubKind, string Title, string? Project, DateTimeOffset? Since, int? AgeSeconds, string Link, string? Reference);
 
-public sealed record MakyxMachine(string Id, string Name, string Status, bool Connected, string? Version, string? SshTarget, string? TmuxSocket);
+/// <param name="RamFreeMb">Free memory of the machine in MB (ram_frei_mb), null when Makyx does not report it.</param>
+public sealed record MakyxMachine(string Id, string Name, string Status, bool Connected, string? Version, string? SshTarget, string? TmuxSocket,
+    int? RamFreeMb = null, int? RamTotalMb = null);
 
 public sealed record MakyxHello(string Version, string Vault, string Client);
 
@@ -56,15 +62,30 @@ public static class MakyxJson
         return new(true, null, Str(e, "rechner"), Str(e, "ssh_ziel"), Str(e, "tmux_socket"), Str(e, "tmux_session"), Str(e, "tmux_fenster"));
     }
 
+    /// <summary>
+    /// The terminal of a run: the object "terminal" (API v1); without it the newer object "tmux" {socket, session, fenster_index, fenster_name}
+    /// (Makyx-PoC/17), which only exists while the window does.
+    /// </summary>
+    private static MakyxTerminal RunTerminal(JsonElement e)
+    {
+        if (e.TryGetProperty("terminal", out var t)) return ParseTerminal(t);
+        if (e.TryGetProperty("tmux", out var x) && x.ValueKind == JsonValueKind.Object && Str(x, "socket") is { } socket && Str(x, "session") is { } session
+            && (Str(x, "fenster_name") ?? Int(x, "fenster_index")?.ToString(CultureInfo.InvariantCulture)) is { } window)
+            return new(true, null, Str(e, "rechner"), null, socket, session, window);
+        return MakyxTerminal.None("unbekannt");
+    }
+
     public static MakyxRun ParseRun(JsonElement e) => new(Str(e, "id") ?? "?", Str(e, "uuid") ?? Str(e, "id") ?? "?", Str(e, "art") ?? "", Str(e, "titel") ?? "", ParseStatus(Str(e, "status")),
         Str(e, "projekt") ?? "", Str(e, "rechner"), Time(e, "beginn"), Time(e, "ende"), Int(e, "dauer_s"), Dbl(e, "kosten_usd"), SafeLink(Str(e, "link")), Time(e, "geaendert_am"),
-        e.TryGetProperty("terminal", out var t) ? ParseTerminal(t) : MakyxTerminal.None("unbekannt"));
+        RunTerminal(e), MakyxNames.IsValid(Str(e, "kurzname")) ? Str(e, "kurzname") : null, Str(e, "rolle") is { Length: > 0 and <= 40 } role ? role : null,
+        Str(e, "projekt_name") is { Length: > 0 and <= 120 } projectName ? projectName : null);
 
     public static MakyxWaiting ParseWaitingItem(JsonElement e) => new(Str(e, "id") ?? "?", Str(e, "art") ?? "", Str(e, "unterart") ?? "", Str(e, "titel") ?? "", Str(e, "projekt"),
         Time(e, "seit"), Int(e, "alter_s"), SafeLink(Str(e, "link")), Str(e, "bezug"));
 
     public static MakyxMachine ParseMachine(JsonElement e) => new(Str(e, "id") ?? "?", Str(e, "name") ?? "", Str(e, "status") ?? "", Bool(e, "verbunden"), Str(e, "version"), Str(e, "ssh_ziel"),
-        e.TryGetProperty("tmux", out var t) && t.ValueKind == JsonValueKind.Object ? Str(t, "socket") : null);
+        e.TryGetProperty("tmux", out var t) && t.ValueKind == JsonValueKind.Object ? Str(t, "socket") : null,
+        Int(e, "ram_frei_mb") is >= 0 and var free ? free : null, Int(e, "ram_gesamt_mb") is > 0 and var total ? total : null);
 
     private static IReadOnlyList<T> List<T>(string json, string property, Func<JsonElement, T> parse, out DateTimeOffset? time)
     {
@@ -87,7 +108,8 @@ public static class MakyxJson
         string id = IdText(e, "id") ?? "?";
         string? repo = Str(e, "repository") ?? Str(e, "repo");
         if (repo is null && e.ValueKind == JsonValueKind.Object && e.TryGetProperty("repository", out var r) && r.ValueKind == JsonValueKind.Object) repo = Str(r, "pfad") ?? Str(r, "url") ?? Str(r, "name");
-        return new(id, Str(e, "name") ?? id, repo, Str(e, "quelle"), Str(e, "rechner"), Int(e, "instanzen_laufend") ?? 0, Int(e, "gates_offen") ?? 0, SafeLink(Str(e, "link")));
+        return new(id, Str(e, "name") ?? id, repo, Str(e, "quelle"), Str(e, "rechner"), Int(e, "instanzen_laufend") ?? 0, Int(e, "gates_offen") ?? 0, SafeLink(Str(e, "link")),
+            Time(e, "zuletzt_aktiv"), Str(e, "modell") ?? Str(e, "standardmodell"));
     }
 
     public static IReadOnlyList<MakyxProject> ParseProjects(string json) => List(json, "projekte", ParseProject, out _);
