@@ -66,7 +66,7 @@ public static class PaletteBuilder
         for (int i = 0; i < Math.Min(clipboard.Count, MaxClipboardEntries); i++)
         {
             string text = clipboard[i];
-            string firstLine = text.Split('\n', 2)[0].Trim();
+            string firstLine = MakyxConfigText.LooksLikeConfig(text) ? MakyxConfigText.MaskedLabel : text.Split('\n', 2)[0].Trim();
             if (firstLine.Length == 0) continue;
             items.Add(new($"clip:{i}", ClipboardGroup, firstLine.Length > 90 ? firstLine[..90] + "…" : firstLine, text.Contains('\n') ? $"{text.Count(c => c == '\n') + 1} Zeilen, Enter fügt ein" : "Enter fügt ein", "", false, true));
         }

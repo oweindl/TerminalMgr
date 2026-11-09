@@ -228,6 +228,58 @@ internal static class Program
         Console.WriteLine("PASS Dark combo boxes: own template, readable text, three start modes");
     }
 
+    /// <summary>Settings › Makyx-Leitstand: paste field, preview, errors, the question before replacing, collapsed manual fields, hidden configuration in the clipboard list.</summary>
+    private static void TestMakyxConfigImport()
+    {
+        const string Fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        string json = "{\"format\":\"makyx-leitstand\",\"version\":1,\"makyx\":{\"name\":\"Makyx Beispiel\",\"oberflaeche\":\"https://makyx.example:8800\",\"api\":\"https://makyx.example:8801/api/leitstand/v1/\"},"
+            + "\"ca\":{\"fingerprint_sha256\":\"" + Fingerprint + "\"},\"zugang\":{\"id\":\"z1\",\"name\":\"TerminalMgr Desktop\"},\"kopplung\":{\"code\":\"einmalcode-0001\",\"gueltig_bis\":\""
+            + DateTimeOffset.UtcNow.AddMinutes(10).ToString("yyyy-MM-ddTHH:mm:ssZ") + "\"}}";
+        string text = MakyxConfigText.Encode(json);
+        var dialog = new SettingsDialog(new AppSettings());
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        T Field<T>(string name) => (T)typeof(SettingsDialog).GetField(name, flags)!.GetValue(dialog)!;
+        var box = Field<TextBox>("_makyxConfig");
+        var previewBox = Field<Border>("_makyxPreviewBox");
+        var preview = Field<TextBlock>("_makyxPreview");
+        var result = Field<TextBlock>("_makyxResult");
+        var read = typeof(SettingsDialog).GetMethod("ReadMakyxConfig", flags)!;
+        var apply = typeof(SettingsDialog).GetMethod("ApplyMakyxConfigAsync", flags)!;
+
+        box.Text = "hallo";
+        read.Invoke(dialog, []);
+        Check(previewBox.Visibility == Visibility.Collapsed && result.Text.Contains("keine Makyx-Konfiguration"), "A foreign text shows an error and no preview: " + result.Text);
+        box.Text = text[..(text.Length / 2)];
+        read.Invoke(dialog, []);
+        Check(previewBox.Visibility == Visibility.Collapsed && (result.Text.Contains("unvollständig") || result.Text.Contains("beschädigt")), "A cut text is reported: " + result.Text);
+
+        box.Text = text;
+        read.Invoke(dialog, []);
+        Check(previewBox.Visibility == Visibility.Visible, "A good text shows the preview");
+        Check(preview.Text.Contains("Makyx Beispiel") && preview.Text.Contains("https://makyx.example:8801/api/leitstand/v1/") && preview.Text.Contains("TerminalMgr Desktop")
+            && preview.Text.Contains(MakyxConfigText.Group(Fingerprint)) && preview.Text.Contains("Einmal-Code") && !preview.Text.Contains("einmalcode"), "The preview shows name, addresses, access, fingerprint and kind, never the code: " + preview.Text);
+
+        // An existing connection is only replaced after the question; "no" changes and redeems nothing.
+        Field<TextBox>("_makyxAddress").Text = "https://rechner-a.example:8801";
+        Field<CheckBox>("_makyxEnabled").IsChecked = true;
+        string? asked = null;
+        dialog.ConfirmReplace = question => { asked = question; return false; };
+        ((Task)apply.Invoke(dialog, [])!).GetAwaiter().GetResult();
+        Check(asked == "Bestehenden Leitstand ersetzen?" && result.Text == "Nicht ersetzt." && Field<TextBox>("_makyxAddress").Text == "https://rechner-a.example:8801" && box.Text == text, "The question is asked, the answer no changes nothing");
+
+        // The manual fields are tucked away behind a toggle.
+        Check(Field<TextBox>("_makyxFingerprint").Visibility == Visibility.Collapsed && Field<PasswordBox>("_makyxToken").Visibility == Visibility.Collapsed && Field<TextBox>("_makyxAddress").Visibility == Visibility.Collapsed, "Manual setup is collapsed");
+        Check(Field<CheckBox>("_makyxEnabled").Visibility == Visibility.Visible && Field<CheckBox>("_makyxNotify").Visibility == Visibility.Visible, "The switch and the notification stay visible");
+
+        // The clipboard list never shows the configuration, but copying and pasting still use the real text.
+        var entry = new ClipboardEntry(text, "Windows", DateTimeOffset.Now);
+        var item = new ClipItem(entry);
+        Check(item.Line1 == MakyxConfigText.MaskedLabel && item.Line2 is null && item.ShownText == MakyxConfigText.MaskedLabel && !item.IsTruncated && item.FullText == text && !item.Line1.Contains("makyx-leitstand:"), "Masked in the list, real text kept");
+        var plain = new ClipItem(new ClipboardEntry("git status --short", "devbox", DateTimeOffset.Now));
+        Check(plain.Line1 == "git status --short" && plain.ShownText == "git status --short", "Other entries are unchanged");
+        Console.WriteLine("PASS Makyx configuration import: field, preview, errors, question before replacing, manual fields tucked away, masked in the clipboard list");
+    }
+
     private static void TestWindowStrip()
     {
         var main = new MainWindow();
@@ -750,6 +802,7 @@ internal static class Program
             main.UpdateLayout();
             Console.WriteLine("PASS WPF main window, icon, profile, tmux and settings dialog, clipboard item template load");
             TestComboBoxTheme();
+            TestMakyxConfigImport();
             TestClipboardCompactDesign();
             TestAiSubscriptions();
             TestMakyxDashboard();

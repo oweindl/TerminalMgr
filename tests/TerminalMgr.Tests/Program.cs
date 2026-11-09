@@ -39,6 +39,7 @@ void Test(string name, Action action)
 }
 MakyxTests.Run(Test, Check);
 MakyxClientTests.Run(Test, Check);
+MakyxConfigTests.Run(Test, Check);
 // The real SSH checks (--ssh-smoke) use an SSH alias of the tester's own, never one that is written into the repository.
 string sshHost = Environment.GetEnvironmentVariable("TERMINALMGR_SSH_TEST_HOST") ?? "";
 var root = Path.Combine(Path.GetTempPath(), "TerminalMgr-tests-" + Guid.NewGuid().ToString("N"));

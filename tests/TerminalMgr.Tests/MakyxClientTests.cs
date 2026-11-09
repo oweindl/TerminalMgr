@@ -7,7 +7,7 @@ using TerminalMgr.Windows;
 /// <summary>The Makyx client against a small local HTTP server written with TcpListener (no admin rights, no certificate needed): token header, status codes, event stream, monitor with reconnect.</summary>
 internal static class MakyxClientTests
 {
-    private sealed record Req(string Path, string Query, string? Authorization);
+    private sealed record Req(string Path, string Query, string? Authorization, string Method = "GET", string Body = "");
 
     /// <summary>Answers requests one by one; the handler returns status, content type and body.</summary>
     private sealed class FakeMakyx : IDisposable
@@ -47,7 +47,12 @@ internal static class MakyxClientTests
                 string[] first = lines[0].Split(' ');
                 string target = first[1];
                 int q = target.IndexOf('?');
-                var req = new Req(q < 0 ? target : target[..q], q < 0 ? "" : target[(q + 1)..], lines.FirstOrDefault(l => l.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))?[14..].Trim());
+                int bodyLength = lines.Where(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)).Select(l => int.TryParse(l[15..].Trim(), out int n) ? n : 0).FirstOrDefault();
+                var bodyBytes = new byte[Math.Min(bodyLength, 65536)];
+                int got = 0;
+                while (got < bodyBytes.Length) { int n = await stream.ReadAsync(bodyBytes.AsMemory(got)); if (n == 0) break; got += n; }
+                string requestBody = Encoding.UTF8.GetString(bodyBytes, 0, got);
+                var req = new Req(q < 0 ? target : target[..q], q < 0 ? "" : target[(q + 1)..], lines.FirstOrDefault(l => l.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))?[14..].Trim(), first[0], requestBody);
                 lock (Requests) Requests.Add(req);
                 var (status, type, body) = _handler(req);
                 byte[] payload = Encoding.UTF8.GetBytes(body);
@@ -137,6 +142,48 @@ internal static class MakyxClientTests
             }
             lock (states) check(states.Contains("connected") && states.Contains("connecting"), "Verbindungszustände werden gemeldet");
             check(monitor.Runs().Count == 1 && monitor.Waiting().Count == 1, "nach der Wiederverbindung gilt wieder der volle Stand des Servers");
+        });
+
+        test("Makyx-Kopplung: der Einmal-Code wird gegen das Token getauscht, ohne Token im Kopf; Fehler sind verständlich", () =>
+        {
+            const string Code = "einmalcode-0001";
+            const string NewToken = "mkl_neues_token_0001";
+            int answer = 200;
+            using var server = new FakeMakyx(r => r.Path == "/api/leitstand/v1/kopplung" && r.Method == "POST"
+                ? answer switch
+                {
+                    200 => r.Body.Contains("\"code\":\"" + Code + "\"") ? (200, "application/json", "{\"token\":\"" + NewToken + "\",\"zugang\":\"Test\"}") : (401, "application/json", "{}"),
+                    201 => (200, "application/json", "{\"ok\":true}"),
+                    202 => (200, "application/json", "keine json"),
+                    _ => (answer, "application/json", "{}")
+                }
+                : (404, "application/json", "{}"));
+            var options = new MakyxOptions { Enabled = true, Address = server.Address };
+            string Redeem(string code) => MakyxClient.RedeemAsync(options, code, CancellationToken.None).GetAwaiter().GetResult();
+            check(Redeem(Code) == NewToken, "das Token kommt zurück");
+            lock (server.Requests)
+            {
+                var sent = server.Requests.Last();
+                check(sent.Method == "POST" && sent.Authorization is null && sent.Body == "{\"code\":\"" + Code + "\"}" && !sent.Path.Contains(Code) && !sent.Query.Contains(Code), "POST ohne Authorization, der Code steht nur im Text der Anfrage");
+            }
+            string Failure(int status, string code = Code)
+            {
+                answer = status;
+                try { Redeem(code); return "kein Fehler"; }
+                catch (MakyxClient.MakyxException ex) { return ex.Message; }
+            }
+            check(Failure(410) is { } gone && gone.Contains("abgelaufen") && gone.Contains("neu erzeugen"), "410: abgelaufen");
+            check(Failure(401) is { } used && used.Contains("schon benutzt") && used.Contains("neu erzeugen") && !used.Contains(Code), "401: ungültig oder schon benutzt, ohne den Code zu nennen");
+            check(Failure(429) is { } limited && limited.Contains("begrenzt"), "429: Abfragegrenze");
+            check(Failure(500) is { } broken && broken.Contains("500"), "500");
+            check(Failure(201) is { } noToken && noToken.Contains("kein Token") && !noToken.Contains(NewToken), "Antwort ohne Token");
+            check(Failure(202) is { } noJson && noJson.Contains("kein Token"), "Antwort ohne JSON");
+            answer = 200;
+            check(Failure(200, "anderer-code-0002") is { } wrongCode && wrongCode.Contains("schon benutzt"), "falscher Code wird vom Server abgelehnt");
+            int closedPort;
+            using (var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0)) { probe.Start(); closedPort = ((IPEndPoint)probe.LocalEndpoint).Port; }
+            try { MakyxClient.RedeemAsync(new MakyxOptions { Address = $"http://127.0.0.1:{closedPort}" }, Code, CancellationToken.None).GetAwaiter().GetResult(); check(false, "ohne Server muss es scheitern"); }
+            catch (MakyxClient.MakyxException ex) { check(ex.Message.Contains("nicht erreichbar") && !ex.Message.Contains(Code), "Makyx nicht erreichbar: " + ex.Message); }
         });
 
         test("Makyx-Monitor: falsches Token wird als Fehler gemeldet, nichts stürzt ab", () =>
