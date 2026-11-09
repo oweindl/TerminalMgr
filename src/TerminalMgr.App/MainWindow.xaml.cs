@@ -266,7 +266,8 @@ public partial class MainWindow : Window
                     item.Status = "Beendet · Exit " + code;
                     Post(new { type = "output", id, data = "\r\n\x1b[90m[SSH beendet, Exit " + code + "]\x1b[0m\r\n" });
                     await owned.DisposeAsync();
-                    ScheduleReconnect(item, code, attachedId);
+                    if (item.Temporary) DropTemporary(item, "Sitzung beendet (Exit " + code + ")");
+                    else ScheduleReconnect(item, code, attachedId);
                 }
             });
             _sessions[id] = pty;
@@ -376,6 +377,9 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>"Trennen" by the user: a temporary entry then leaves the list (it can not be opened again).</summary>
+    private async Task DisconnectByUserAsync(ProfileItem item) { await DisconnectAsync(item); DropTemporary(item, "getrennt"); }
+
     private void FlushOutput()
     {
         // Bounded queue applies backpressure to chatty remote processes.
@@ -396,7 +400,7 @@ public partial class MainWindow : Window
     }
     private async void ConnectAutomatic(object sender, RoutedEventArgs e) => await ConnectAutomaticAsync();
     private async void ConnectSelected(object sender, RoutedEventArgs e) { if (Selected is { } item) await ConnectAsync(item); }
-    private async void DisconnectSelected(object sender, RoutedEventArgs e) { if (Selected is { } item) await DisconnectAsync(item); }
+    private async void DisconnectSelected(object sender, RoutedEventArgs e) { if (Selected is { } item) await DisconnectByUserAsync(item); }
     private async void ProfileDoubleClick(object sender, MouseButtonEventArgs e) { if (Selected is { } item) await ConnectAsync(item); }
 
     private void ProfileSelected(object sender, SelectionChangedEventArgs e)
@@ -599,7 +603,7 @@ public partial class MainWindow : Window
     }
     private async void ContextDisconnect(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem { Tag: ProfileItem item }) await DisconnectAsync(item);
+        if (sender is MenuItem { Tag: ProfileItem item }) await DisconnectByUserAsync(item);
     }
     private void ContextEdit(object sender, RoutedEventArgs e)
     {

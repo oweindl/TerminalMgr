@@ -335,6 +335,13 @@ internal static class Program
         var items = (System.Collections.IList)profiles.ItemsSource;
         for (int i = 0; i < 11; i++) items.Add(new ProfileItem(new Profile { Name = "s" + i, Destination = "s" + i }));
         Check(((ProfileItem)items[0]!).AltLabel == "Alt 1" && ((ProfileItem)items[8]!).AltLabel == "Alt 9" && ((ProfileItem)items[9]!).AltLabel == "" && ((ProfileItem)items[9]!).AltVisibility == Visibility.Collapsed, "Alt labels in the server list");
+        // A temporary Makyx entry whose session ended leaves the list (it can not be opened again); a normal entry stays.
+        var drop = typeof(MainWindow).GetMethod("DropTemporary", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var dead = new ProfileItem(new Profile { Name = "Makyx · Beispiel · rechner-a", Destination = "rechner-a" }) { Temporary = true };
+        items.Add(dead); profiles.SelectedItem = dead;
+        drop.Invoke(main, [dead, "Sitzung beendet (Exit 1)"]);
+        drop.Invoke(main, [(ProfileItem)items[0]!, "getrennt"]);
+        Check(!items.Contains(dead) && items.Count == 11 && profiles.SelectedItem is ProfileItem, "an ended temporary entry is removed and another entry selected; normal entries stay");
 
         if (Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") is { Length: > 0 } directory)
         {

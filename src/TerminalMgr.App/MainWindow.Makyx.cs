@@ -216,6 +216,24 @@ public partial class MainWindow
         catch (ArgumentException) { StatusText.Text = "Der tmux-Name von Makyx ist ungültig."; }
     }
 
+    /// <summary>
+    /// A temporary entry (Makyx instance or "Makyx · server") whose connection ended: it can not be opened again (the tmux window is
+    /// usually gone), so it leaves the list together with its terminal and tab instead of staying there as a dead entry.
+    /// </summary>
+    private void DropTemporary(ProfileItem item, string reason)
+    {
+        if (!item.Temporary || _closing || !_profiles.Contains(item)) return;
+        string id = item.Profile.Id;
+        CancelReconnect(id, reset: true);
+        _reconnect.Remove(id);
+        if (_terminals.Remove(id)) Post(new { type = "remove", id });
+        bool wasSelected = ReferenceEquals(Selected, item);
+        _profiles.Remove(item);
+        if (wasSelected)
+            ProfilesList.SelectedItem = _profiles.FirstOrDefault(p => p.Connection == ConnectionState.Connected) ?? _profiles.FirstOrDefault();
+        StatusText.Text = item.Name + ": " + reason + " – Eintrag entfernt.";
+    }
+
     private void DisposeMakyx() { _makyxClock?.Stop(); _makyx?.Dispose(); _makyx = null; }
 
     /// <summary>Palette ("makyx:ID" opens the page, "makyxterm:ID" the terminal); false for any other id.</summary>
