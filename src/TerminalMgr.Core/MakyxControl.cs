@@ -120,6 +120,34 @@ public static class MakyxControl
     public static bool IsStoppable(MakyxRun run) => run.IsActive && run.Kind != "session";
 
     /// <summary>The menu text of a project: "Name · 2 laufen · 1 Gate".</summary>
+    /// <summary>Name of the terminal entry of a Makyx instance, "Makyx · Projekt · Rechner", so the server list shows where it runs.</summary>
+    public static string TerminalName(MakyxRun run)
+    {
+        string project = run.Project.Length > 0 ? run.Project : run.Kind == "session" ? "freie Session" : run.Id;
+        string? machine = run.Terminal.Machine ?? run.Machine;
+        return MakyxTmux.GroupPrefix + project + (machine is { Length: > 0 } ? " · " + machine : "");
+    }
+
+    /// <summary>What "Neue Session" sends as rechner: the machine's name, its id when it has none.</summary>
+    public static string MachineValue(MakyxMachine machine) => machine.Name.Length > 0 ? machine.Name : machine.Id;
+
+    /// <summary>The line in the machine list of "Neue Session".</summary>
+    public static string MachineLabel(MakyxMachine machine) => MachineValue(machine) + (machine.Connected ? "" : " · nicht verbunden");
+
+    /// <summary>
+    /// The machine "Neue Session" preselects: the project's machine (by id or name), otherwise the only connected one, otherwise the
+    /// first; -1 when Makyx reports none (Makyx then chooses).
+    /// </summary>
+    public static int PreferredMachine(IReadOnlyList<MakyxMachine> machines, string? projectMachine)
+    {
+        if (machines.Count == 0) return -1;
+        if (projectMachine is { Length: > 0 })
+            for (int i = 0; i < machines.Count; i++)
+                if (string.Equals(machines[i].Id, projectMachine, StringComparison.OrdinalIgnoreCase) || string.Equals(machines[i].Name, projectMachine, StringComparison.OrdinalIgnoreCase)) return i;
+        var connected = machines.Select((m, i) => (m, i)).Where(x => x.m.Connected).ToList();
+        return connected.Count == 1 ? connected[0].i : 0;
+    }
+
     public static string ProjectText(MakyxProject p)
     {
         var parts = new List<string> { p.Name };

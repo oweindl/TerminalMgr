@@ -218,6 +218,20 @@ internal static class MakyxTests
             var run = MakyxJson.ParseRuns(json, out _).Single();
             check(run.Id == "S-1a2b3c4d" && run.Kind == "session" && run.Project == "" && run.IsActive, "Session gelesen");
             check(run.Terminal.Available && run.Terminal.TmuxSocket == "makyx" && run.Terminal.TmuxWindow == "@3", "Terminal-Zuordnung");
+            check(MakyxControl.TerminalName(run) == "Makyx · freie Session · rechner-a", "Eintrag heißt nach Session und Rechner: " + MakyxControl.TerminalName(run));
+            check(MakyxControl.TerminalName(run with { Project = "ProtyxPulse" }) == "Makyx · ProtyxPulse · rechner-a", "Eintrag heißt nach Projekt und Rechner");
+            check(MakyxControl.TerminalName(run with { Project = "ProtyxPulse", Machine = null, Terminal = MakyxTerminal.None("x") }) == "Makyx · ProtyxPulse", "ohne Rechner nur das Projekt");
+        });
+
+        test("Makyx: Neue Session – Rechner vorauswählen (Projekt-Rechner, sonst der einzige verbundene)", () =>
+        {
+            MakyxMachine M(string id, string name, bool connected) => new(id, name, connected ? "online" : "offline", connected, null, null, null);
+            check(MakyxControl.PreferredMachine([], "rechner-a") == -1, "ohne Rechner wählt Makyx");
+            check(MakyxControl.PreferredMachine([M("r1", "rechner-a", true)], null) == 0, "ein einziger Rechner ist vorausgewählt");
+            check(MakyxControl.PreferredMachine([M("r1", "rechner-a", false), M("r2", "rechner-b", true)], null) == 1, "sonst der einzige verbundene");
+            check(MakyxControl.PreferredMachine([M("r1", "rechner-a", true), M("r2", "rechner-b", true)], "R2") == 1, "Projekt-Rechner nach Kennung");
+            check(MakyxControl.PreferredMachine([M("r1", "rechner-a", true), M("r2", "rechner-b", true)], "rechner-a") == 0, "Projekt-Rechner nach Name");
+            check(MakyxControl.MachineValue(M("r1", "", true)) == "r1" && MakyxControl.MachineLabel(M("r1", "rechner-a", false)) == "rechner-a · nicht verbunden", "Wert und Anzeige");
         });
 
         test("Makyx: Projekte lesen (Kennung als Text oder Zahl, Zähler, nur sichere Links)", () =>
