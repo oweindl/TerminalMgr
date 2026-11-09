@@ -21,8 +21,8 @@ public sealed class TmuxSessionQuery
     }
 
     /// <summary>All windows of all sessions. Works whether or not the server is connected in TerminalMgr.</summary>
-    public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
-        TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
+    public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default, string? socket = null) =>
+        TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile, socket), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
     /// <summary>One frame: the screen of every window of one session; <paramref name="sessionTarget"/> is a session ID ($1) or name.</summary>
     public async Task<WindowPoll> StripAsync(Profile profile, string sessionTarget, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>

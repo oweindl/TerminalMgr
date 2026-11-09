@@ -34,12 +34,13 @@ public static class WindowStripParser
     /// <paramref name="loop"/> second (0 = a single frame). Plain sh, so it works whatever the login shell is. When the SSH connection
     /// ends, the loop ends with it.
     /// </summary>
-    public static string Script(string sessionTarget, int loop = 0)
+    public static string Script(string sessionTarget, int loop = 0, string? socket = null)
     {
         string t = SshCommand.ShellQuote(sessionTarget);
-        string frame = $"echo '{NowMarker}'$(date +%s); tmux list-windows -t {t} -F {SshCommand.ShellQuote(Format)} || exit 1; " +
-                       $"for w in $(tmux list-windows -t {t} -F '#{{window_id}}'); do echo '{ScreenMarker}'$w; " +
-                       $"tmux capture-pane -p -t \"$w\" | tail -n {ScreenLines} | cut -c1-{ScreenWidth}; done; echo '{EndMarker}'";
+        string tmux = SshCommand.Tmux(socket);
+        string frame = $"echo '{NowMarker}'$(date +%s); {tmux} list-windows -t {t} -F {SshCommand.ShellQuote(Format)} || exit 1; " +
+                       $"for w in $({tmux} list-windows -t {t} -F '#{{window_id}}'); do echo '{ScreenMarker}'$w; " +
+                       $"{tmux} capture-pane -p -t \"$w\" | tail -n {ScreenLines} | cut -c1-{ScreenWidth}; done; echo '{EndMarker}'";
         return loop <= 0 ? frame : $"while :; do {frame}; sleep {loop}; done";
     }
 

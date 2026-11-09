@@ -17,6 +17,11 @@ internal static class MakyxTests
 
     private static string Event(string name, string data, int id) => $"id: {id}\nevent: {name}\ndata: {data}\n\n";
 
+    private static bool Throws(Action action)
+    {
+        try { action(); return false; } catch (ArgumentException) { return true; }
+    }
+
     public static void Run(Action<string, Action> test, Action<bool, string> check)
     {
         test("Makyx: API-JSON wird zu Läufen, Status, Terminal und Kosten", () =>
@@ -139,6 +144,110 @@ internal static class MakyxTests
                 try { SshCommand.MakyxTmuxAttachArguments(profile, s, se, w); } catch (ArgumentException) { refused = true; }
                 check(refused, $"abgelehnt: {s}/{se}/{w}");
             }
+        });
+
+        test("Makyx: Fenster auf dem eigenen Socket werden abgefragt, ohne Ansichts-Doppel, und dem Server zugeordnet", () =>
+        {
+            var profile = new Profile { Id = "p1", Name = "rechner-a", Destination = "benutzer@rechner-a" };
+            check(SshCommand.TmuxWindowsArguments(profile, "makyx")[^1].StartsWith("tmux -L 'makyx' list-windows -a -F "), "Abfrage mit Socket");
+            check(SshCommand.TmuxWindowsArguments(profile)[^1].StartsWith("tmux list-windows -a -F "), "ohne Socket wie bisher");
+            check(SshCommand.TmuxAttachArguments(profile, "$1", "@3", "makyx")[^1] == "tmux -L 'makyx' attach-session -t '$1:@3'", "Anhängen mit Socket");
+            string script = WindowStripParser.Script("$1", 1, "makyx");
+            check(script.Contains("tmux -L 'makyx' list-windows -t") && script.Contains("tmux -L 'makyx' capture-pane") && !script.Contains("; tmux list-windows"), "Fensterleiste fragt denselben Socket: " + script);
+            bool refused = false;
+            try { SshCommand.TmuxWindowsArguments(profile, "ma'kyx"); } catch (ArgumentException) { refused = true; }
+            check(refused, "ungültiger Socket wird abgelehnt");
+
+            string output = string.Join("\n",
+                "$0\t@0\t0\t1\tmakyx\tuebersicht\tsleep",
+                "$0\t@1\t1\t0\tmakyx\tlauf9-bau\tclaude",
+                "$0\t@2\t2\t0\tmakyx\tsession-frei\tclaude",
+                "$3\t@1\t1\t1\tansicht-f9363\tlauf9-bau\tclaude",
+                "$4\t@2\t2\t1\tansicht-0aa12\tsession-frei\tclaude");
+            var sessions = MakyxTmux.Sessions(TmuxWindowParser.Parse(output));
+            check(sessions.Count == 1 && sessions[0].Name == "Makyx · makyx" && sessions[0].Id == "$0", "eine Session, Ansichten fallen weg: " + string.Join(",", sessions.Select(s => s.Name)));
+            check(sessions[0].Windows.Select(w => w.Name).SequenceEqual(["lauf9-bau", "session-frei"]), "zwei Fenster, Platzhalter ohne Programm fehlt");
+
+            var other = new Profile { Id = "p2", Name = "rechner-b", Destination = "rechner-b" };
+            var machines = new[] {
+                new MakyxMachine("m1", "makyx-rechner-a", "verbunden", true, "1.0", "benutzer@rechner-a", "makyx"),
+                new MakyxMachine("m2", "makyx-rechner-c", "verbunden", true, "1.0", "rechner-c", "makyx"),
+                new MakyxMachine("m3", "rechner-b", "verbunden", true, "1.0", "rechner-b", null) };
+            check(MakyxTmux.SocketsFor(profile, [profile, other], machines).SequenceEqual(["makyx"]), "Rechner über das SSH-Ziel zugeordnet");
+            check(MakyxTmux.SocketsFor(other, [profile, other], machines).Count == 0, "Rechner ohne tmux-Socket liefert nichts");
+        });
+
+        test("Makyx-Fenster: nur Makyx-Seiten, alles andere in den Browser; eigene CA nur mit passendem Fingerprint", () =>
+        {
+            check(MakyxBrowserRules.Origin("https://makyx.example:8800/v/makyx/lauf/L-001") == "https://makyx.example:8800", "Herkunft mit Port");
+            check(MakyxBrowserRules.Origin("http://Makyx.Example/x") == "http://makyx.example:80", "Standardport, Kleinschreibung");
+            check(MakyxBrowserRules.Origin("file:///c:/x") is null && MakyxBrowserRules.Origin("javascript:alert(1)") is null && MakyxBrowserRules.Origin("https://benutzer:geheim@makyx.example/") is null && MakyxBrowserRules.Origin(null) is null, "fremde Schemata und Benutzerangaben");
+            var origins = new HashSet<string> { "https://makyx.example:8800" };
+            check(MakyxBrowserRules.IsAllowed("https://makyx.example:8800/v/makyx/rechner", origins), "Makyx-Seite bleibt im Fenster");
+            check(!MakyxBrowserRules.IsAllowed("https://makyx.example:8801/api/", origins) && !MakyxBrowserRules.IsAllowed("https://andere.example/", origins) && !MakyxBrowserRules.IsAllowed("http://makyx.example:8800/", origins), "anderer Port, anderer Host, http statt https: Browser");
+
+            var (pem, fingerprint) = MakyxConfigTests.NewCa();
+            var (otherPem, _) = MakyxConfigTests.NewCa();
+            using var ca = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(pem);
+            using var other = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(otherPem);
+            check(MakyxBrowserRules.ChainMatches([other.RawData, ca.RawData], fingerprint), "CA in der Kette passt");
+            check(MakyxBrowserRules.ChainMatches([ca.RawData], MakyxConfigText.Group(fingerprint)), "Fingerprint mit Doppelpunkten");
+            check(!MakyxBrowserRules.ChainMatches([other.RawData], fingerprint) && !MakyxBrowserRules.ChainMatches([ca.RawData], "") && !MakyxBrowserRules.ChainMatches([ca.RawData], null), "fremde CA oder kein Fingerprint: abgelehnt");
+        });
+
+        test("Makyx-Fenster: Anmeldung per Token führt nur auf Makyx-Pfade, Code nur URL-sicher", () =>
+        {
+            const string code = "Abc123_-x.y~z";
+            string? url = MakyxBrowserRules.LoginUrl("https://makyx.example:8800/v/makyx/lauf/L-001?tab=log#ende", code);
+            check(url == "https://makyx.example:8800/anmelden?code=Abc123_-x.y~z&ziel=%2Fv%2Fmakyx%2Flauf%2FL-001%3Ftab%3Dlog%23ende", "Ziel ist der relative Pfad des Links: " + url);
+            check(MakyxBrowserRules.LoginUrl("https://makyx.example:8800/", code)!.EndsWith("&ziel=%2F", StringComparison.Ordinal), "Startseite");
+            check(MakyxBrowserRules.LoginUrl("https://makyx.example/x", "kurz") is null && MakyxBrowserRules.LoginUrl("https://makyx.example/x", "abc def ghi") is null
+                && MakyxBrowserRules.LoginUrl("https://makyx.example/x", "abcdefgh&ziel=//boese.example") is null && MakyxBrowserRules.LoginUrl("https://makyx.example/x", null) is null, "ungültige Codes");
+            check(MakyxBrowserRules.LoginUrl("file:///c:/x", code) is null && MakyxBrowserRules.LoginUrl("https://benutzer:geheim@makyx.example/", code) is null, "ungültige Links");
+            check(MakyxBrowserRules.IsLoginAddress(url) && !MakyxBrowserRules.IsLoginAddress("https://makyx.example:8800/v/makyx/") && !MakyxBrowserRules.IsLoginAddress(null), "Anmeldeadresse erkannt");
+            check(MakyxJson.ParseLoginCode("{\"code\":\"" + code + "\",\"gueltig_bis\":\"2026-01-01T00:00:00Z\"}") == code, "Antwort mit Code");
+            check(MakyxJson.ParseLoginCode("{\"token\":\"x\"}") is null && MakyxJson.ParseLoginCode("{\"code\":\"a b\"}") is null && MakyxJson.ParseLoginCode("[]") is null, "Antwort ohne gültigen Code");
+        });
+
+        test("Makyx: freie Session aus /laeufe (Art session, ohne Nummer und Projekt) mit Terminal", () =>
+        {
+            const string json = "{\"zeit\":\"2026-01-01T10:00:00Z\",\"laeufe\":[{\"id\":\"S-1a2b3c4d\",\"art\":\"session\",\"nummer\":null,\"titel\":\"Terminal-Session\",\"status\":\"arbeitet\",\"projekt\":null,\"rechner\":\"rechner-a\","
+                + "\"link\":\"https://makyx.example:8800/v/makyx/session/1\",\"terminal\":{\"vorhanden\":true,\"rechner\":\"rechner-a\",\"ssh_ziel\":\"benutzer@rechner-a\",\"tmux_socket\":\"makyx\",\"tmux_session\":\"makyx\",\"tmux_fenster\":\"@3\"}}]}";
+            var run = MakyxJson.ParseRuns(json, out _).Single();
+            check(run.Id == "S-1a2b3c4d" && run.Kind == "session" && run.Project == "" && run.IsActive, "Session gelesen");
+            check(run.Terminal.Available && run.Terminal.TmuxSocket == "makyx" && run.Terminal.TmuxWindow == "@3", "Terminal-Zuordnung");
+        });
+
+        test("Makyx: Projekte lesen (Kennung als Text oder Zahl, Zähler, nur sichere Links)", () =>
+        {
+            const string json = "{\"projekte\":[{\"id\":\"p-1\",\"name\":\"Beispiel\",\"repository\":\"/arbeit/beispiel\",\"quelle\":\"lokal\",\"rechner\":\"rechner-a\",\"instanzen_laufend\":2,\"gates_offen\":1,\"link\":\"https://makyx.example:8800/v/makyx/projekt/p-1\"},"
+                + "{\"id\":7,\"name\":\"Zweites\",\"link\":\"javascript:alert(1)\"}]}";
+            var projects = MakyxJson.ParseProjects(json);
+            check(projects.Count == 2 && projects[0] is { Id: "p-1", Name: "Beispiel", Repository: "/arbeit/beispiel", Machine: "rechner-a", Running: 2, GatesOpen: 1 }, "erstes Projekt");
+            check(projects[1] is { Id: "7", Running: 0, GatesOpen: 0, Link: "" }, "Zahl als Kennung, fehlende Zähler, unsicherer Link verworfen");
+            check(MakyxControl.ProjectText(projects[0]) == "Beispiel · 2 laufen · 1 Gate" && MakyxControl.ProjectText(projects[1]) == "Zweites", "Menütext");
+            check(MakyxJson.ParseProjects("{}").Count == 0, "ohne Liste leer");
+        });
+
+        test("Makyx steuern: Anfragen, Kennungen im Pfad, Fehlertexte", () =>
+        {
+            check(MakyxControl.SessionBody("p-1", "rechner-a", "codex", "modell-x") == "{\"projekt\":\"p-1\",\"rechner\":\"rechner-a\",\"agent\":\"codex\",\"modell\":\"modell-x\",\"modus\":\"terminal\"}", "Session mit allem");
+            check(MakyxControl.SessionBody("p-1", " ", "unbekannt", null) == "{\"projekt\":\"p-1\",\"agent\":\"claude\",\"modus\":\"terminal\"}", "Vorgaben: kein Rechner, Agent claude, kein Modell");
+            check(Throws(() => MakyxControl.SessionBody(" ", null, null, null)), "Projekt fehlt");
+            check(MakyxControl.AnswerBody(MakyxDecision.Approve, null) == "{\"entscheidung\":\"freigeben\"}" && MakyxControl.AnswerBody(MakyxDecision.Reject, " ") == "{\"entscheidung\":\"ablehnen\"}", "Freigeben, Ablehnen");
+            check(MakyxControl.AnswerBody(MakyxDecision.Return, " bitte \"so\" ") == "{\"entscheidung\":\"zurueckgeben\",\"text\":\"bitte \\u0022so\\u0022\"}", "Zurückgeben mit Text, sauber maskiert: " + MakyxControl.AnswerBody(MakyxDecision.Return, " bitte \"so\" "));
+            check(Throws(() => MakyxControl.AnswerBody(MakyxDecision.Return, "")), "Zurückgeben ohne Text");
+            var items = MakyxControl.RunItems("B-12\r\n\r\n  Neuer Punkt  \n");
+            check(items.SequenceEqual(["B-12", "Neuer Punkt"]), "Punkte je Zeile");
+            check(MakyxControl.StartRunBody("p-1", items) == "{\"projekt\":\"p-1\",\"punkte\":[\"B-12\",\"Neuer Punkt\"]}", "Lauf-Anfrage");
+            check(Throws(() => MakyxControl.StartRunBody("p-1", [])) && Throws(() => MakyxControl.StartRunBody("p-1", Enumerable.Range(0, 51).Select(i => "P" + i).ToList())), "leer oder zu viele Punkte");
+            check(MakyxControl.PathId("L-001") == "L-001" && MakyxControl.PathId("a_b-9") == "a_b-9", "gültige Kennungen");
+            check(Throws(() => MakyxControl.PathId("../x")) && Throws(() => MakyxControl.PathId("a/b")) && Throws(() => MakyxControl.PathId("a?b")) && Throws(() => MakyxControl.PathId("")) && Throws(() => MakyxControl.PathId(null)), "Pfad-Tricks abgelehnt");
+            check(MakyxControl.ErrorText(403, "{\"fehler\":\"kein_recht_steuern\"}").Contains("Recht „steuern“"), "kein Recht steuern erklärt");
+            check(MakyxControl.ErrorText(400, "{\"fehler\":\"projekt_unbekannt\",\"meldung\":\"Projekt nicht gefunden\"}") == "Makyx lehnt die Anfrage ab: Projekt nicht gefunden", "Meldung von Makyx");
+            check(MakyxControl.ErrorText(404, "kein json") == "Makyx kennt diesen Eintrag nicht (mehr)" && MakyxControl.ErrorText(500, null) == "Makyx antwortet mit 500", "ohne Text");
+            check(MakyxJson.ParseStarted("{\"session\":{\"id\":\"S-1a2b3c4d\",\"art\":\"session\",\"status\":\"arbeitet\",\"terminal\":{\"vorhanden\":true,\"tmux_socket\":\"makyx\",\"tmux_session\":\"makyx\",\"tmux_fenster\":\"@4\"}}}")?.Terminal.TmuxWindow == "@4", "gestartete Session (eingepackt)");
+            check(MakyxJson.ParseStarted("{\"id\":\"S-1\",\"art\":\"session\"}")?.Id == "S-1" && MakyxJson.ParseStarted("{\"ok\":true}") is null, "gestartete Session (direkt) oder keine");
         });
 
         test("Makyx: Profil des Rechners wird zugeordnet (Zuordnung, Name, Ziel)", () =>

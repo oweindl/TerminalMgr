@@ -44,6 +44,8 @@ public sealed class ProfileItem(Profile profile) : INotifyPropertyChanged
     public Profile Profile { get; set; } = profile;
     /// <summary>An entry that exists only for this run (for example "Makyx · window"): it is never written to the settings.</summary>
     public bool Temporary { get; init; }
+    /// <summary>The tmux server of this entry when it is not the default one (an entry "Makyx · server" runs on the socket of Makyx).</summary>
+    public string? TmuxSocket { get; init; }
     public string Name => Profile.Name;
     private string _status = profile.AutoConnect ? "Autostart · getrennt" : "Getrennt";
     /// <summary>The Alt number of this server in the list ("Alt 1" to "Alt 9"), empty beyond the ninth.</summary>

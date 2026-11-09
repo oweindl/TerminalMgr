@@ -8,7 +8,7 @@ using TerminalMgr.Windows;
 namespace TerminalMgr.App;
 
 /// <summary>Makyx dashboard: the LÄUFE strip under KI-ABOS, a toast for new "waits for you" items, the jump into the Makyx page or the tmux window of an instance, and the palette entries.
-/// Read only; nothing is changed in Makyx.</summary>
+/// Steering (sessions, runs, answers, stop) lives in MainWindow.MakyxControl.cs.</summary>
 public partial class MainWindow
 {
     private MakyxMonitor? _makyx;
@@ -19,9 +19,11 @@ public partial class MainWindow
     private void InitializeMakyx()
     {
         MakyxRuns.OpenRequested += run => OpenMakyxLink(run.Link);
+        MakyxRuns.BrowserRequested += run => OpenMakyxInBrowser(run.Link);
         MakyxRuns.CopyRequested += run => { try { Clipboard.SetText(run.Link); StatusText.Text = "Link kopiert."; } catch (System.Runtime.InteropServices.ExternalException) { StatusText.Text = "Der Link ließ sich nicht kopieren."; } };
         MakyxRuns.TerminalRequested += run => _ = OpenMakyxTerminalAsync(run);
         MakyxRuns.TerminalProblem = TerminalProblem;
+        InitializeMakyxControl();
         _makyxClock = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => { if (_makyx is not null && !Makyx.Collapsed) RenderMakyx(); }, Dispatcher);
         _makyxClock.Start();
         RenderMakyx();      // shows "nicht eingerichtet" until the settings are loaded and the monitor starts
@@ -53,6 +55,7 @@ public partial class MainWindow
     {
         if (_closing || !ReferenceEquals(_makyx, monitor)) return;
         RenderMakyx();
+        OpenPendingMakyxSession();
         if (!Makyx.Notify) return;
         foreach (var item in change.NewWaiting)
             ToastWindow.Show("Wartet auf dich", $"{MakyxJson.WaitingKindText(item)}: {item.Title}" + (item.Project is { Length: > 0 } p ? " · " + p : ""), () => OpenMakyxLink(item.Link));
@@ -93,6 +96,12 @@ public partial class MainWindow
         var menu = new ContextMenu();
         var refresh = new MenuItem { Header = "Neu verbinden", IsEnabled = Makyx.Enabled };
         refresh.Click += (_, _) => ApplyMakyxSettings(); menu.Items.Add(refresh);
+        // The interface address is the origin of the links Makyx reports; without runs there is none yet.
+        string? home = _makyx?.Runs().Select(r => MakyxBrowserRules.Origin(r.Link)).FirstOrDefault(o => o is not null);
+        var open = new MenuItem { Header = "Makyx öffnen", IsEnabled = home is not null };
+        open.Click += (_, _) => OpenMakyxLink(home + "/"); menu.Items.Add(open);
+        AddMakyxControlMenus(menu);
+        menu.Items.Add(new Separator());
         var settings = new MenuItem { Header = "Makyx-Einstellungen …" };
         settings.Click += (_, _) => OpenSettings(this, new RoutedEventArgs()); menu.Items.Add(settings);
         menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
@@ -108,8 +117,35 @@ public partial class MainWindow
         MakyxScroll.MaxHeight = Math.Max(0, MakyxPanelRow.Height.Value - 62);
     }
 
-    /// <summary>Only http and https are opened, in the default browser.</summary>
+    /// <summary>Opens a Makyx page in the Makyx window of TerminalMgr (note 15, stage 1); only http and https.</summary>
     private void OpenMakyxLink(string link)
+    {
+        string safe = MakyxJson.SafeLink(link);
+        if (safe.Length == 0) { StatusText.Text = "Für diesen Eintrag gibt es keinen Link."; return; }
+        MakyxBrowserWindow.Open(this, _dataDirectory, () => Makyx.CaFingerprint, safe, MakyxLoginCodeAsync);
+    }
+
+    /// <summary>One-time sign-in code for the Makyx window, fetched with the paired token; null (page asks for the password) when anything fails.</summary>
+    private async Task<string?> MakyxLoginCodeAsync()
+    {
+        if (!Makyx.Enabled || Makyx.Problem() is not null) return null;
+        string? token;
+        try { token = MakyxCredentialStore.Read(); } catch (System.ComponentModel.Win32Exception) { return null; }
+        if (token is null) return null;
+        try
+        {
+            using var client = new MakyxClient(Makyx, token);
+            return await client.LoginCodeAsync(CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is MakyxClient.MakyxException or ArgumentException)
+        {
+            StatusText.Text = "Makyx: Anmeldung per Token nicht möglich (" + ex.Message + ") – die Seite fragt nach dem Passwort.";
+            return null;
+        }
+    }
+
+    /// <summary>Only http and https are opened, in the default browser.</summary>
+    private void OpenMakyxInBrowser(string link)
     {
         string safe = MakyxJson.SafeLink(link);
         if (safe.Length == 0) { StatusText.Text = "Für diesen Eintrag gibt es keinen Link."; return; }
@@ -141,6 +177,49 @@ public partial class MainWindow
             _profiles.Add(item);
             ProfilesList.SelectedItem = item;
             await ConnectAsync(item);
+        }
+        catch (ArgumentException) { StatusText.Text = "Der tmux-Name von Makyx ist ungültig."; }
+    }
+
+    /// <summary>
+    /// Windows of the Makyx instances that run on this server, per tmux socket of Makyx (from <c>/rechner</c>). Empty without Makyx,
+    /// for entries that already are on a Makyx socket, and when the socket does not answer; the server menu then shows only the normal sessions.
+    /// </summary>
+    private async Task<IReadOnlyList<(string Socket, IReadOnlyList<TmuxSessionWindows> Sessions)>> MakyxWindowsForAsync(ProfileItem item, CancellationToken cancel)
+    {
+        if (_makyx is null || item.Temporary || item.TmuxSocket is not null) return [];
+        var profiles = _profiles.Where(p => !p.Temporary).Select(p => p.Profile).ToList();
+        var result = new List<(string, IReadOnlyList<TmuxSessionWindows>)>();
+        foreach (string socket in MakyxTmux.SocketsFor(item.Profile, profiles, _makyx.Machines(), Makyx.MachineProfiles))
+        {
+            try
+            {
+                var sessions = MakyxTmux.Sessions(await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(10), cancel, socket));
+                if (sessions.Count > 0) result.Add((socket, sessions));
+            }
+            catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception) { }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Opens a Makyx window from the server menu: one entry "Makyx · server" per server and socket (not saved), attached to the session of
+    /// that window; further windows switch inside it, and the window strip shows all windows of the Makyx session.
+    /// </summary>
+    private async Task OpenMakyxWindowAsync(ProfileItem basis, string socket, TmuxWindowRecord window)
+    {
+        try
+        {
+            string name = MakyxTmux.GroupPrefix + basis.Name;
+            var item = _profiles.FirstOrDefault(p => p.Temporary && p.TmuxSocket == socket && p.Profile.Name == name && p.Profile.Destination == basis.Profile.Destination);
+            if (item is null)
+            {
+                string command = SshCommand.TmuxAttachArguments(basis.Profile, window.SessionId, window.WindowId, socket)[^1]; // validates socket and IDs
+                var profile = basis.Profile with { Id = Guid.NewGuid().ToString("N"), Name = name, Mode = StartMode.Command, Command = command, AutoConnect = false, AutoReconnect = false };
+                item = new ProfileItem(profile) { Temporary = true, TmuxSocket = socket };
+                _profiles.Add(item);
+            }
+            await SwitchToTmuxWindowAsync(item, window);
         }
         catch (ArgumentException) { StatusText.Text = "Der tmux-Name von Makyx ist ungültig."; }
     }

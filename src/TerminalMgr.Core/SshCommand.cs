@@ -34,20 +34,30 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: true, "tmux attach-session -t " + ShellQuote(sessionId));
     }
 
-    /// <summary>All windows of all sessions, one tab-separated line each (see <see cref="TmuxWindowParser.Format"/>).</summary>
-    public static IReadOnlyList<string> TmuxWindowsArguments(Profile profile) =>
-        OverrideArguments(profile, interactive: false, "tmux list-windows -a -F " + ShellQuote(TmuxWindowParser.Format));
+    /// <summary>All windows of all sessions, one tab-separated line each (see <see cref="TmuxWindowParser.Format"/>); with <paramref name="socket"/> those of another tmux server (<c>tmux -L</c>).</summary>
+    public static IReadOnlyList<string> TmuxWindowsArguments(Profile profile, string? socket = null) =>
+        OverrideArguments(profile, interactive: false, Tmux(socket) + " list-windows -a -F " + ShellQuote(TmuxWindowParser.Format));
 
     /// <summary>Windows of one session with the screen of each: one frame, or with <paramref name="loopSeconds"/> a frame per interval until the connection ends (see <see cref="WindowStripParser.Script"/>).</summary>
-    public static IReadOnlyList<string> TmuxStripArguments(Profile profile, string sessionTarget, int loopSeconds = 0)
+    public static IReadOnlyList<string> TmuxStripArguments(Profile profile, string sessionTarget, int loopSeconds = 0, string? socket = null)
     {
         if (string.IsNullOrWhiteSpace(sessionTarget) || sessionTarget.Any(char.IsControl)) throw new ArgumentException("Ungültige tmux-Session.");
-        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(WindowStripParser.Script(sessionTarget, loopSeconds)));
+        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(WindowStripParser.Script(sessionTarget, loopSeconds, socket)));
     }
 
     /// <summary>Attach straight to one window; an existing session is required, nothing is created.</summary>
-    public static IReadOnlyList<string> TmuxAttachArguments(Profile profile, string sessionId, string windowId) =>
-        OverrideArguments(profile, interactive: true, "tmux attach-session -t " + ShellQuote(TmuxWindowParser.Target(sessionId, windowId)));
+    public static IReadOnlyList<string> TmuxAttachArguments(Profile profile, string sessionId, string windowId, string? socket) =>
+        OverrideArguments(profile, interactive: true, Tmux(socket) + " attach-session -t " + ShellQuote(TmuxWindowParser.Target(sessionId, windowId)));
+
+    public static IReadOnlyList<string> TmuxAttachArguments(Profile profile, string sessionId, string windowId) => TmuxAttachArguments(profile, sessionId, windowId, null);
+
+    /// <summary>"tmux", or "tmux -L 'name'" for a tmux server with its own socket (Makyx runs its instances on one).</summary>
+    public static string Tmux(string? socket)
+    {
+        if (socket is null) return "tmux";
+        if (!MakyxName.IsMatch(socket)) throw new ArgumentException("Ungültiger tmux-Socket.");
+        return "tmux -L " + ShellQuote(socket);
+    }
 
     private static readonly System.Text.RegularExpressions.Regex MakyxName = new("^[A-Za-z0-9._-]{1,40}$");
 

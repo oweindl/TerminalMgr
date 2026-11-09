@@ -81,7 +81,7 @@ public partial class MainWindow
         {
             using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
             cancel.CancelAfter(limit);
-            var windows = await _tmuxQuery.ListWindowsAsync(item.Profile, limit, cancel.Token);
+            var windows = await _tmuxQuery.ListWindowsAsync(item.Profile, limit, cancel.Token, item.TmuxSocket);
             var (attachedId, attachedName) = await AttachedTmuxAsync(item, cancel.Token);
             var sessions = TmuxWindowParser.Group(windows);
             var session = sessions.FirstOrDefault(s => attachedId is not null && s.Id == attachedId)
@@ -102,7 +102,7 @@ public partial class MainWindow
             var item = _profiles.FirstOrDefault(p => p.Profile.Id == target.ProfileId);
             if (item is null) { _history.Forget(p => p.ProfileId == target.ProfileId); continue; }
             IReadOnlyList<TmuxWindowRecord> windows;
-            try { windows = await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(6), _shutdown.Token); }
+            try { windows = await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(6), _shutdown.Token, item.TmuxSocket); }
             catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
             {
                 StatusText.Text = $"Zurück: {item.Name} ist nicht erreichbar.";
@@ -129,7 +129,7 @@ public partial class MainWindow
         if (item is null) { StatusText.Text = $"Favorit „{favorite.Label}“: Der Server ist nicht mehr in der Liste."; return; }
         StatusText.Text = $"Favorit „{favorite.Label}“ …";
         IReadOnlyList<TmuxWindowRecord> windows;
-        try { windows = await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(10), _shutdown.Token); }
+        try { windows = await _tmuxQuery.ListWindowsAsync(item.Profile, TimeSpan.FromSeconds(10), _shutdown.Token, item.TmuxSocket); }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
         {
             StatusText.Text = $"Favorit „{favorite.Label}“: {item.Name} ist nicht erreichbar.";
