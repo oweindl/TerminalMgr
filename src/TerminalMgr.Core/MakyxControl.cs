@@ -100,6 +100,9 @@ public static class MakyxControl
         catch (JsonException) { }
         if (code == "kein_recht_steuern") return "Dieser Zugang darf nicht steuern. In Makyx unter Leitstand-Zugänge einen Zugang mit Recht „steuern“ anlegen und TerminalMgr neu koppeln.";
         if (code == "nur_lesen") return "Dieser Zugang darf nur lesen.";
+        // The runner of a machine takes a limited number of sessions at once (max_sessions); the code may come as "fehler" or inside the message.
+        if (code == "dock_ausgelastet" || message?.Contains("dock_ausgelastet", StringComparison.OrdinalIgnoreCase) == true)
+            return "Rechner voll: Makyx erlaubt dort nur eine begrenzte Zahl Sessions gleichzeitig. Beende eine laufende Session (Rechtsklick im Baum › Session beenden) oder wähle einen anderen Rechner; das Limit selbst stellt man in Makyx ein";
         string detail = message is { Length: > 0 and <= 300 } ? ": " + message : code is { Length: > 0 and <= 100 } ? " (" + code + ")" : "";
         return status switch
         {
