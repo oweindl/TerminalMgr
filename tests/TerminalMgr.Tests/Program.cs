@@ -84,6 +84,26 @@ try
         Check(TmuxNaming.Suggest("Mein Server 1") == "Mein-Server-1" && TmuxNaming.Suggest("!!!") == "main" && TmuxNaming.Suggest(null) == "main" && TmuxNaming.IsValid(TmuxNaming.Suggest(new string('x', 90))), "suggested name is always valid");
         Check(TmuxNaming.Problem("logs", false) is null && TmuxNaming.Problem("", true) is null && TmuxNaming.Problem("", false) is { } && TmuxNaming.Problem("a b", true) == TmuxNaming.Rule, "name problems");
     });
+    Test("tmux: close a window by its ID – command without a local shell, question names what ends, Makyx windows are left alone", () =>
+    {
+        var profile = new Profile { Name = "rechner-a", Destination = "rechner-a" };
+        var plain = SshCommand.TmuxKillWindowArguments(profile, "@7");
+        Check(plain.Contains("-T") && !plain.Contains("-tt") && plain[^2] == "rechner-a" && plain[^1] == "tmux kill-window -t '@7'", "kill-window by ID: " + plain[^1]);
+        Check(SshCommand.TmuxKillWindowArguments(profile, "@7", "makyx")[^1] == "tmux -L 'makyx' kill-window -t '@7'", "with a socket");
+        foreach (string bad in new[] { "7", "@", "@x", "@7;id", "logs", "", "$1:@7", "@7 -a" })
+        {
+            bool refused = false;
+            try { SshCommand.TmuxKillWindowArguments(profile, bad); } catch (ArgumentException) { refused = true; }
+            Check(refused, "refused window id: '" + bad + "'");
+        }
+        bool badSocket = false;
+        try { SshCommand.TmuxKillWindowArguments(profile, "@7", "ma kyx"); } catch (ArgumentException) { badSocket = true; }
+        Check(badSocket, "a bad socket name is refused");
+        string question = TmuxWindowActions.CloseQuestion("logs", "main", "tail", false);
+        Check(question == "Fenster „logs“ in Session „main“ schließen? Was darin läuft (tail), wird beendet." && !question.Contains("endet die Session"), "question: " + question);
+        Check(TmuxWindowActions.CloseQuestion("bash", "arbeit", "", true) == "Fenster „bash“ in Session „arbeit“ schließen? Was darin läuft, wird beendet. Damit endet die Session „arbeit“.", "question for the last window without a program");
+        Check(TmuxWindowActions.ManagedReason(null) is null && TmuxWindowActions.ManagedReason("makyx") is { } reason && reason.Contains("Session beenden"), "Makyx windows are managed by Makyx");
+    });
     Test("Reject destination option injection", () =>
     {
         foreach (string value in new[] { "-oProxyCommand=evil", "dev -p 22", "dev\nother" })

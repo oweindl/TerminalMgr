@@ -181,6 +181,67 @@ public partial class MainWindow
         if (sender is FrameworkElement { Tag: StripCard card }) { RunNavigationAction("windowId:" + card.WindowId); e.Handled = true; }
     }
 
+    /// <summary>Right click on a card: the actions on that tmux window.</summary>
+    private void StripCardRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: StripCard card } element || Selected is not { } item) return;
+        var menu = BuildStripCardMenu(item, card);
+        menu.PlacementTarget = element;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    /// <summary>"Fenster schließen …" (red); on the Makyx socket it is greyed out with the reason, Makyx manages those windows.</summary>
+    private System.Windows.Controls.ContextMenu BuildStripCardMenu(ProfileItem item, StripCard card)
+    {
+        var menu = new System.Windows.Controls.ContextMenu();
+        string? managed = TmuxWindowActions.ManagedReason(item.TmuxSocket);
+        var close = new System.Windows.Controls.MenuItem { Header = managed is null ? "Fenster schließen …" : "Fenster schließen – " + managed, IsEnabled = managed is null };
+        if (managed is null) close.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "RecordingBrush");
+        close.Click += (_, _) => _ = CloseTmuxWindowAsync(item, card);
+        menu.Items.Add(close);
+        return menu;
+    }
+
+    /// <summary>The name of the tmux session this connection shows: from the label, else the tracked name, else what the strip asks for.</summary>
+    private string StripSessionName(ProfileItem item)
+    {
+        string id = item.Profile.Id;
+        if (_tmuxLabel.TryGetValue(id, out string? label) && label.StartsWith("tmux: ", StringComparison.Ordinal))
+        {
+            string rest = label["tmux: ".Length..];
+            int slash = rest.IndexOf(" / ", StringComparison.Ordinal);
+            string name = slash >= 0 ? rest[..slash] : rest;
+            if (name.Length > 0) return name;
+        }
+        if (_tmuxAttached.TryGetValue(id, out var attached) && attached.Name is { Length: > 0 } known) return known;
+        return _streamTarget ?? "dieser Session";
+    }
+
+    /// <summary>
+    /// Closes a tmux window over a separate SSH command after asking. If it was the active window the tmux client moves on by itself;
+    /// if it was the last one the session ends and the connection with it (the normal end of a connection). The strip follows with its next frame.
+    /// </summary>
+    private async Task CloseTmuxWindowAsync(ProfileItem item, StripCard card)
+    {
+        string session = StripSessionName(item);
+        bool last = _stripCards.Count <= 1;
+        string question = TmuxWindowActions.CloseQuestion(card.Name, session, card.Card.Command, last);
+        if (MessageBox.Show(this, question, "tmux-Fenster schließen", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        StatusText.Text = $"Fenster „{card.Name}“ wird geschlossen …";
+        try { await _tmuxQuery.KillWindowAsync(item.Profile, card.WindowId, item.TmuxSocket, _shutdown.Token); }
+        catch (OperationCanceledException) when (_closing) { return; }
+        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            string first = ex.Message.Split('\n')[0].Trim();
+            StatusText.Text = $"Fenster „{card.Name}“ ließ sich nicht schließen: {first}";
+            MessageBox.Show(this, ex.Message, "tmux-Fenster schließen", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _history.Forget(p => p.ProfileId == item.Profile.Id && p.WindowId == card.WindowId);
+        StatusText.Text = $"Fenster „{card.Name}“ geschlossen." + (last ? $" Die Session „{session}“ ist damit beendet." : "");
+    }
+
     /// <summary>The server changed: the old cards belong to another session.</summary>
     private void StripSelectionChanged()
     {

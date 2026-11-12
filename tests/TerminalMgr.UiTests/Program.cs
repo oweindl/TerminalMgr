@@ -373,6 +373,15 @@ internal static class Program
         var model = (StripCard)strip.Items[1];
         Check(model.Shortcut == "Ctrl 1" && model.Current && model.Preview1 == "Dateien lesen (12/40)" && model.SparkHeights.Count == WindowActivityTracker.SparkBuckets && model.SparkHeights.All(h => h is >= 1.5 and <= 12), "Card model");
         Check(((StripCard)strip.Items[4]).Shortcut == "", "No Ctrl number beyond 9");
+        // Right click on a card: "Fenster schließen …" in red; on a Makyx socket it is greyed out with the reason.
+        var cardMenu = typeof(MainWindow).GetMethod("BuildStripCardMenu", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var normal = new ProfileItem(new Profile { Name = "rechner-a", Destination = "rechner-a" });
+        var onMakyx = new ProfileItem(new Profile { Name = "Makyx · rechner-a", Destination = "rechner-a" }) { Temporary = true, TmuxSocket = "makyx" };
+        var normalMenu = (ContextMenu)cardMenu.Invoke(main, [normal, (StripCard)strip.Items[1]])!;
+        var closeItem = (MenuItem)normalMenu.Items[0]!;
+        Check(normalMenu.Items.Count == 1 && closeItem.IsEnabled && (string)closeItem.Header == "Fenster schließen …", "a card offers \"Fenster schließen …\"");
+        var makyxItem = (MenuItem)((ContextMenu)cardMenu.Invoke(main, [onMakyx, (StripCard)strip.Items[1]])!).Items[0]!;
+        Check(!makyxItem.IsEnabled && ((string)makyxItem.Header).Contains("von Makyx verwaltet"), "a Makyx window can not be closed here: " + makyxItem.Header);
         Check(!ReferenceEquals(model.StateBrush, ((StripCard)strip.Items[2]).StateBrush) && !ReferenceEquals(((StripCard)strip.Items[3]).StateBrush, ((StripCard)strip.Items[0]).StateBrush), "Each state has its own color");
 
         // Alt numbers appear in the server list, beyond the ninth server there is none.
