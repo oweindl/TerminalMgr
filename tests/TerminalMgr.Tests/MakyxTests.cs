@@ -170,6 +170,26 @@ internal static class MakyxTests
             }
         });
 
+        test("Makyx: Session beenden – nur freie aktive Sessions mit tmux-Fenster; Befehl ohne lokale Shell, böse Namen abgelehnt", () =>
+        {
+            var term = new MakyxTerminal(true, null, "rechner-a", "benutzer@host-a", "makyx", "makyx", "worker-1");
+            MakyxRun Run(string kind, MakyxStatus status, MakyxTerminal t) => new("S-1", "u-1", kind, "Titel", status, "Beispiel", "rechner-a", null, null, null, null, "", null, t);
+            check(MakyxControl.IsEndable(Run("session", MakyxStatus.Working, term)) && MakyxControl.IsEndable(Run("session", MakyxStatus.Waiting, term)), "aktive freie Session ist beendbar");
+            check(!MakyxControl.IsEndable(Run("session", MakyxStatus.Done, term)) && !MakyxControl.IsEndable(Run("lauf", MakyxStatus.Working, term)) && !MakyxControl.IsEndable(Run("einzelauftrag", MakyxStatus.Working, term)), "fertige Session, Lauf und Einzelauftrag nicht");
+            check(!MakyxControl.IsEndable(Run("session", MakyxStatus.Working, MakyxTerminal.None("strukturiert"))) && !MakyxControl.IsEndable(Run("session", MakyxStatus.Working, term with { TmuxWindow = null })) && !MakyxControl.IsEndable(Run("session", MakyxStatus.Working, term with { TmuxSocket = "" })), "ohne vollständiges tmux-Fenster nicht");
+            check(MakyxControl.IsStoppable(Run("lauf", MakyxStatus.Working, term)) && !MakyxControl.IsStoppable(Run("session", MakyxStatus.Working, term)), "Anhalten bleibt für Läufe, Sessions gehen über Beenden");
+            var profile = new Profile { Name = "rechner-a", Destination = "rechner-a" };
+            var args = SshCommand.MakyxTmuxEndArguments(profile, "makyx", "makyx", "worker-1");
+            check(args.Contains("-T") && !args.Contains("-tt") && args[^2] == "rechner-a" && args.Count(a => a.Contains("kill-window")) == 1, "ein Argument für ssh, nicht interaktiv");
+            check(args[^1].StartsWith("sh -c ") && args[^1].Contains("send-keys") && args[^1].Contains("/exit") && args[^1].Contains("kill-window") && args[^1].Contains("makyx:worker-1"), "Befehl: " + args[^1]);
+            foreach (var (s, se, w) in new[] { ("ma kyx", "makyx", "a"), ("makyx", "ma'kyx", "a"), ("makyx", "makyx", "a;rm -rf /"), ("makyx", "makyx", ""), ("makyx", "$(id)", "a") })
+            {
+                bool refused = false;
+                try { SshCommand.MakyxTmuxEndArguments(profile, s, se, w); } catch (ArgumentException) { refused = true; }
+                check(refused, $"abgelehnt: {s}/{se}/{w}");
+            }
+        });
+
         test("Makyx: Fenster auf dem eigenen Socket werden abgefragt, ohne Ansichts-Doppel, und dem Server zugeordnet", () =>
         {
             var profile = new Profile { Id = "p1", Name = "rechner-a", Destination = "benutzer@rechner-a" };

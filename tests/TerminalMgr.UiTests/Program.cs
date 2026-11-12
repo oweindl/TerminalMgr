@@ -80,6 +80,20 @@ internal static class Program
         Check(!noProfile.IsEnabled && noProfile.Header.ToString()!.Contains("kein SSH-Profil"), "terminal entry is disabled with the reason when no profile matches");
         var structured = (MenuItem)((Border)panel.Children[5]).ContextMenu!.Items[0];
         Check(!structured.IsEnabled && structured.Header.ToString()!.Contains("strukturierte Session"), "a structured session has no terminal, said explicitly");
+        // A free session is ended from the tree ("Session beenden …"), a run stopped; a finished or windowless session offers neither.
+        var free = new MakyxRun("S-9", "u-S-9", "session", "Titel S-9", MakyxStatus.Working, "Beispiel", "rechner-a", DateTimeOffset.UnixEpoch, null, 125, null, "https://makyx.example/S-9", null,
+            new MakyxTerminal(true, null, "rechner-a", "benutzer@host-a", "makyx", "makyx", "worker-9"));
+        var sessionPanel = new MakyxTreePanel { ShellProblem = _ => null };
+        var ended = new List<string>(); sessionPanel.EndRequested += run => ended.Add(run.Id);
+        sessionPanel.Render(MakyxTree.Build([machine], [treeProject], [free]), [], "leer");
+        var freeMenu = ((Border)sessionPanel.Children[3]).ContextMenu!.Items;
+        var endItem = (MenuItem)freeMenu[freeMenu.Count - 2];
+        Check(endItem.Header.ToString() == "Session beenden …" && endItem.IsEnabled && !((MenuItem)freeMenu[freeMenu.Count - 1]).IsEnabled, "a free session offers \"Session beenden …\" and no emergency stop");
+        endItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(ended.SequenceEqual(["S-9"]), "the end entry raises its event");
+        sessionPanel.Render(MakyxTree.Build([machine], [treeProject], [free with { Terminal = MakyxTerminal.None("strukturiert") }]), [], "leer");
+        var noWindow = (MenuItem)((Border)sessionPanel.Children[3]).ContextMenu!.Items[^2];
+        Check(!noWindow.IsEnabled && noWindow.Header.ToString()!.StartsWith("Session beenden –"), "a session without a tmux window can not be ended from here: " + noWindow.Header);
         first.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
         ((Border)panel.Children[5]).RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
         Check(terminals.SequenceEqual(["E-1"]) && opened.SequenceEqual(["E-4"]), "a click opens the terminal, or the Makyx page when there is none");

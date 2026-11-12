@@ -20,6 +20,8 @@ public sealed class MakyxTreePanel : StackPanel
     public event Action<MakyxRun>? StopRequested;
     /// <summary>"Nothalt (ganz Makyx) …" (stops all of Makyx; the window asks first).</summary>
     public event Action<MakyxRun>? EmergencyRequested;
+    /// <summary>"Session beenden …" on a free session (the window asks first).</summary>
+    public event Action<MakyxRun>? EndRequested;
     /// <summary>"Antworten …" on an instance that waits for the user.</summary>
     public event Action<MakyxWaiting>? AnswerRequested;
     /// <summary>"Neue Session …" of a project; the machine is the one of the tree branch (null: Makyx chooses).</summary>
@@ -233,10 +235,15 @@ public sealed class MakyxTreePanel : StackPanel
         menu.Items.Add(Item("In Makyx öffnen", () => OpenRequested?.Invoke(run), run.Link.Length > 0));
         menu.Items.Add(Item("Im Browser öffnen", () => BrowserRequested?.Invoke(run), run.Link.Length > 0));
         menu.Items.Add(Item("Link kopieren", () => CopyRequested?.Invoke(run), run.Link.Length > 0));
-        // Steering (right "steuern"): only for active runs; free sessions end in their terminal (Makyx has no "end session" call yet).
+        // Steering (right "steuern"): runs and jobs are stopped through Makyx; a free session has no such call, TerminalMgr ends its tmux window.
         bool stoppable = MakyxControl.IsStoppable(run);
         menu.Items.Add(new Separator());
-        menu.Items.Add(Item(stoppable ? "Anhalten …" : "Anhalten – Session im Terminal beenden", () => StopRequested?.Invoke(run), stoppable));
+        if (run.Kind == "session")
+        {
+            bool endable = MakyxControl.IsEndable(run);
+            menu.Items.Add(Item(endable ? "Session beenden …" : "Session beenden – " + (run.IsActive ? "kein tmux-Fenster" : "schon beendet"), () => EndRequested?.Invoke(run), endable));
+        }
+        else menu.Items.Add(Item(stoppable ? "Anhalten …" : "Anhalten – schon beendet", () => StopRequested?.Invoke(run), stoppable));
         menu.Items.Add(Item("Nothalt (ganz Makyx) …", () => EmergencyRequested?.Invoke(run), stoppable));
         return menu;
     }

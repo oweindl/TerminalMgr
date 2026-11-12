@@ -24,6 +24,10 @@ public sealed class TmuxSessionQuery
     public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default, string? socket = null) =>
         TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile, socket), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
+    /// <summary>Ends a Makyx instance by its tmux window (see <see cref="SshCommand.MakyxTmuxEndArguments"/>); takes a few seconds.</summary>
+    public Task EndMakyxWindowAsync(Profile profile, string socket, string session, string window, CancellationToken cancellationToken = default) =>
+        RunAsync(SshCommand.MakyxTmuxEndArguments(profile, socket, session, window), TimeSpan.FromSeconds(25), cancellationToken);
+
     /// <summary>One frame: the screen of every window of one session; <paramref name="sessionTarget"/> is a session ID ($1) or name.</summary>
     public async Task<WindowPoll> StripAsync(Profile profile, string sessionTarget, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         WindowStripParser.Parse(await RunAsync(SshCommand.TmuxStripArguments(profile, sessionTarget), timeout ?? TimeSpan.FromSeconds(8), cancellationToken));

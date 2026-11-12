@@ -22,6 +22,7 @@ public partial class MainWindow
         // The MAKYX tree: a new session preselects the machine of its branch; a gate opens its own choice in the Makyx page.
         MakyxRuns.NewSessionRequested += (project, machine) =>
             _ = StartMakyxSessionAsync(machine is null ? project : project with { Machine = MakyxControl.MachineValue(machine) });
+        MakyxRuns.EndRequested += run => _ = EndMakyxSessionAsync(run);
         MakyxRuns.RunRequested += project => _ = StartMakyxRunAsync(project);
         MakyxRuns.ProjectPageRequested += project => OpenMakyxLink(project.Link);
         MakyxRuns.AnswerRequested += item =>
@@ -153,6 +154,31 @@ public partial class MainWindow
         else if (decision == MakyxDecision.Reject && !AskMakyx($"„{item.Title}“ ablehnen? Der Lauf wird damit verworfen.")) return;
         await MakyxActionAsync("Antwort wird gesendet", c => c.AnswerAsync(item.Id, decision, text, CancellationToken.None),
             decision switch { MakyxDecision.Approve => "Freigegeben.", MakyxDecision.Reject => "Abgelehnt.", _ => "Antwort gesendet." });
+    }
+
+    /// <summary>
+    /// "Session beenden …": Makyx has no call to end a free session, so the tmux window of the instance is ended over SSH with the profile
+    /// of its machine. An open terminal of this instance ends by itself and leaves the list (see <c>DropTemporary</c>).
+    /// </summary>
+    private async Task EndMakyxSessionAsync(MakyxRun run)
+    {
+        if (!MakyxControl.IsEndable(run) || run.Terminal is not { TmuxSocket: { } socket, TmuxSession: { } session, TmuxWindow: { } window }) { StatusText.Text = "Diese Session lässt sich von hier nicht beenden."; return; }
+        string machine = run.Terminal.Machine ?? run.Machine ?? "diesem Rechner";
+        var basis = ProfileFor(run);
+        if (basis is null) { StatusText.Text = "Es gibt kein SSH-Profil für " + machine + " (Profil mit gleichem Namen oder Ziel anlegen)."; return; }
+        string name = MakyxTree.InstanceName(run);
+        if (!AskMakyx($"„{name}“ ({(run.Project.Length > 0 ? run.Project : "freie Session")}) auf {machine} beenden?\n\nDer Agent wird gestoppt, nicht gespeicherte Arbeit im Terminal geht verloren.")) return;
+        StatusText.Text = $"{name} wird beendet …";
+        try { await _tmuxQuery.EndMakyxWindowAsync(basis, socket, session, window, _shutdown.Token); }
+        catch (OperationCanceledException) when (_closing) { return; }
+        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            StatusText.Text = $"{name} ließ sich nicht beenden: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Makyx", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        StatusText.Text = $"{name} beendet.";
+        if (_makyx is { } monitor) { await monitor.RefreshProjectsAsync(); RenderMakyx(); }
     }
 
     private async Task StopMakyxRunAsync(MakyxRun run, bool emergency)

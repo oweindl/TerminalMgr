@@ -119,6 +119,13 @@ public static class MakyxControl
     /// <summary>Can this run be stopped? Active runs and jobs; free sessions are ended in their terminal.</summary>
     public static bool IsStoppable(MakyxRun run) => run.IsActive && run.Kind != "session";
 
+    /// <summary>
+    /// Can this free session be ended from here? Makyx has no call for it, so TerminalMgr ends the tmux window of the instance over SSH:
+    /// an active session with a complete tmux address (socket, session, window).
+    /// </summary>
+    public static bool IsEndable(MakyxRun run) => run.IsActive && run.Kind == "session"
+        && run.Terminal is { Available: true, TmuxSocket: { Length: > 0 }, TmuxSession: { Length: > 0 }, TmuxWindow: { Length: > 0 } };
+
     /// <summary>The menu text of a project: "Name · 2 laufen · 1 Gate".</summary>
     /// <summary>Name of the terminal entry of a Makyx instance, "Makyx · Projekt · Rechner", so the server list shows where it runs.</summary>
     public static string TerminalName(MakyxRun run)

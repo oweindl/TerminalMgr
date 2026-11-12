@@ -68,6 +68,18 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: true, $"tmux -L {ShellQuote(socket)} attach-session -t {ShellQuote(session + ":" + window)}");
     }
 
+    /// <summary>
+    /// Ends the Makyx instance in a tmux window: first "/exit" and Enter (the way Makyx books as finished and frees the slot), then, after a
+    /// short wait, the window is closed if it still exists. One argument for ssh, no local shell; names are checked like the attach command.
+    /// </summary>
+    public static IReadOnlyList<string> MakyxTmuxEndArguments(Profile profile, string socket, string session, string window)
+    {
+        if (!MakyxName.IsMatch(socket) || !MakyxName.IsMatch(session) || !MakyxName.IsMatch(window)) throw new ArgumentException("Ungültiger tmux-Name von Makyx.");
+        string tmux = "tmux -L " + ShellQuote(socket), target = ShellQuote(session + ":" + window);
+        string script = $"{tmux} send-keys -t {target} -l '/exit' && {tmux} send-keys -t {target} Enter; sleep 3; {tmux} kill-window -t {target} 2>/dev/null; exit 0";
+        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(script));
+    }
+
     /// <summary>Prints the effective OpenSSH settings (ssh -G), e.g. the RemoteCommand from the config.</summary>
     public static IReadOnlyList<string> EffectiveConfigArguments(Profile profile)
     {
