@@ -110,6 +110,14 @@
       term.clearSelection();
       if (text) send({ type:'copy',id,text });
     };
+    // A selection made inside tmux or Claude Code waits (OSC 52) for the right click; the copy key takes it too.
+    const waitingCopy = () => !!pending && Date.now() - pending.at < 30000;
+    const copyKey = () => {
+      if (term.hasSelection()) copySelection();
+      else if (waitingCopy()) { send({ type:'osc52', id, data:pending.data }); pending = null; showToast('Kopiert.'); }
+    };
+    // True from the keydown that copied until the key is released: repeats and the keyup must not reach the session either.
+    let copyHeld = false;
     term.attachCustomKeyEventHandler(e => {
       if (!e.metaKey) {
         const key = keyOf(e.code);
@@ -118,7 +126,19 @@
           return fire(() => send({ type:'switch', index:Number(key) - 1 }));
         const hit = key && shortcuts.find(s => s.ctrl === e.ctrlKey && s.alt === e.altKey && s.shift === e.shiftKey && s.key === key);
         if (hit) {
-          if (hit.action === 'copy') return fire(copySelection);
+          if (hit.action === 'copy') {
+            // As in Windows Terminal: with a selection the key copies, without one it goes to the session, so Ctrl+C still interrupts.
+            if (e.type !== 'keydown' || e.repeat) {
+              if (!copyHeld) return true;
+              e.preventDefault();
+              if (e.type === 'keyup') copyHeld = false;
+              return false;
+            }
+            copyHeld = false;
+            if (!term.hasSelection() && !waitingCopy()) return true;
+            copyHeld = true;
+            return fire(copyKey);
+          }
           if (hit.action === 'paste') return fire(() => send({ type:'pasteRequest', id }));
           if (hit.action === 'palette') return fire(togglePalette);
           return fire(() => send({ type:'shortcut', action:hit.action, id }));
