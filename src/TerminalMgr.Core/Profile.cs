@@ -11,6 +11,8 @@ public sealed record Profile
     public bool AutoConnect { get; init; }
     /// <summary>Connect again after the connection was lost (off by default).</summary>
     public bool AutoReconnect { get; init; }
+    /// <summary>Keep a list of the tmux sessions on the server (a file in its home directory) and offer to restore them after the server restarted.</summary>
+    public bool RememberTmux { get; init; } = true;
     public StartMode Mode { get; init; }
     public string TmuxSession { get; init; } = "main";
     public string Command { get; init; } = "";

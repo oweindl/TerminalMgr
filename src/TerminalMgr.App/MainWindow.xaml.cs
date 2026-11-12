@@ -66,6 +66,7 @@ public partial class MainWindow : Window
         InitializeLayout();
         InitializeSubscriptions();
         InitializeMakyx();
+        InitializeTmuxMemory();
         RestoreWindowPlacement();
         _flush = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Background, (_, _) => FlushOutput(), Dispatcher);
         _flush.Start();
@@ -273,6 +274,11 @@ public partial class MainWindow : Window
         try
         {
             item.Profile.Validate();
+            // The server restarted and lost its tmux sessions? A saved list on the server lets the user restore them before connecting.
+            _snapshotPolicy.Reset(id);
+            if (newTmux is null && tmuxSessionId is null && RemembersTmux(item) && await OfferTmuxRestoreAsync(item, ask: !automatic) is { } restored
+                && item.Profile.Mode == StartMode.SshConfig && await _tmuxQuery.RemoteCommandAsync(item.Profile, _shutdown.Token) is null)
+                newTmux = (restored, null);   // a plain shell profile goes into the restored session; profiles that start tmux themselves keep their way
             if (!automatic) SelectProfile(item);
             if (_terminals.Remove(id)) Post(new { type = "remove", id });
             var completion = new TaskCompletionSource<(int Cols, int Rows)>(TaskCreationOptions.RunContinuationsAsynchronously);

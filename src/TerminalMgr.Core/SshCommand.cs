@@ -70,6 +70,56 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: false, Tmux(socket) + " kill-window -t " + ShellQuote(windowId));
     }
 
+    /// <summary>
+    /// The snapshot of the tmux sessions, made on the server itself (see <see cref="TmuxSnapshot"/>): one line per window into
+    /// <c>~/.config/terminalmgr/tmux-sitzungen.tsv</c>, written atomically with rights for the user only. When no tmux runs (or nothing is left
+    /// after leaving out helper sessions) the old file stays. Only the normal tmux server, never a socket of Makyx.
+    /// </summary>
+    public static IReadOnlyList<string> TmuxSnapshotArguments(Profile profile)
+    {
+        string format = "#{session_name}\t#{window_index}\t#{window_name}\t#{pane_current_path}";
+        string script = "umask 077; d=\"$HOME/.config/terminalmgr\"; f=\"$d/tmux-sitzungen.tsv\"; mkdir -p \"$d\" || exit 0; " +
+            "out=$(tmux list-windows -a -F " + ShellQuote(format) + " 2>/dev/null) || exit 0; [ -n \"$out\" ] || exit 0; now=$(date +%s); " +
+            "printf '%s\\n' \"$out\" | awk -v t=\"$now\" 'BEGIN{FS=OFS=\"\\t\"} $1 !~ /^(tm|ansicht)-/ {print $0, t}' > \"$f.neu\" " +
+            "&& [ -s \"$f.neu\" ] && chmod 600 \"$f.neu\" && mv \"$f.neu\" \"$f\"; rm -f \"$f.neu\"; exit 0";
+        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(script));
+    }
+
+    /// <summary>One answer with both things the restore question needs: the saved file (if any), then the marker line, then the names of the running sessions.</summary>
+    public static IReadOnlyList<string> TmuxMemoryCheckArguments(Profile profile)
+    {
+        string script = "f=\"$HOME/.config/terminalmgr/tmux-sitzungen.tsv\"; [ -r \"$f\" ] && head -c 262144 \"$f\"; echo; echo '" + TmuxSnapshot.SessionsMarker +
+            "'; tmux list-sessions -F '#{session_name}' 2>/dev/null; exit 0";
+        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(script));
+    }
+
+    /// <summary>
+    /// Creates the saved sessions that are missing, window by window in the saved order, each in its directory (the home directory when the
+    /// directory is gone): <c>new-session -d</c> for the first window, <c>new-window</c> for the others. A running session is skipped. Only the
+    /// session, window names and directories come back, not the programs; every window starts a shell.
+    /// </summary>
+    public static IReadOnlyList<string> TmuxRestoreArguments(Profile profile, IReadOnlyList<SavedTmuxSession> sessions)
+    {
+        var todo = sessions.Where(s => s.Windows.Count > 0).ToList();
+        if (todo.Count == 0) throw new ArgumentException("Es gibt nichts wiederherzustellen.");
+        if (todo.Sum(s => s.Windows.Count) > TmuxSnapshot.MaxWindowsToRestore) throw new ArgumentException("Zu viele Fenster zum Wiederherstellen.");
+        string script = "";
+        foreach (var session in todo)
+        {
+            string name = ShellQuote(session.Name), exact = ShellQuote("=" + session.Name), target = ShellQuote("=" + session.Name + ":");
+            string inner = "";
+            for (int i = 0; i < session.Windows.Count; i++)
+            {
+                var window = session.Windows[i];
+                string label = window.Name.Length > 0 ? " -n " + ShellQuote(window.Name) : "";
+                string create = i == 0 ? $"tmux new-session -d -s {name}{label} -c \"$p\"" : $"tmux new-window -t {target}{label} -c \"$p\"";
+                inner += $"p={ShellQuote(window.Path)}; [ -d \"$p\" ] || p=\"$HOME\"; {create}; ";
+            }
+            script += $"tmux has-session -t {exact} 2>/dev/null || {{ {inner}}}; ";
+        }
+        return OverrideArguments(profile, interactive: false, "sh -c " + ShellQuote(script + "exit 0"));
+    }
+
     /// <summary>"tmux", or "tmux -L 'name'" for a tmux server with its own socket (Makyx runs its instances on one).</summary>
     public static string Tmux(string? socket)
     {

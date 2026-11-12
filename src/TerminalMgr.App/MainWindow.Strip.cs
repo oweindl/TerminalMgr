@@ -126,7 +126,9 @@ public partial class MainWindow
     private void OnStripFrame(int generation, ProfileItem item, WindowActivityTracker tracker, WindowPoll poll)
     {
         if (generation != _streamGeneration || !ReferenceEquals(Selected, item) || !_stripOpen) return;
-        ShowCards(tracker.Update(poll, DateTimeOffset.Now));
+        var cards = tracker.Update(poll, DateTimeOffset.Now);
+        ShowCards(cards);
+        ObserveTmuxWindows(item, cards);
     }
 
     /// <summary>No tmux in this session, no key login for the query, the connection dropped: the strip is gone (the tabs stay) and tries again later.</summary>
