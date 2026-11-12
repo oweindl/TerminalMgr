@@ -100,6 +100,7 @@ public partial class MainWindow
     {
         if (e.OldItems is not null) foreach (ProfileItem item in e.OldItems) item.PropertyChanged -= ProfileItemChanged;
         if (e.NewItems is not null) foreach (ProfileItem item in e.NewItems) item.PropertyChanged += ProfileItemChanged;
+        if (_active is not null && !_profiles.Contains(_active)) _active = null;   // the shown terminal was removed
         RefreshTabs();
     }
 
@@ -111,12 +112,13 @@ public partial class MainWindow
     /// <summary>One tab per connected server, plus the selected one (so the terminal always has its tab). The number is the Alt number.</summary>
     private void RefreshTabs()
     {
-        for (int i = 0; i < _profiles.Count; i++) _profiles[i].AltLabel = i < 9 ? "Alt " + (i + 1) : "";
+        var numbered = NumberedProfiles();
+        for (int i = 0; i < numbered.Count; i++) numbered[i].AltLabel = i < 9 ? "Alt " + (i + 1) : "";
         if (_updatingTabs || SessionTabs is null) return;
         _updatingTabs = true;
         try
         {
-            var wanted = _profiles.Select((item, index) => (item, index))
+            var wanted = numbered.Select((item, index) => (item, index))
                 .Where(t => t.item.Connection != ConnectionState.Disconnected || ReferenceEquals(t.item, Selected)).ToList();
             for (int i = _tabs.Count - 1; i >= 0; i--)
                 if (wanted.All(w => !ReferenceEquals(w.item, _tabs[i].Item))) _tabs.RemoveAt(i);
@@ -136,14 +138,14 @@ public partial class MainWindow
     private void TabSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingTabs || SessionTabs.SelectedItem is not TabModel tab) return;
-        if (!ReferenceEquals(Selected, tab.Item)) { ProfilesList.SelectedItem = tab.Item; FocusTerminal(tab.Item.Profile.Id); }
+        if (!ReferenceEquals(Selected, tab.Item)) { SelectProfile(tab.Item); FocusTerminal(tab.Item.Profile.Id); }
     }
 
     private void TabRightClick(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is not DependencyObject source) return;
         if (ItemsControl.ContainerFromElement(SessionTabs, source) is not ListBoxItem { DataContext: TabModel tab } container) return;
-        ProfilesList.SelectedItem = tab.Item;
+        SelectProfile(tab.Item);
         ShowServerMenu(tab.Item, container);
         e.Handled = true;
     }

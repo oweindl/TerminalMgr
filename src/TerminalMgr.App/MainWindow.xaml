@@ -79,7 +79,11 @@
    <ListBox x:Name="ProfilesList" ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="ProfileSelected" MouseDoubleClick="ProfileDoubleClick" PreviewMouseRightButtonUp="ServerRightClick">
     <ListBox.ItemContainerStyle>
      <!-- 23 + 2 × 3 padding + 1 line = 30 (WindowLayout.ServerRowHeight) -->
-     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Padding" Value="12,3,10,3"/></Style>
+     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+      <Setter Property="Padding" Value="12,3,10,3"/>
+      <!-- Instance terminals of Makyx (temporary entries) live in the MAKYX tree and the tabs, not in this list of servers; not focusable, so the arrow keys skip them. -->
+      <Style.Triggers><DataTrigger Binding="{Binding Temporary}" Value="True"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="Focusable" Value="False"/></DataTrigger></Style.Triggers>
+     </Style>
     </ListBox.ItemContainerStyle>
     <ListBox.ItemTemplate><DataTemplate>
      <Grid Height="23" ToolTip="{Binding Status}">

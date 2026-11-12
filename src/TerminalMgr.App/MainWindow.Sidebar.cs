@@ -46,7 +46,7 @@ public partial class MainWindow
         if (runsOpen)
         {
             // The runs take what is left; the server list fits its rows.
-            double servers = WindowLayout.ListHeight(_serverListHeight, _profiles.Count, WindowLayout.ServerRowHeight, 2, total - ai, RunsMinimum + 8);
+            double servers = WindowLayout.ListHeight(_serverListHeight, _profiles.Count(p => !p.Temporary),WindowLayout.ServerRowHeight, 2, total - ai, RunsMinimum + 8);
             ServerListRow.Height = new GridLength(servers);
             MakyxPanelRow.Height = new GridLength(1, GridUnitType.Star);
         }
