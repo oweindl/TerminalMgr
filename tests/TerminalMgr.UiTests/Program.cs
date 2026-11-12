@@ -378,10 +378,19 @@ internal static class Program
         var normal = new ProfileItem(new Profile { Name = "rechner-a", Destination = "rechner-a" });
         var onMakyx = new ProfileItem(new Profile { Name = "Makyx · rechner-a", Destination = "rechner-a" }) { Temporary = true, TmuxSocket = "makyx" };
         var normalMenu = (ContextMenu)cardMenu.Invoke(main, [normal, (StripCard)strip.Items[1]])!;
-        var closeItem = (MenuItem)normalMenu.Items[0]!;
-        Check(normalMenu.Items.Count == 1 && closeItem.IsEnabled && (string)closeItem.Header == "Fenster schließen …", "a card offers \"Fenster schließen …\"");
-        var makyxItem = (MenuItem)((ContextMenu)cardMenu.Invoke(main, [onMakyx, (StripCard)strip.Items[1]])!).Items[0]!;
-        Check(!makyxItem.IsEnabled && ((string)makyxItem.Header).Contains("von Makyx verwaltet"), "a Makyx window can not be closed here: " + makyxItem.Header);
+        var renameItem = (MenuItem)normalMenu.Items[0]!;
+        var closeItem = (MenuItem)normalMenu.Items[1]!;
+        Check(normalMenu.Items.Count == 2 && renameItem.IsEnabled && (string)renameItem.Header == "Fenster umbenennen …" && closeItem.IsEnabled && (string)closeItem.Header == "Fenster schließen …", "a card offers rename and close");
+        var makyxMenu = ((ContextMenu)cardMenu.Invoke(main, [onMakyx, (StripCard)strip.Items[1]])!).Items;
+        Check(makyxMenu.Cast<MenuItem>().All(i => !i.IsEnabled && ((string)i.Header).Contains("von Makyx verwaltet")), "a Makyx window can neither be renamed nor closed here: " + string.Join(" | ", makyxMenu.Cast<MenuItem>().Select(i => i.Header)));
+        // The rename dialog takes the name tmux gave (spaces included) but refuses empty names and control characters.
+        var renameDialog = new TmuxNameDialog("Fenster umbenennen · rechner-a", "Neuer Name.", "my window", optional: false, "Umbenennen", anyText: true);
+        renameDialog.SetText("");
+        Check(!renameDialog.Confirm() && renameDialog.ErrorText.Contains("Namen"), "an empty name is refused");
+        renameDialog.SetText("bad\u0001name");
+        Check(!renameDialog.Confirm() && renameDialog.ErrorText.Contains("Steuerzeichen"), "control characters are refused: " + renameDialog.ErrorText);
+        renameDialog.SetText(new string('x', TmuxNaming.MaxLength + 1));
+        Check(!renameDialog.Confirm() && renameDialog.ErrorText.Contains("höchstens"), "an over-long name is refused");
         Check(!ReferenceEquals(model.StateBrush, ((StripCard)strip.Items[2]).StateBrush) && !ReferenceEquals(((StripCard)strip.Items[3]).StateBrush, ((StripCard)strip.Items[0]).StateBrush), "Each state has its own color");
 
         // Alt numbers appear in the server list, beyond the ninth server there is none.

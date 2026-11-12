@@ -84,6 +84,25 @@ try
         Check(TmuxNaming.Suggest("Mein Server 1") == "Mein-Server-1" && TmuxNaming.Suggest("!!!") == "main" && TmuxNaming.Suggest(null) == "main" && TmuxNaming.IsValid(TmuxNaming.Suggest(new string('x', 90))), "suggested name is always valid");
         Check(TmuxNaming.Problem("logs", false) is null && TmuxNaming.Problem("", true) is null && TmuxNaming.Problem("", false) is { } && TmuxNaming.Problem("a b", true) == TmuxNaming.Rule, "name problems");
     });
+    Test("tmux: rename a window by its ID – quoted name after \"--\", free text without control characters, one argument for ssh", () =>
+    {
+        var profile = new Profile { Name = "rechner-a", Destination = "rechner-a" };
+        var plain = SshCommand.TmuxRenameWindowArguments(profile, "@7", "logs");
+        Check(plain.Contains("-T") && !plain.Contains("-tt") && plain[^2] == "rechner-a" && plain[^1] == "tmux rename-window -t '@7' -- 'logs'", "rename-window by ID: " + plain[^1]);
+        Check(SshCommand.TmuxRenameWindowArguments(profile, "@7", "  my window  ", "zweit")[^1] == "tmux -L 'zweit' rename-window -t '@7' -- 'my window'", "spaces are fine, the name is trimmed, socket");
+        Check(SshCommand.TmuxRenameWindowArguments(profile, "@7", "-x")[^1].EndsWith(" -- '-x'"), "a name with a leading dash is no option");
+        Check(SshCommand.TmuxRenameWindowArguments(profile, "@7", "it's $(id)")[^1].Contains("'\"'\"'") && !SshCommand.TmuxRenameWindowArguments(profile, "@7", "a;b")[^1].Contains(" a;b"), "quotes and shell characters in the name stay inside their quotes");
+        foreach (string badName in new[] { "", "   ", "a\nb", "a\u0001b", new string('x', TmuxNaming.MaxLength + 1) })
+        {
+            bool refused = false;
+            try { SshCommand.TmuxRenameWindowArguments(profile, "@7", badName); } catch (ArgumentException) { refused = true; }
+            Check(refused, "refused name: '" + badName.Replace("\n", "\\n") + "'");
+        }
+        bool badId = false;
+        try { SshCommand.TmuxRenameWindowArguments(profile, "7;id", "x"); } catch (ArgumentException) { badId = true; }
+        Check(badId, "a bad window id is refused");
+        Check(TmuxNaming.WindowNameProblem("logs") is null && TmuxNaming.WindowNameProblem("my window.2") is null && TmuxNaming.WindowNameProblem(null) is { } && TmuxNaming.WindowNameProblem(new string('x', 41)) is { }, "window name rules");
+    });
     Test("tmux: close a window by its ID – command without a local shell, question names what ends, Makyx windows are left alone", () =>
     {
         var profile = new Profile { Name = "rechner-a", Destination = "rechner-a" };

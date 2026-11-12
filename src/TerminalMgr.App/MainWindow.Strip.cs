@@ -198,11 +198,38 @@ public partial class MainWindow
     {
         var menu = new System.Windows.Controls.ContextMenu();
         string? managed = TmuxWindowActions.ManagedReason(item.TmuxSocket);
+        var rename = new System.Windows.Controls.MenuItem { Header = managed is null ? "Fenster umbenennen …" : "Fenster umbenennen – " + managed, IsEnabled = managed is null };
+        rename.Click += (_, _) => _ = RenameTmuxWindowAsync(item, card);
+        menu.Items.Add(rename);
         var close = new System.Windows.Controls.MenuItem { Header = managed is null ? "Fenster schließen …" : "Fenster schließen – " + managed, IsEnabled = managed is null };
         if (managed is null) close.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "RecordingBrush");
         close.Click += (_, _) => _ = CloseTmuxWindowAsync(item, card);
         menu.Items.Add(close);
         return menu;
+    }
+
+    /// <summary>
+    /// "Fenster umbenennen …": asks for the new name (the current one is filled in and selected) and renames the window over a separate SSH
+    /// command by its stable ID. The strip, the server menu and the history show the new name; tmux keeps it (no renaming after the program).
+    /// </summary>
+    private async Task RenameTmuxWindowAsync(ProfileItem item, StripCard card)
+    {
+        var dialog = new TmuxNameDialog("Fenster umbenennen · " + item.Name, "Neuer Name für das tmux-Fenster.", card.Name, optional: false, "Umbenennen", anyText: true) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        string name = dialog.Value;
+        if (name == card.Name) return;
+        StatusText.Text = $"Fenster „{card.Name}“ wird umbenannt …";
+        try { await _tmuxQuery.RenameWindowAsync(item.Profile, card.WindowId, name, item.TmuxSocket, _shutdown.Token); }
+        catch (OperationCanceledException) when (_closing) { return; }
+        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            string first = ex.Message.Split('\n')[0].Trim();
+            StatusText.Text = $"Fenster „{card.Name}“ ließ sich nicht umbenennen: {first}";
+            MessageBox.Show(this, ex.Message, "tmux-Fenster umbenennen", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        _history.Forget(p => p.ProfileId == item.Profile.Id && p.WindowId == card.WindowId);   // the old name must not stay in the history
+        StatusText.Text = $"Fenster „{card.Name}“ heißt jetzt „{name}“.";
     }
 
     /// <summary>The name of the tmux session this connection shows: from the label, else the tracked name, else what the strip asks for.</summary>

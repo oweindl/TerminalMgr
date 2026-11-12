@@ -9,13 +9,15 @@ public sealed class TmuxNameDialog : Window
 {
     private readonly TextBox _name = new() { Margin = new Thickness(0, 6, 0, 4), MaxLength = TmuxNaming.MaxLength };
     private readonly TextBlock _error = new() { TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.IndianRed, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly bool _optional;
+    private readonly bool _optional, _anyText;
     /// <summary>The chosen name, trimmed; empty only when the name is optional.</summary>
     public string Value => _name.Text.Trim();
 
-    public TmuxNameDialog(string title, string prompt, string initial, bool optional, string okText)
+    /// <param name="anyText">The new name of an existing window: any text without control characters (the name tmux gave it may have spaces), not the strict session rule.</param>
+    public TmuxNameDialog(string title, string prompt, string initial, bool optional, string okText, bool anyText = false)
     {
         _optional = optional;
+        _anyText = anyText;
         Style = (Style)FindResource(typeof(Window));
         Title = title;
         Width = 460; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
@@ -41,7 +43,7 @@ public sealed class TmuxNameDialog : Window
     /// <summary>Checks the name; the dialog only closes with a valid one.</summary>
     public bool Confirm()
     {
-        string? problem = TmuxNaming.Problem(_name.Text, _optional);
+        string? problem = _anyText ? TmuxNaming.WindowNameProblem(_name.Text) : TmuxNaming.Problem(_name.Text, _optional);
         if (problem is not null) { _error.Text = problem; return false; }
         DialogResult = true;
         return true;
