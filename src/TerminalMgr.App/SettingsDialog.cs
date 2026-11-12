@@ -158,8 +158,8 @@ public sealed partial class SettingsDialog : Window
         _panel.Children.Add(new TextBlock { Text = "Feld anklicken und Kombination drücken. Mit Ctrl oder Alt, nur F1 bis F12 gehen allein. Ctrl+B bleibt für tmux reserviert.",
             TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(0, 0, 0, 8) });
         _dictationShortcut = ShortcutField("Diktat starten und stoppen", dictation.Shortcut, new DictationOptions().Shortcut);
-        _copyShortcut = ShortcutField("Markierung kopieren", shortcuts.Copy, new ShortcutOptions().Copy);
-        _pasteShortcut = ShortcutField("Zwischenablage einfügen", shortcuts.Paste, new ShortcutOptions().Paste);
+        _copyShortcut = ShortcutField("Markierung kopieren", shortcuts.Copy, new ShortcutOptions().Copy, "copy");
+        _pasteShortcut = ShortcutField("Zwischenablage einfügen", shortcuts.Paste, new ShortcutOptions().Paste, "paste");
         _sessionModifier = Combo("Session wechseln: Tasten plus 1 bis 9", ShortcutRules.SessionModifiers.Select(m => m + "+1 … 9"), shortcuts.SessionModifier + "+1 … 9");
 
         _windowModifier = Combo("tmux-Fenster der aktuellen Session: Tasten plus 0 bis 9", ShortcutRules.WindowModifiers.Select(m => m + "+0 … 9"), shortcuts.WindowModifier + "+0 … 9");
@@ -182,8 +182,10 @@ public sealed partial class SettingsDialog : Window
             ToolTip = "Programme in der Session können so Text in die Zwischenablage legen. Lesen der Zwischenablage ist nie möglich." };
         _panel.Children.Add(_acceptOsc52);
         _copyOnSelect = new CheckBox { Content = "Markierung sofort kopieren (überall gleich: Shell, tmux, Claude Code)", IsChecked = settings.CopyOnSelect,
-            ToolTip = "Aus: Eine Markierung wird mit Rechtsklick (oder der Kopieren-Taste) in die Zwischenablage übernommen. Rechtsklick ohne Markierung fügt ein." };
+            ToolTip = "Aus: Linksziehen markiert nur. Kopiert wird erst mit Rechtsklick oder der Kopieren-Taste (in tmux und Claude Code ebenso). Rechtsklick ohne Markierung fügt ein. An: Die Markierung ist sofort in der Zwischenablage." };
         _panel.Children.Add(_copyOnSelect);
+        _panel.Children.Add(new TextBlock { Text = "Ohne diese Option markiert Linksziehen nur; kopiert wird mit Rechtsklick oder der Kopieren-Taste.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, FontSize = 11, Margin = new Thickness(22, 0, 0, 6) });
 
         Heading("Diktat");
         _engine = Combo("Spracherkennung (Engine)", SpeechEngineIds.All.Select(SpeechEngineIds.Label), SpeechEngineIds.Label(dictation.Engine));
@@ -227,12 +229,12 @@ public sealed partial class SettingsDialog : Window
     }
 
     /// <summary>A read-only box that records the pressed combination, a reset button and a note when the key is also used in the terminal.</summary>
-    private TextBox ShortcutField(string label, string value, string standard)
+    private TextBox ShortcutField(string label, string value, string standard, string? action = null)
     {
         _panel.Children.Add(new TextBlock { Text = label });
         var box = new TextBox { Text = value, IsReadOnly = true, IsReadOnlyCaretVisible = false, Margin = new Thickness(0, 4, 0, 2) };
         var hint = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Goldenrod, FontSize = 11, Margin = new Thickness(0, 0, 0, 10) };
-        void ShowHint() => hint.Text = Shortcut.TryParse(box.Text, out var s) ? ShortcutRules.TerminalHint(s) ?? "" : "";
+        void ShowHint() => hint.Text = Shortcut.TryParse(box.Text, out var s) ? ShortcutRules.TerminalHint(s, action) ?? "" : "";
         box.TextChanged += (_, _) => ShowHint();
         box.PreviewKeyDown += CaptureShortcut;
         var reset = new Button { Content = "Standard", ToolTip = standard, Margin = new Thickness(6, 0, 0, 0) };

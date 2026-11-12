@@ -65,8 +65,13 @@ public static class ShortcutRules
     };
 
     /// <summary>Hint (not a hard rule) when a shortcut would hide a key that programs in the terminal use.</summary>
-    public static string? TerminalHint(Shortcut shortcut)
+    public static string? TerminalHint(Shortcut shortcut, string? action = null)
     {
+        // Copy and paste on a plain Ctrl key: the terminal gives the key back to the session where it has nothing to do.
+        if (action == "copy" && shortcut is { Ctrl: true, Alt: false, Shift: false, Key: "C" })
+            return "Mit Markierung kopiert Ctrl+C; ohne Markierung geht es an das Terminal und bricht das Programm ab (wie in Windows Terminal).";
+        if (action == "paste" && shortcut is { Ctrl: true, Alt: false, Shift: false, Key: "V" })
+            return "Ctrl+V fügt ein und sendet kein ^V („nächstes Zeichen wörtlich“, z. B. in vim) an das Programm.";
         if (shortcut.Ctrl && !shortcut.Alt && !shortcut.Shift && shortcut.Key.Length == 1 && char.IsAsciiDigit(shortcut.Key[0]))
             return $"{shortcut} hat im Terminal eine alte Bedeutung (Ctrl+3 ist Escape, Ctrl+2 das Nullzeichen) und ist dann dort nicht mehr erreichbar.";
         if (!shortcut.Ctrl || shortcut.Alt || shortcut.Shift || shortcut.Key.Length != 1 || !char.IsAsciiLetter(shortcut.Key[0])) return null;

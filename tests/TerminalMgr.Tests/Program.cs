@@ -780,6 +780,8 @@ try
     Test("Shortcut rules: hints for terminal keys, normalization of bad values", () =>
     {
         Check(ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Y"))!.Contains("yank") && ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Q")) is not null, "Hint for Ctrl+letter");
+        Check(ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+C"), "copy") is { } copyHint && copyHint.Contains("ohne Markierung") && ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+V"), "paste") is { } pasteHint && pasteHint.Contains("^V")
+            && ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Shift+C"), "copy") is null && ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+C")) is { } plain && plain.Contains("abbrechen"), "Hint for Ctrl+C as the copy key and Ctrl+V as the paste key");
         Check(ShortcutRules.TerminalHint(Shortcut.Parse("Ctrl+Shift+D")) is null && ShortcutRules.TerminalHint(Shortcut.Parse("Alt+1")) is null && ShortcutRules.TerminalHint(Shortcut.Parse("F5")) is null, "No hint expected");
         var fixedUp = new ShortcutOptions { Copy = "C", Paste = "", SessionModifier = "Win" }.Normalized();
         Check(fixedUp.Copy == "Ctrl+Shift+C" && fixedUp.Paste == "Ctrl+Shift+V" && fixedUp.SessionModifier == "Alt", "Normalization");

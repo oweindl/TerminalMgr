@@ -138,6 +138,33 @@ test('Default copy and paste shortcuts work before the host sends a configuratio
   await expect.poll(async () => (await messages(page, 'pasteRequest')).length).toBe(1);
 });
 
+test('Copy on Ctrl+C: with a selection it copies, without one Ctrl+C reaches the session as ^C', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'shortcuts', shortcuts:{dictation:'Ctrl+Y', copy:'Ctrl+C', paste:'Ctrl+V'}}));
+  await page.keyboard.press('Control+c');                          // nothing selected: interrupts
+  await expect.poll(async () => (await inputs(page)).includes('\x03')).toBe(true);
+  expect(await messages(page, 'copy')).toHaveLength(0);
+  await page.evaluate(() => window.__hostMessage({type:'output',id:'one',data:'copy-me   \r\n'}));
+  await expect(page.locator('.xterm-rows')).toContainText('copy-me');
+  await page.locator('.xterm-rows > div').first().click({clickCount:3});
+  await page.keyboard.press('Control+c');                          // selected: copies, no ^C
+  await expect.poll(async () => (await messages(page, 'copy')).length).toBe(1);
+  expect((await messages(page, 'copy'))[0].text).toBe('copy-me');
+  expect((await inputs(page)).filter(d => d === '\x03')).toHaveLength(1);
+  await page.keyboard.press('Control+c');                          // the selection is gone: interrupts again
+  await expect.poll(async () => (await inputs(page)).filter(d => d === '\x03').length).toBe(2);
+  expect(await messages(page, 'copy')).toHaveLength(1);
+});
+
+test('A selection waiting in tmux (OSC 52) is copied by the copy key instead of interrupting', async ({page}) => {
+  await page.evaluate(() => window.__hostMessage({type:'shortcuts', shortcuts:{dictation:'Ctrl+Y', copy:'Ctrl+C', paste:'Ctrl+V'}}));
+  await tmuxSelect(page);
+  await page.waitForTimeout(150);
+  expect((await messages(page, 'osc52')).filter(m => m.data.endsWith(b64('markierter Satz')))).toHaveLength(0);
+  await page.keyboard.press('Control+c');
+  await expect.poll(async () => (await messages(page, 'osc52')).filter(m => m.data.endsWith(b64('markierter Satz'))).length).toBe(1);
+  expect(await inputs(page)).not.toContain('\x03');
+});
+
 test('The session switch modifier is configurable: Alt+2 by default, Ctrl+Alt+2 after the change', async ({page}) => {
   await page.keyboard.press('Alt+2');
   await expect.poll(async () => (await messages(page, 'switch')).length).toBe(1);
