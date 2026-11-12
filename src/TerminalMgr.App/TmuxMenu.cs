@@ -13,15 +13,22 @@ public static class TmuxMenu
     public static string SessionTitle(TmuxSessionWindows session, bool connected) =>
         $"{session.Name} · {session.Windows.Count} Fenster" + (connected ? " · verbunden" : "");
 
+    /// <param name="newWindow">When given, every session ends with "+ Neues Fenster in dieser Session".</param>
     public static IReadOnlyList<Control> Build(IReadOnlyList<TmuxSessionWindows> sessions,
-        Func<TmuxSessionWindows, bool> isConnected, Action<TmuxWindowRecord> choose)
+        Func<TmuxSessionWindows, bool> isConnected, Action<TmuxWindowRecord> choose, Action<TmuxSessionWindows>? newWindow = null)
     {
         var items = new List<Control>();
         bool submenus = TmuxWindowParser.UseSubmenus(sessions);
         foreach (var session in sessions)
         {
             string title = Escape(SessionTitle(session, isConnected(session)));
-            var windows = session.Windows.Select(w => WindowItem(w, choose)).ToList();
+            var windows = session.Windows.Select(w => WindowItem(w, choose)).ToList<Control>();
+            if (newWindow is not null)
+            {
+                var add = new MenuItem { Header = "    + Neues Fenster in dieser Session", Tag = session };
+                add.Click += (_, _) => newWindow(session);
+                windows.Add(add);
+            }
             if (submenus)
             {
                 var submenu = new MenuItem { Header = title, FontWeight = isConnected(session) ? FontWeights.SemiBold : FontWeights.Normal };

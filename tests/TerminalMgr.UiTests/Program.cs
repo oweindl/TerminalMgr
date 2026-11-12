@@ -764,7 +764,19 @@ internal static class Program
         var many = TmuxWindowParser.Group(Enumerable.Range(1, 30).Select(i => new TmuxWindowRecord("$0", "big", "@" + i, i, "w" + i, "bash", i == 3)));
         var nested = TmuxMenu.Build(many, _ => false, _ => { }).Cast<MenuItem>().ToList();
         Check(nested.Count == 1 && nested[0].Items.Count == 30 && nested[0].IsEnabled, "Many windows must be one submenu per session");
-        Console.WriteLine("PASS tmux context menu: headers, active marker, escaping, click by IDs, submenus for many windows");
+        // "+ Neues Fenster in dieser Session" ends every session when the caller wants it; without the callback the menu is as before.
+        TmuxSessionWindows? addTo = null;
+        var withAdd = TmuxMenu.Build(sessions, s => s.Name == "main", _ => { }, s => addTo = s).Cast<MenuItem>().ToList();
+        Check(withAdd.Count == 7 && ((string)withAdd[2].Header).Contains("+ Neues Fenster") && ((string)withAdd[6].Header).Contains("+ Neues Fenster") && withAdd[2].IsEnabled, "a new-window entry ends each session: " + withAdd.Count);
+        withAdd[6].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(addTo is { Name: "my_work" }, "the new-window entry carries its session");
+        // The name dialog keeps a refused name inside and says why; an optional name may stay empty.
+        var nameDialog = new TmuxNameDialog("Neue tmux-Session · rechner-a", "Name der Session.", "rechner-a", optional: false, "Session anlegen");
+        nameDialog.SetText("zwei Wörter");
+        Check(!nameDialog.Confirm() && nameDialog.ErrorText == TmuxNaming.Rule, "an invalid session name is refused in the dialog: " + nameDialog.ErrorText);
+        nameDialog.SetText("");
+        Check(!nameDialog.Confirm() && nameDialog.ErrorText.Contains("Namen"), "an empty session name is refused");
+        Console.WriteLine("PASS tmux context menu: headers, active marker, escaping, click by IDs, submenus for many windows, new window entry, name dialog");
     }
 
     private static void SetClipboard(string text, string? marker = null, int markerValue = 1)

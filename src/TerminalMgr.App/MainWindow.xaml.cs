@@ -230,7 +230,8 @@ public partial class MainWindow : Window
     }
 
     /// <param name="automatic">True for an automatic reconnect: it must not steal the selection from what the user is doing.</param>
-    private async Task ConnectAsync(ProfileItem item, string? tmuxSessionId = null, string? tmuxWindowId = null, bool automatic = false)
+    /// <param name="newTmux">Creates (or attaches to) a tmux session of this name and, when <c>Window</c> is not null, opens a new window in it.</param>
+    private async Task ConnectAsync(ProfileItem item, string? tmuxSessionId = null, string? tmuxWindowId = null, bool automatic = false, (string Session, string? Window)? newTmux = null)
     {
         string id = item.Profile.Id;
         if (!_ready) { StatusText.Text = "Das Terminal wird noch vorbereitet."; return; }
@@ -271,11 +272,13 @@ public partial class MainWindow : Window
                 }
             });
             _sessions[id] = pty;
-            var arguments = tmuxSessionId is null ? SshCommand.Arguments(item.Profile)
+            var arguments = newTmux is { } fresh ? SshCommand.TmuxNewArguments(item.Profile, fresh.Session, fresh.Window)
+                : tmuxSessionId is null ? SshCommand.Arguments(item.Profile)
                 : tmuxWindowId is null ? SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId)
                 : SshCommand.TmuxAttachArguments(item.Profile, tmuxSessionId, tmuxWindowId, item.TmuxSocket);
             ForgetTmux(id);
-            if (tmuxSessionId is not null) _tmuxAttached[id] = (tmuxSessionId, null);
+            if (newTmux is { } created) _tmuxAttached[id] = (null, created.Session);
+            else if (tmuxSessionId is not null) _tmuxAttached[id] = (tmuxSessionId, null);
             else if (item.Profile.Mode == StartMode.Tmux) _tmuxAttached[id] = (null, item.Profile.TmuxSession);
             pty.Start(ssh, arguments, size.Cols, size.Rows);
             Reconnect(id).Connected(DateTimeOffset.Now);
@@ -452,6 +455,8 @@ public partial class MainWindow : Window
         }
         Add("tmux-Session auswählen …", ChooseTmuxSession);
         Add("tmux-Fensterwahl öffnen (Ctrl+B w)", OpenTmuxWindowPicker);
+        // New sessions and windows of the normal tmux (not for the entries on the Makyx socket, which Makyx manages).
+        if (!item.Temporary && item.TmuxSocket is null) { Add("Neue tmux-Session …", NewTmuxSession); Add("Neues tmux-Fenster …", NewTmuxWindow); }
         menu.Items.Add(new Separator());
         // The menu opens at once; the window list is inserted here when the separate SSH query answers.
         var placeholder = new MenuItem { Header = "Fenster werden geladen …", IsEnabled = false };
@@ -485,9 +490,10 @@ public partial class MainWindow : Window
                 menu.Items.Insert(at, new MenuItem { Header = "Keine tmux-Sessions auf dem Server", IsEnabled = false });
                 return;
             }
-            var entries = TmuxMenu.Build(sessions,
-                s => (attachedId is not null && s.Id == attachedId) || (attachedName is not null && s.Name == attachedName),
-                window => _ = SwitchToTmuxWindowAsync(item, window));
+            bool Attached(TmuxSessionWindows s) => (attachedId is not null && s.Id == attachedId) || (attachedName is not null && s.Name == attachedName);
+            var entries = TmuxMenu.Build(sessions, Attached,
+                window => _ = SwitchToTmuxWindowAsync(item, window),
+                item.TmuxSocket is null && !item.Temporary ? s => _ = NewTmuxWindowAsync(item, "", s, Attached(s)) : null);
             foreach (var entry in entries) menu.Items.Insert(at++, entry);
             // Makyx instances of this server: on the tmux socket of Makyx, opened as their own entry "Makyx · server".
             foreach (var (socket, makyxSessions) in makyx)
@@ -573,6 +579,60 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception ex) { ShowError("Wechsel in das tmux-Fenster fehlgeschlagen.", ex); }
     }
+    /// <summary>"Neue tmux-Session …": works on a server without any tmux session; a name that exists is attached (<c>new-session -A</c>).</summary>
+    private async void NewTmuxSession(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: ProfileItem item }) return;
+        ProfilesList.SelectedItem = item;
+        var dialog = new TmuxNameDialog("Neue tmux-Session · " + item.Name, "Name der Session. Gibt es sie schon, wird sie angehängt.", TmuxNaming.Suggest(item.Name), optional: false, "Session anlegen") { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        await StartTmuxAsync(item, dialog.Value, null);
+    }
+
+    /// <summary>"Neues tmux-Fenster …": in the session of the connected tmux client; otherwise a session named after the server is created or attached with the window.</summary>
+    private async void NewTmuxWindow(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: ProfileItem item }) return;
+        ProfilesList.SelectedItem = item;
+        var dialog = new TmuxNameDialog("Neues tmux-Fenster · " + item.Name, "Name des Fensters; leer lässt tmux den Namen wählen.", "", optional: true, "Fenster anlegen") { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        await NewTmuxWindowAsync(item, dialog.Value, null, false);
+    }
+
+    /// <param name="target">The session the window belongs to (from the menu), or null for the session of the connected client.</param>
+    /// <param name="targetAttached">The connected client hangs on <paramref name="target"/>.</param>
+    private async Task NewTmuxWindowAsync(ProfileItem item, string windowName, TmuxSessionWindows? target, bool targetAttached)
+    {
+        string id = item.Profile.Id;
+        try
+        {
+            if (_sessions.TryGetValue(id, out var pty) && (target is null || targetAttached) && await ClientInTmuxAsync(item, _shutdown.Token))
+            {
+                await TmuxClient.RunCommandAsync(pty, TmuxNaming.NewWindowCommand(windowName), _shutdown.Token);
+                StatusText.Text = item.Name + ": neues tmux-Fenster" + (windowName.Length > 0 ? " „" + windowName + "“" : "") + " angelegt.";
+                FocusTerminal(id);
+                return;
+            }
+            string session = target?.Name ?? TmuxNaming.Suggest(item.Name);
+            if (!TmuxNaming.IsValid(session)) { StatusText.Text = $"Die Session „{session}“ hat Zeichen, die TerminalMgr nicht an tmux übergibt; bitte „tmux-Session auswählen …“ nutzen."; return; }
+            await StartTmuxAsync(item, session, windowName);
+        }
+        catch (OperationCanceledException) when (_closing) { }
+        catch (ArgumentException ex) { StatusText.Text = ex.Message; }
+        catch (Exception ex) { ShowError("Neues tmux-Fenster fehlgeschlagen.", ex); }
+    }
+
+    /// <summary>Reconnects the server to a tmux session of this name (created when missing), with a new window when <paramref name="window"/> is not null.</summary>
+    private async Task StartTmuxAsync(ProfileItem item, string session, string? window)
+    {
+        await DisconnectAsync(item);
+        await ConnectAsync(item, newTmux: (session, window));
+        if (!_sessions.ContainsKey(item.Profile.Id)) return;
+        _tmuxLabel[item.Profile.Id] = "tmux: " + session;
+        SessionTitle.Text = TitleFor(item);
+        StatusText.Text = item.Name + ": tmux-Session „" + session + "“" + (window is not null ? " mit neuem Fenster" : "") + ".";
+    }
+
     private async void ChooseTmuxSession(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: ProfileItem item }) return;
