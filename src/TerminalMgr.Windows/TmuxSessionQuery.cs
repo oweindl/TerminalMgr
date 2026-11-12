@@ -24,6 +24,10 @@ public sealed class TmuxSessionQuery
     public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default, string? socket = null) =>
         TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile, socket), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
+    /// <summary>Closes a tmux window by its ID (see <see cref="SshCommand.TmuxKillWindowArguments"/>); the programs in it end.</summary>
+    public Task KillWindowAsync(Profile profile, string windowId, string? socket = null, CancellationToken cancellationToken = default) =>
+        RunAsync(SshCommand.TmuxKillWindowArguments(profile, windowId, socket), TimeSpan.FromSeconds(15), cancellationToken);
+
     /// <summary>Ends a Makyx instance by its tmux window (see <see cref="SshCommand.MakyxTmuxEndArguments"/>); takes a few seconds.</summary>
     public Task EndMakyxWindowAsync(Profile profile, string socket, string session, string window, CancellationToken cancellationToken = default) =>
         RunAsync(SshCommand.MakyxTmuxEndArguments(profile, socket, session, window), TimeSpan.FromSeconds(25), cancellationToken);

@@ -147,7 +147,7 @@
        </Style>
       </ListBox.ItemContainerStyle>
       <ListBox.ItemTemplate><DataTemplate>
-       <Border x:Name="Card" Width="176" Margin="0,0,6,0" Padding="9,6,9,6" CornerRadius="7" BorderThickness="1" BorderBrush="{DynamicResource LineBrush}" Background="{DynamicResource RaisedBrush}" Cursor="Hand" ToolTip="{Binding Tooltip}" Tag="{Binding}" MouseLeftButtonUp="StripCardClick">
+       <Border x:Name="Card" Width="176" Margin="0,0,6,0" Padding="9,6,9,6" CornerRadius="7" BorderThickness="1" BorderBrush="{DynamicResource LineBrush}" Background="{DynamicResource RaisedBrush}" Cursor="Hand" ToolTip="{Binding Tooltip}" Tag="{Binding}" MouseLeftButtonUp="StripCardClick" MouseRightButtonUp="StripCardRightClick">
         <StackPanel>
          <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

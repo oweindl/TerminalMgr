@@ -63,6 +63,13 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: true, command);
     }
 
+    /// <summary>Closes one tmux window by its stable ID (<c>@n</c>); with <paramref name="socket"/> on another tmux server. One argument for ssh, no local shell.</summary>
+    public static IReadOnlyList<string> TmuxKillWindowArguments(Profile profile, string windowId, string? socket = null)
+    {
+        if (!TmuxWindowParser.IsWindowId(windowId)) throw new ArgumentException("Ungültige tmux-Fenster-ID.");
+        return OverrideArguments(profile, interactive: false, Tmux(socket) + " kill-window -t " + ShellQuote(windowId));
+    }
+
     /// <summary>"tmux", or "tmux -L 'name'" for a tmux server with its own socket (Makyx runs its instances on one).</summary>
     public static string Tmux(string? socket)
     {
