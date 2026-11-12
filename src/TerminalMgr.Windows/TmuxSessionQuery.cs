@@ -24,6 +24,18 @@ public sealed class TmuxSessionQuery
     public async Task<IReadOnlyList<TmuxWindowRecord>> ListWindowsAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default, string? socket = null) =>
         TmuxWindowParser.Parse(await RunAsync(SshCommand.TmuxWindowsArguments(profile, socket), timeout ?? TimeSpan.FromSeconds(10), cancellationToken));
 
+    /// <summary>Asks the server to write its snapshot of the tmux sessions (see <see cref="SshCommand.TmuxSnapshotArguments"/>); nothing comes back.</summary>
+    public Task WriteSnapshotAsync(Profile profile, CancellationToken cancellationToken = default) =>
+        RunAsync(SshCommand.TmuxSnapshotArguments(profile), TimeSpan.FromSeconds(20), cancellationToken);
+
+    /// <summary>The saved file and the running sessions of the server in one answer; throws when the server can not be asked without a password dialog.</summary>
+    public async Task<TmuxMemoryCheck> CheckMemoryAsync(Profile profile, TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
+        TmuxSnapshot.ParseCheck(await RunAsync(SshCommand.TmuxMemoryCheckArguments(profile), timeout ?? TimeSpan.FromSeconds(8), cancellationToken));
+
+    /// <summary>Creates the missing sessions with their windows (see <see cref="SshCommand.TmuxRestoreArguments"/>).</summary>
+    public Task RestoreSessionsAsync(Profile profile, IReadOnlyList<SavedTmuxSession> sessions, CancellationToken cancellationToken = default) =>
+        RunAsync(SshCommand.TmuxRestoreArguments(profile, sessions), TimeSpan.FromSeconds(30), cancellationToken);
+
     /// <summary>Closes a tmux window by its ID (see <see cref="SshCommand.TmuxKillWindowArguments"/>); the programs in it end.</summary>
     public Task KillWindowAsync(Profile profile, string windowId, string? socket = null, CancellationToken cancellationToken = default) =>
         RunAsync(SshCommand.TmuxKillWindowArguments(profile, windowId, socket), TimeSpan.FromSeconds(15), cancellationToken);

@@ -104,6 +104,81 @@ try
         Check(TmuxWindowActions.CloseQuestion("bash", "arbeit", "", true) == "Fenster „bash“ in Session „arbeit“ schließen? Was darin läuft, wird beendet. Damit endet die Session „arbeit“.", "question for the last window without a program");
         Check(TmuxWindowActions.ManagedReason(null) is null && TmuxWindowActions.ManagedReason("makyx") is { } reason && reason.Contains("Session beenden"), "Makyx windows are managed by Makyx");
     });
+    Test("tmux memory: file format – broken lines are skipped, tabs in names can not break it, helper sessions never count", () =>
+    {
+        string file = "main\t0\tbash\t/home/benutzer\t1000\nmain\t1\tlogs\t/var/log\t1000\narbeit\t0\tclaude\t/home/benutzer/projekte/x\t1010\n";
+        var parsed = TmuxSnapshot.Parse(file);
+        Check(parsed.Count == 3 && parsed[1] == new SavedTmuxWindow("main", 1, "logs", "/var/log", 1000), "three windows read");
+        Check(TmuxSnapshot.Parse(TmuxSnapshot.Format(parsed)).SequenceEqual(parsed), "round trip");
+        var rough = "kaputt\nmain\t0\tbash\t/home\t5\nmain\tx\tbad index\t/home\t5\nmain\t-1\tneg\t/home\t5\nmain\t2\ttoo\tmany\tfields\t5\nmain\t3\tctl\u0001\t/home\t5\ntm-abc\t0\thelper\t/home\t5\nansicht-1\t0\tview\t/home\t5\n\t0\tno session\t/home\t5\narbeit\t0\tok\t/tmp\t7\r\n";
+        var kept = TmuxSnapshot.Parse(rough);
+        Check(kept.Count == 2 && kept[0].Session == "main" && kept[1] == new SavedTmuxWindow("arbeit", 0, "ok", "/tmp", 7), "broken, foreign and helper lines are skipped: " + kept.Count);
+        Check(TmuxSnapshot.Parse(null).Count == 0 && TmuxSnapshot.Parse("").Count == 0 && TmuxSnapshot.Parse("\n\n").Count == 0, "empty file is empty");
+        string cleaned = TmuxSnapshot.Format([new SavedTmuxWindow("a\tb", 0, "x\ny", "/p\tq", 1)]);
+        Check(cleaned == "a b\t0\tx y\t/p q\t1\n" && TmuxSnapshot.Parse(cleaned).Count == 1, "tabs and line breaks in names become spaces");
+        Check(TmuxSnapshot.Parse(string.Join("\n", Enumerable.Range(0, 5000).Select(i => $"s{i}\t0\tw\t/\t1"))).Count == TmuxSnapshot.MaxLines, "the number of lines is bounded");
+        Check(TmuxSnapshot.Parse("main\t0\t" + new string('n', 101) + "\t/\t1\n").Count == 0 && TmuxSnapshot.Parse("main\t0\tn\t" + new string('p', 1001) + "\t1\n").Count == 0, "over-long texts are skipped");
+    });
+    Test("tmux memory: which sessions are missing, the question text, the answer of the check script", () =>
+    {
+        var saved = TmuxSnapshot.Parse("main\t0\tbash\t/home\t100\nmain\t1\tlogs\t/var/log\t100\narbeit\t0\tclaude\t/x\t200\nlaufend\t0\tshell\t/\t50\n");
+        var sessions = TmuxSnapshot.Sessions(saved);
+        Check(sessions.Select(s => s.Name).SequenceEqual(["main", "arbeit", "laufend"]) && sessions[0].Windows.Select(w => w.Name).SequenceEqual(["bash", "logs"]), "sessions in file order, windows by index");
+        var missing = TmuxSnapshot.Missing(saved, ["laufend", "fremd"]);
+        Check(missing.Select(s => s.Name).SequenceEqual(["main", "arbeit"]), "a running session is not touched, an unknown one is ignored");
+        Check(TmuxSnapshot.Missing(saved, ["main", "arbeit", "laufend"]).Count == 0 && TmuxSnapshot.Missing([], ["main"]).Count == 0, "nothing missing: no question");
+        Check(TmuxSnapshot.Summary(missing) == "main (bash, logs), arbeit (claude)", "summary: " + TmuxSnapshot.Summary(missing));
+        Check(missing[1].Saved == DateTimeOffset.FromUnixTimeSeconds(200), "time of a session");
+        var many = Enumerable.Range(0, 300).Select(i => new SavedTmuxWindow("s" + (i / 10), i % 10, "w", "/", 1)).ToList();
+        Check(TmuxSnapshot.Missing(many, []).Sum(s => s.Windows.Count) == TmuxSnapshot.MaxWindowsToRestore, "restoring is bounded");
+        var check = TmuxSnapshot.ParseCheck("main\t0\tbash\t/home\t100\n\n@@SESSIONS\nmain\nzweite\n");
+        Check(check.Saved.Count == 1 && check.Running.SequenceEqual(["main", "zweite"]), "file and running sessions in one answer");
+        Check(TmuxSnapshot.ParseCheck("").Saved.Count == 0 && TmuxSnapshot.ParseCheck("\n@@SESSIONS\n").Running.Count == 0 && TmuxSnapshot.ParseCheck(null).Saved.Count == 0, "no file, no tmux");
+        Check(TmuxSnapshot.Signature([("@1", 0, "bash"), ("@2", 1, "logs")]) == "@1:0:bash|@2:1:logs" && TmuxSnapshot.Signature([("@1", 0, "bash")]) != TmuxSnapshot.Signature([("@1", 0, "shell")]), "a rename changes the signature");
+    });
+    Test("tmux memory: scripts for the snapshot, the check and the restore are one quoted argument for ssh", () =>
+    {
+        var profile = new Profile { Name = "rechner-a", Destination = "rechner-a" };
+        var snapshot = SshCommand.TmuxSnapshotArguments(profile);
+        string script = snapshot[^1];
+        Check(snapshot.Contains("-T") && snapshot[^2] == "rechner-a" && script.StartsWith("sh -c '") && script.Contains(".config/terminalmgr") && script.Contains("tmux-sitzungen.tsv") && script.Contains("umask 077") && script.Contains("chmod 600") && script.Contains("mv "), "snapshot: private file, written atomically");
+        Check(script.Contains("tmux list-windows -a") && !script.Contains("-L") && script.Contains("[ -n "), "only the normal tmux, nothing written when no tmux runs");
+        Check(script.Contains("tm|ansicht"), "helper sessions are left out on the server too");
+        var check = SshCommand.TmuxMemoryCheckArguments(profile)[^1];
+        Check(check.Contains("tmux-sitzungen.tsv") && check.Contains(TmuxSnapshot.SessionsMarker) && check.Contains("list-sessions"), "check script");
+        var restore = SshCommand.TmuxRestoreArguments(profile, [new SavedTmuxSession("main", [new SavedTmuxWindow("main", 0, "bash", "/home/benutzer", 1), new SavedTmuxWindow("main", 1, "logs", "/var/log", 1)]),
+            new SavedTmuxSession("arbeit", [new SavedTmuxWindow("arbeit", 0, "", "/x", 1)])])[^1];
+        Check(restore.StartsWith("sh -c '") && restore.Contains("has-session -t") && restore.Contains("new-session -d -s") && restore.Contains("new-window -t") && restore.Contains("[ -d ") && restore.Contains("$HOME"), "restore: sessions only when missing, window by window, ~ as a fallback");
+        Check(restore.IndexOf("'bash'", StringComparison.Ordinal) < restore.IndexOf("'logs'", StringComparison.Ordinal) && restore.IndexOf("'main'", StringComparison.Ordinal) < restore.IndexOf("'arbeit'", StringComparison.Ordinal), "saved order is kept");
+        var evil = SshCommand.TmuxRestoreArguments(profile, [new SavedTmuxSession("a'; id; '", [new SavedTmuxWindow("a'; id; '", 0, "n'$(id)'", "/p'; rm -rf /; '", 1)])])[^1];
+        Check(!evil.Contains("; id;") || evil.Contains("'\"'\"'"), "quotes in names are escaped, nothing leaves its quotes: " + evil);
+        bool none = false, tooMany = false;
+        try { SshCommand.TmuxRestoreArguments(profile, []); } catch (ArgumentException) { none = true; }
+        try { SshCommand.TmuxRestoreArguments(profile, [new SavedTmuxSession("s", Enumerable.Range(0, TmuxSnapshot.MaxWindowsToRestore + 1).Select(i => new SavedTmuxWindow("s", i, "w", "/", 1)).ToList())]); } catch (ArgumentException) { tooMany = true; }
+        Check(none && tooMany, "nothing to restore and too many windows are refused");
+        Check(new Profile().RememberTmux && System.Text.Json.JsonSerializer.Deserialize<Profile>("""{"Name":"alt","Destination":"alt"}""")!.RememberTmux && !System.Text.Json.JsonSerializer.Deserialize<Profile>("""{"Name":"x","Destination":"x","RememberTmux":false}""")!.RememberTmux, "on by default, old profiles included, off when chosen");
+    });
+    Test("tmux memory: when a snapshot is written – on change, once a minute, refresh every ten minutes, never while suspended", () =>
+    {
+        var policy = new TmuxSnapshotPolicy();
+        var t = DateTimeOffset.Parse("2026-11-12T10:00:00Z");
+        policy.Reset("p1");
+        Check(policy.Due("p1", t), "the first snapshot after connecting may be written at once");
+        policy.Written("p1", policy.Current("p1"), t);
+        Check(!policy.Due("p1", t.AddSeconds(30)) && !policy.Due("p1", t.AddMinutes(5)), "nothing changed: nothing is written");
+        policy.Observe("p1", "@1:0:bash");
+        Check(!policy.Due("p1", t.AddSeconds(20)), "a change waits for the minimum interval");
+        Check(policy.Due("p1", t.AddSeconds(61)), "after a minute the change is written");
+        policy.Written("p1", "@1:0:bash", t.AddSeconds(61));
+        Check(!policy.Due("p1", t.AddMinutes(5)) && policy.Due("p1", t.AddSeconds(61).Add(TmuxSnapshotPolicy.Refresh)), "unchanged windows are refreshed every ten minutes (other sessions)");
+        policy.Observe("p1", "@1:0:logs");
+        policy.Suspend("p1");
+        Check(!policy.Due("p1", t.AddHours(1)) && policy.IsSuspended("p1"), "\"Später fragen\": the file is not overwritten");
+        policy.Reset("p1");
+        Check(!policy.Due("p1", t.AddHours(2)), "a new connection does not lift the suspension");
+        policy.Resume("p1");
+        Check(policy.Due("p1", t.AddHours(2)) && policy.Due("p2-unknown", t), "after the question it writes again; a server without history writes at once");
+    });
     Test("Reject destination option injection", () =>
     {
         foreach (string value in new[] { "-oProxyCommand=evil", "dev -p 22", "dev\nother" })

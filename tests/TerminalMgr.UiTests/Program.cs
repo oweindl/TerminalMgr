@@ -820,7 +820,24 @@ internal static class Program
         Check(!nameDialog.Confirm() && nameDialog.ErrorText == TmuxNaming.Rule, "an invalid session name is refused in the dialog: " + nameDialog.ErrorText);
         nameDialog.SetText("");
         Check(!nameDialog.Confirm() && nameDialog.ErrorText.Contains("Namen"), "an empty session name is refused");
-        Console.WriteLine("PASS tmux context menu: headers, active marker, escaping, click by IDs, submenus for many windows, new window entry, name dialog");
+        // The restore question names sessions, windows and time; three answers; the profile has the switch (on by default).
+        var restoreSessions = TmuxSnapshot.Missing(TmuxSnapshot.Parse("main\t0\tbash\t/home\t1000\nmain\t1\tlogs\t/var/log\t1000\narbeit\t0\tclaude\t/x\t2000\n"), []);
+        string question = TmuxRestoreDialog.Question("rechner-a", restoreSessions);
+        Check(question.StartsWith("Auf rechner-a waren zuletzt 2 tmux-Sessions mit 3 Fenstern offen (Stand ") && question.EndsWith("main (bash, logs), arbeit (claude)"), "the restore question: " + question);
+        static IEnumerable<T> Logical<T>(DependencyObject root) where T : DependencyObject
+        {
+            foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+            {
+                if (child is T match) yield return match;
+                foreach (var deeper in Logical<T>(child)) yield return deeper;
+            }
+        }
+        var restoreDialog = new TmuxRestoreDialog("rechner-a", restoreSessions);
+        Check(Logical<Button>(restoreDialog).Select(b => b.Content?.ToString()).SequenceEqual(["Wiederherstellen", "Neu anfangen", "Später fragen"]) && restoreDialog.Choice == TmuxRestoreChoice.Later, "restore, start fresh, ask later; closing counts as later");
+        var profileDialog = new ProfileDialog(new Profile { Name = "rechner-a", Destination = "rechner-a" });
+        var remember = Logical<CheckBox>(profileDialog).Single(c => c.Content?.ToString()?.StartsWith("tmux-Sitzungen merken") == true);
+        Check(remember.IsChecked == true && remember.ToolTip?.ToString()!.Contains("tmux-sitzungen.tsv") == true, "the profile remembers tmux sessions by default");
+        Console.WriteLine("PASS tmux context menu: headers, active marker, escaping, click by IDs, submenus for many windows, new window entry, name dialog, restore question");
     }
 
     private static void SetClipboard(string text, string? marker = null, int markerValue = 1)
