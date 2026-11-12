@@ -65,6 +65,25 @@ try
         Check(a.Last() == command, "Command was changed");
         Check(a.Contains("-tt"), "No interactive PTY");
     });
+    Test("tmux: new session and new window – names checked, one argument for ssh without a local shell", () =>
+    {
+        var profile = new Profile { Name = "rechner-a", Destination = "rechner-a" };
+        var plain = SshCommand.TmuxNewArguments(profile, "logs");
+        Check(plain.Contains("-tt") && plain[^2] == "rechner-a" && plain[^1] == "tmux new-session -A -s 'logs'", "new session attaches when the name exists: " + plain[^1]);
+        Check(SshCommand.TmuxNewArguments(profile, "main", "build")[^1] == "tmux new-session -A -s 'main' ';' new-window -n build", "session with a named window");
+        Check(SshCommand.TmuxNewArguments(profile, "main", "")[^1] == "tmux new-session -A -s 'main' ';' new-window", "session with a window tmux names");
+        Check(plain.Contains("RemoteCommand=none"), "a RemoteCommand from the SSH config does not get in the way");
+        foreach (string bad in new[] { "a b", "a;b", "", "$(id)", "a'b", "a:b", "a.b", new string('a', TmuxNaming.MaxLength + 1) })
+        {
+            bool refused = false, windowRefused = false;
+            try { SshCommand.TmuxNewArguments(profile, bad); } catch (ArgumentException) { refused = true; }
+            try { SshCommand.TmuxNewArguments(profile, "main", bad.Length == 0 ? "x y" : bad); } catch (ArgumentException) { windowRefused = true; }
+            Check(refused && windowRefused, $"refused: '{bad}'");
+        }
+        Check(TmuxNaming.NewWindowCommand("logs") == "new-window -n logs" && TmuxNaming.NewWindowCommand(null) == "new-window" && TmuxNaming.NewWindowCommand("  ") == "new-window", "new-window command");
+        Check(TmuxNaming.Suggest("Mein Server 1") == "Mein-Server-1" && TmuxNaming.Suggest("!!!") == "main" && TmuxNaming.Suggest(null) == "main" && TmuxNaming.IsValid(TmuxNaming.Suggest(new string('x', 90))), "suggested name is always valid");
+        Check(TmuxNaming.Problem("logs", false) is null && TmuxNaming.Problem("", true) is null && TmuxNaming.Problem("", false) is { } && TmuxNaming.Problem("a b", true) == TmuxNaming.Rule, "name problems");
+    });
     Test("Reject destination option injection", () =>
     {
         foreach (string value in new[] { "-oProxyCommand=evil", "dev -p 22", "dev\nother" })

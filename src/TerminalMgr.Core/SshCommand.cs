@@ -51,6 +51,18 @@ public static class SshCommand
 
     public static IReadOnlyList<string> TmuxAttachArguments(Profile profile, string sessionId, string windowId) => TmuxAttachArguments(profile, sessionId, windowId, null);
 
+    /// <summary>
+    /// Creates a tmux session of the normal tmux server, or attaches when the name exists (<c>new-session -A -s</c>); with
+    /// <paramref name="window"/> (empty = tmux names it) a new window is opened in it as well. One argument for ssh, no local shell.
+    /// </summary>
+    public static IReadOnlyList<string> TmuxNewArguments(Profile profile, string session, string? window = null)
+    {
+        if (!TmuxNaming.IsValid(session)) throw new ArgumentException(TmuxNaming.Rule);
+        string command = "tmux new-session -A -s " + ShellQuote(session);
+        if (window is not null) command += " ';' " + TmuxNaming.NewWindowCommand(window);   // the name is checked: letters, digits, _ and - need no quoting
+        return OverrideArguments(profile, interactive: true, command);
+    }
+
     /// <summary>"tmux", or "tmux -L 'name'" for a tmux server with its own socket (Makyx runs its instances on one).</summary>
     public static string Tmux(string? socket)
     {
