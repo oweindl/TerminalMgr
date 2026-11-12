@@ -36,6 +36,10 @@ public sealed class TmuxSessionQuery
     public Task RestoreSessionsAsync(Profile profile, IReadOnlyList<SavedTmuxSession> sessions, CancellationToken cancellationToken = default) =>
         RunAsync(SshCommand.TmuxRestoreArguments(profile, sessions), TimeSpan.FromSeconds(30), cancellationToken);
 
+    /// <summary>Renames a tmux window by its ID (see <see cref="SshCommand.TmuxRenameWindowArguments"/>).</summary>
+    public Task RenameWindowAsync(Profile profile, string windowId, string name, string? socket = null, CancellationToken cancellationToken = default) =>
+        RunAsync(SshCommand.TmuxRenameWindowArguments(profile, windowId, name, socket), TimeSpan.FromSeconds(15), cancellationToken);
+
     /// <summary>Closes a tmux window by its ID (see <see cref="SshCommand.TmuxKillWindowArguments"/>); the programs in it end.</summary>
     public Task KillWindowAsync(Profile profile, string windowId, string? socket = null, CancellationToken cancellationToken = default) =>
         RunAsync(SshCommand.TmuxKillWindowArguments(profile, windowId, socket), TimeSpan.FromSeconds(15), cancellationToken);

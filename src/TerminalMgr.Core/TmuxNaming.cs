@@ -17,6 +17,19 @@ public static class TmuxNaming
         return IsValid(trimmed) ? null : Rule;
     }
 
+    /// <summary>
+    /// The message for a refused new name of an existing window, or null. Looser than <see cref="Problem"/>: windows that tmux named after a
+    /// program ("my window", "vim .") stay renamable; only empty names, control characters and over-long names are refused. The name is quoted
+    /// for the shell, so nothing in it can leave its quotes.
+    /// </summary>
+    public static string? WindowNameProblem(string? name)
+    {
+        string trimmed = name?.Trim() ?? "";
+        if (trimmed.Length == 0) return "Bitte einen Namen angeben.";
+        if (trimmed.Length > MaxLength) return $"Der Name darf höchstens {MaxLength} Zeichen haben.";
+        return trimmed.Any(char.IsControl) ? "Der Name darf keine Steuerzeichen enthalten." : null;
+    }
+
     /// <summary>A valid session name made from a server name ("Mein Server 1" becomes "Mein-Server-1"); "main" when nothing is left.</summary>
     public static string Suggest(string? serverName)
     {

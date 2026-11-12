@@ -63,6 +63,18 @@ public static class SshCommand
         return OverrideArguments(profile, interactive: true, command);
     }
 
+    /// <summary>
+    /// Renames one tmux window by its stable ID (<c>@n</c>); with <paramref name="socket"/> on another tmux server. The new name is quoted and
+    /// follows "--", so a name that starts with "-" is no option. One argument for ssh, no local shell. tmux then stops renaming the window
+    /// after the running program (<c>automatic-rename</c> is switched off for it), so the name stays.
+    /// </summary>
+    public static IReadOnlyList<string> TmuxRenameWindowArguments(Profile profile, string windowId, string name, string? socket = null)
+    {
+        if (!TmuxWindowParser.IsWindowId(windowId)) throw new ArgumentException("Ungültige tmux-Fenster-ID.");
+        if (TmuxNaming.WindowNameProblem(name) is { } problem) throw new ArgumentException(problem);
+        return OverrideArguments(profile, interactive: false, Tmux(socket) + " rename-window -t " + ShellQuote(windowId) + " -- " + ShellQuote(name.Trim()));
+    }
+
     /// <summary>Closes one tmux window by its stable ID (<c>@n</c>); with <paramref name="socket"/> on another tmux server. One argument for ssh, no local shell.</summary>
     public static IReadOnlyList<string> TmuxKillWindowArguments(Profile profile, string windowId, string? socket = null)
     {
