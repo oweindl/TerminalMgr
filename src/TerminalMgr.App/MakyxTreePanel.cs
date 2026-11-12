@@ -30,6 +30,8 @@ public sealed class MakyxTreePanel : StackPanel
     public event Action<MakyxMachine>? ShellRequested;
     /// <summary>The terminal entry is enabled when this returns null (a reason otherwise).</summary>
     public Func<MakyxRun, string?>? TerminalProblem { get; set; }
+    /// <summary>True for the instance whose terminal is shown: its row is marked.</summary>
+    public Func<MakyxRun, bool>? IsShown { get; set; }
     /// <summary>"Shell öffnen" is enabled when this returns null (for example "kein SSH-Profil").</summary>
     public Func<MakyxMachine, string?>? ShellProblem { get; set; }
 
@@ -188,6 +190,7 @@ public sealed class MakyxTreePanel : StackPanel
         string? problem = TerminalProblemOf(run);
         string tooltip = $"{run.Id} · {run.Title} · {MakyxJson.StatusText(run.Status)}\n{Detail(run)}\n" + (problem is null ? "Klick öffnet das Terminal" : "Klick öffnet die Makyx-Seite (" + problem + ")");
         var row = Row(32, null, content, right, $"{MakyxTree.InstanceName(run)}, {state}", tooltip);
+        if (IsShown?.Invoke(run) == true) row.SetResourceReference(Border.BackgroundProperty, "AccentTintBrush");
         OnActivate(row, () => { if (problem is null) TerminalRequested?.Invoke(run); else OpenRequested?.Invoke(run); });
         row.ContextMenu = InstanceMenu(run, waiting, problem);
         Children.Add(row);

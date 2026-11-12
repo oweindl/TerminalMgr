@@ -88,6 +88,12 @@ internal static class Program
         Check(sessions.SequenceEqual(["Beispiel@rechner-a"]), "\"+ Neue Session\" carries the machine of its branch");
         ((Border)panel.Children[2]).RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
         Check(panel.Children.Count == 3, "a click on the project folds it: " + panel.Children.Count);
+        // The instance whose terminal is shown is marked in the tree.
+        ((Border)panel.Children[2]).RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+        Check(panel.Children.Count == 7, "a second click unfolds the project again: " + panel.Children.Count);
+        panel.IsShown = run => run.Id == "E-2";
+        panel.Render(MakyxTree.Build([machine], [treeProject], runs), [question], "leer");
+        Check(!ReferenceEquals(((Border)panel.Children[4]).Background, System.Windows.Media.Brushes.Transparent) && ReferenceEquals(((Border)panel.Children[3]).Background, System.Windows.Media.Brushes.Transparent), "only the shown instance has a marked row");
         panel.Render([], [], "Makyx nicht eingerichtet");
         Check(panel.Children.Count == 1 && ((TextBlock)panel.Children[0]).Text == "Makyx nicht eingerichtet", "empty text is shown");
         Check(MakyxTreePanel.Duration(45) == "45 s" && MakyxTreePanel.Duration(409) == "6:49 min" && MakyxTreePanel.Duration(7500) == "2 h 5 min" && MakyxTreePanel.Duration(null) == "", "duration text");
@@ -366,6 +372,21 @@ internal static class Program
         drop.Invoke(main, [dead, "Sitzung beendet (Exit 1)"]);
         drop.Invoke(main, [(ProfileItem)items[0]!, "getrennt"]);
         Check(!items.Contains(dead) && items.Count == 11 && profiles.SelectedItem is ProfileItem, "an ended temporary entry is removed and another entry selected; normal entries stay");
+        // An instance terminal (temporary entry) is not a row of the server list: hidden there, numbered after the servers, shown through its tab.
+        var shownType = typeof(MainWindow);
+        var instance = new ProfileItem(new Profile { Name = "Makyx · Beispiel · rechner-a", Destination = "rechner-a" }) { Temporary = true };
+        items.Insert(0, instance);
+        main.UpdateLayout();
+        profiles.Measure(new Size(300, 800)); profiles.Arrange(new Rect(0, 0, 300, 800)); profiles.UpdateLayout();   // the list is realized even when its panel is closed
+        var instanceRow = profiles.ItemContainerGenerator.ContainerFromItem(instance) as ListBoxItem;
+        Check(instanceRow is { Visibility: Visibility.Collapsed, Focusable: false }, "an instance terminal has no visible, focusable row in the server list");
+        Check(((ProfileItem)items[1]!).AltLabel == "Alt 1" && ((ProfileItem)items[9]!).AltLabel == "Alt 9" && instance.AltLabel == "", "servers keep their Alt numbers when an instance terminal is in the list");
+        shownType.GetMethod("SelectProfile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(main, [instance]);
+        var shownNow = shownType.GetProperty("Selected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(main);
+        Check(ReferenceEquals(shownNow, instance) && profiles.SelectedItem is null, "showing an instance terminal clears the server selection but keeps the terminal");
+        Check(((ListBox)main.FindName("SessionTabs")).Items.Cast<TabModel>().Any(t => ReferenceEquals(t.Item, instance)), "the shown instance terminal has its tab");
+        items.Remove(instance);
+        Check(shownType.GetProperty("Selected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(main) is null, "removing the shown terminal leaves nothing shown");
 
         if (Environment.GetEnvironmentVariable("TERMINALMGR_RENDER_DIR") is { Length: > 0 } directory)
         {

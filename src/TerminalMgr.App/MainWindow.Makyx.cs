@@ -23,6 +23,7 @@ public partial class MainWindow
         MakyxRuns.CopyRequested += run => { try { Clipboard.SetText(run.Link); StatusText.Text = "Link kopiert."; } catch (System.Runtime.InteropServices.ExternalException) { StatusText.Text = "Der Link ließ sich nicht kopieren."; } };
         MakyxRuns.TerminalRequested += run => _ = OpenMakyxTerminalAsync(run);
         MakyxRuns.TerminalProblem = TerminalProblem;
+        MakyxRuns.IsShown = IsInstanceShown;
         MakyxRuns.ShellProblem = machine => ShellProfileFor(machine) is null ? "kein SSH-Profil" : null;
         MakyxRuns.ShellRequested += machine => _ = OpenMakyxShellAsync(machine);
         InitializeMakyxControl();
@@ -96,7 +97,7 @@ public partial class MainWindow
     private async Task OpenMakyxShellAsync(MakyxMachine machine)
     {
         if (ShellProfileFor(machine) is not { } item) { StatusText.Text = "Es gibt kein SSH-Profil für " + MakyxControl.MachineValue(machine) + "."; return; }
-        ProfilesList.SelectedItem = item;
+        SelectProfile(item);
         if (!_sessions.ContainsKey(item.Profile.Id)) await ConnectAsync(item);
     }
 
@@ -187,13 +188,13 @@ public partial class MainWindow
             string command = args[^1];
             // The same tmux window opens the same entry again; a second instance of the same project on the same machine gets its id appended.
             var existing = _profiles.FirstOrDefault(p => p.Temporary && p.Profile.Command == command && p.Profile.Destination == basis.Destination);
-            if (existing is not null) { ProfilesList.SelectedItem = existing; await ConnectAsync(existing); return; }
+            if (existing is not null) { SelectProfile(existing); await ConnectAsync(existing); return; }
             string name = MakyxControl.TerminalName(run);
             if (_profiles.Any(p => p.Profile.Name == name)) name += " · " + run.Id;
             var profile = basis with { Id = Guid.NewGuid().ToString("N"), Name = name, Mode = StartMode.Command, Command = command, AutoConnect = false, AutoReconnect = false };
             var item = new ProfileItem(profile) { Temporary = true };
             _profiles.Add(item);
-            ProfilesList.SelectedItem = item;
+            SelectProfile(item);
             await ConnectAsync(item);
         }
         catch (ArgumentException) { StatusText.Text = "Der tmux-Name von Makyx ist ungültig."; }
@@ -256,9 +257,24 @@ public partial class MainWindow
         bool wasSelected = ReferenceEquals(Selected, item);
         _profiles.Remove(item);
         if (wasSelected)
-            ProfilesList.SelectedItem = _profiles.FirstOrDefault(p => p.Connection == ConnectionState.Connected) ?? _profiles.FirstOrDefault();
+        {
+            var numbered = NumberedProfiles();
+            SelectProfile(numbered.FirstOrDefault(p => p.Connection == ConnectionState.Connected) ?? numbered.FirstOrDefault());
+        }
         StatusText.Text = item.Name + ": " + reason + " – Eintrag entfernt.";
     }
+
+    /// <summary>The ssh command that attaches to the tmux window of an instance (the identity of its temporary terminal entry), or null.</summary>
+    private string? MakyxAttachCommand(MakyxRun run)
+    {
+        if (run.Terminal is not { Available: true, TmuxSocket: { } socket, TmuxSession: { } session, TmuxWindow: { } window } || ProfileFor(run) is not { } basis) return null;
+        try { return SshCommand.MakyxTmuxAttachArguments(basis, socket, session, window)[^1]; }
+        catch (ArgumentException) { return null; }
+    }
+
+    /// <summary>Is the terminal of this instance the one shown? The MAKYX tree marks its row.</summary>
+    private bool IsInstanceShown(MakyxRun run) =>
+        Selected is { Temporary: true } shown && MakyxAttachCommand(run) is { } command && shown.Profile.Command == command;
 
     private void DisposeMakyx() { _makyxClock?.Stop(); _makyx?.Dispose(); _makyx = null; }
 

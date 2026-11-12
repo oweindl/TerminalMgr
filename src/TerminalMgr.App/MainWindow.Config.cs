@@ -94,11 +94,11 @@ public partial class MainWindow
     private void ApplyImported(AppSettings settings)
     {
         _settings = settings;
-        string? selected = (ProfilesList.SelectedItem as ProfileItem)?.Profile.Id;
+        string? selected = Selected?.Profile.Id;
         _profiles.Clear();
         foreach (var profile in settings.Profiles) _profiles.Add(new(profile));
-        if (_profiles.FirstOrDefault(p => p.Profile.Id == selected) is { } same) ProfilesList.SelectedItem = same;
-        else if (_profiles.Count > 0) ProfilesList.SelectedIndex = 0;
+        if (_profiles.FirstOrDefault(p => p.Profile.Id == selected) is { } same) SelectProfile(same);
+        else if (_profiles.Count > 0) SelectNumbered(0);
         _clipList.MaxUnpinned = Math.Clamp(settings.ClipHistoryLimit, 1, 1000);
         _clipList.LoadPinned(settings.PinnedClips);
         PostShortcuts();

@@ -161,7 +161,7 @@ public partial class MainWindow : Window
                     Post(new { type = "font", size = _fontSize });
                     PostShortcuts();
                     PostTerminalSettings();
-                    if (_profiles.Count > 0) ProfilesList.SelectedIndex = 0;
+                    if (_profiles.Count > 0) SelectNumbered(0);
                     await HandleStartupUpdateAsync();   // before the automatic connections: an update must not tear down fresh sessions
                     await ConnectAutomaticAsync();
                     break;
@@ -183,7 +183,7 @@ public partial class MainWindow : Window
                     break;
                 case "switch":
                     int index = m.GetProperty("index").GetInt32();
-                    if (index >= 0 && index < _profiles.Count) { ProfilesList.SelectedIndex = index; FocusTerminal(Selected?.Profile.Id); }
+                    if (SelectNumbered(index)) FocusTerminal(Selected?.Profile.Id);
                     break;
                 case "openLink":
                     OpenLink(m.GetProperty("url").GetString());
@@ -223,7 +223,38 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("Terminalaktion fehlgeschlagen.", ex); }
     }
 
-    private ProfileItem? Selected => ProfilesList.SelectedItem as ProfileItem;
+    /// <summary>
+    /// The terminal that is shown. It is not the selection of the server list any more: an instance terminal of Makyx (a temporary entry)
+    /// has no row there, it lives in the MAKYX tree and in the tabs.
+    /// </summary>
+    private ProfileItem? Selected => _active;
+    private ProfileItem? _active;
+    private bool _selecting;
+
+    /// <summary>
+    /// Servers first in list order, then the temporary instance terminals: this order gives the Alt numbers (list rows, tabs, Alt+1 to 9).
+    /// </summary>
+    private IReadOnlyList<ProfileItem> NumberedProfiles() => _profiles.Where(p => !p.Temporary).Concat(_profiles.Where(p => p.Temporary)).ToList();
+
+    /// <summary>Shows this terminal. The server list marks it when it is a server; for an instance terminal the list selection is cleared.</summary>
+    private void SelectProfile(ProfileItem? item)
+    {
+        if (item is not null && !_profiles.Contains(item)) return;
+        _active = item;
+        _selecting = true;
+        try { ProfilesList.SelectedItem = item is { Temporary: false } ? item : null; }
+        finally { _selecting = false; }
+        OnProfileShown();
+    }
+
+    /// <summary>Alt+1 to 9 and the page's "switch": the n-th terminal in <see cref="NumberedProfiles"/>.</summary>
+    private bool SelectNumbered(int index)
+    {
+        var numbered = NumberedProfiles();
+        if (index < 0 || index >= numbered.Count) return false;
+        SelectProfile(numbered[index]);
+        return true;
+    }
     private void Post(object message)
     {
         if (_ready && !_closed) TerminalView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message));
@@ -241,7 +272,7 @@ public partial class MainWindow : Window
         try
         {
             item.Profile.Validate();
-            if (!automatic) ProfilesList.SelectedItem = item;
+            if (!automatic) SelectProfile(item);
             if (_terminals.Remove(id)) Post(new { type = "remove", id });
             var completion = new TaskCompletionSource<(int Cols, int Rows)>(TaskCreationOptions.RunContinuationsAsynchronously);
             _created[id] = completion;
@@ -396,15 +427,25 @@ public partial class MainWindow : Window
         // Sequential UI creation keeps each terminal's initial size deterministic.
         var selected = Selected;
         foreach (var item in _profiles.Where(p => p.Profile.AutoConnect).ToArray()) await ConnectAsync(item);
-        if (selected is not null) ProfilesList.SelectedItem = selected;
+        if (selected is not null) SelectProfile(selected);
     }
     private async void ConnectAutomatic(object sender, RoutedEventArgs e) => await ConnectAutomaticAsync();
     private async void ConnectSelected(object sender, RoutedEventArgs e) { if (Selected is { } item) await ConnectAsync(item); }
     private async void DisconnectSelected(object sender, RoutedEventArgs e) { if (Selected is { } item) await DisconnectByUserAsync(item); }
     private async void ProfileDoubleClick(object sender, MouseButtonEventArgs e) { if (Selected is { } item) await ConnectAsync(item); }
 
+    /// <summary>A click or key in the server list. Clearing the selection (a server was removed, an instance terminal is shown) keeps the shown terminal.</summary>
     private void ProfileSelected(object sender, SelectionChangedEventArgs e)
     {
+        if (_selecting) return;
+        if (ProfilesList.SelectedItem is not ProfileItem picked) return;
+        _active = picked;
+        OnProfileShown();
+    }
+
+    private void OnProfileShown()
+    {
+        RenderMakyx();   // the MAKYX tree marks the instance whose terminal is shown
         ChangeAiSource();
         if (Selected is not { } item) return;
         SessionTitle.Text = TitleFor(item);
@@ -435,7 +476,7 @@ public partial class MainWindow : Window
         if (e.OriginalSource is not DependencyObject source) return;
         var container = ItemsControl.ContainerFromElement(ProfilesList, source) as ListBoxItem;
         if (container?.DataContext is not ProfileItem item) return;
-        ProfilesList.SelectedItem = item;
+        SelectProfile(item);
         ShowServerMenu(item, container);
         e.Handled = true;
     }
@@ -547,7 +588,7 @@ public partial class MainWindow : Window
         string id = item.Profile.Id;
         try
         {
-            ProfilesList.SelectedItem = item;
+            SelectProfile(item);
             // A connection that is only a plain shell cannot switch windows by keys: it is replaced by one attached to that window.
             if (_sessions.ContainsKey(id) && !await ClientInTmuxAsync(item, _shutdown.Token))
             {
@@ -576,7 +617,7 @@ public partial class MainWindow : Window
     private async void ChooseTmuxSession(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: ProfileItem item }) return;
-        ProfilesList.SelectedItem = item;
+        SelectProfile(item);
         var dialog = new TmuxSessionDialog(item.Profile) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.SelectedSession is not { } session) return;
         await DisconnectAsync(item);
@@ -588,7 +629,7 @@ public partial class MainWindow : Window
     private async void OpenTmuxWindowPicker(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: ProfileItem item }) return;
-        ProfilesList.SelectedItem = item;
+        SelectProfile(item);
         if (_sessions.TryGetValue(item.Profile.Id, out var session))
         {
             if (!await ClientInTmuxAsync(item)) { StatusText.Text = NotInTmuxHint; return; }
@@ -607,7 +648,7 @@ public partial class MainWindow : Window
     }
     private void ContextEdit(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem { Tag: ProfileItem item }) { ProfilesList.SelectedItem = item; EditProfile(sender, e); }
+        if (sender is MenuItem { Tag: ProfileItem item }) { SelectProfile(item); EditProfile(sender, e); }
     }
     private HoverPreview? _clipHover;
     // Width of the terminal area and the window height limit the popup that shows the full text of a shortened entry.
@@ -655,7 +696,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true && dialog.Result is { } profile)
         {
             var item = new ProfileItem(profile);
-            _profiles.Add(item); ProfilesList.SelectedItem = item; SaveSettings();
+            _profiles.Add(item); SelectProfile(item); SaveSettings();
         }
     }
 
@@ -928,7 +969,7 @@ public partial class MainWindow : Window
             Shortcut.Parse(_settings.Shortcuts.Normalized().SessionModifier + "+" + pressed.Key) == pressed)
         {
             int index = pressed.Key[0] - '1';
-            if (index < Math.Min(9, _profiles.Count)) { ProfilesList.SelectedIndex = index; FocusTerminal(Selected?.Profile.Id); e.Handled = true; }
+            if (SelectNumbered(index)) { FocusTerminal(Selected?.Profile.Id); e.Handled = true; }
         }
     }
 

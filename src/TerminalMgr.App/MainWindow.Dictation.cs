@@ -336,7 +336,7 @@ public partial class MainWindow
         }
         // Paste goes through xterm.js, so bracketed paste applies when the program asked for it (Claude Code, bash, tmux).
         Post(new { type = "paste", id, text, enter = run });
-        if (_profiles.FirstOrDefault(p => p.Profile.Id == id) is { } target) ProfilesList.SelectedItem = target;
+        if (_profiles.FirstOrDefault(p => p.Profile.Id == id) is { } target) SelectProfile(target);
         CloseDictation();
         FocusTerminal(id);
     }
